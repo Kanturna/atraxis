@@ -26,11 +26,12 @@ func resolve(result: CollisionDetector.CollisionResult) -> void:
 
 	var outcome: String = _determine_outcome(a, b, result)
 	match outcome:
-		"absorb":   _absorb(a, b)
-		"impact":   _impact(a, b, result)
-		"merge":    _merge(a, b)
-		"fragment": _fragment(a, b, result)
-		_:          _bounce(a, b, result)
+		"star_impact": _star_impact(a, b)
+		"absorb":      _absorb(a, b)
+		"impact":      _impact(a, b, result)
+		"merge":       _merge(a, b)
+		"fragment":    _fragment(a, b, result)
+		_:             _bounce(a, b, result)
 
 # -------------------------------------------------------------------------
 # Outcome determination
@@ -38,6 +39,10 @@ func resolve(result: CollisionDetector.CollisionResult) -> void:
 
 func _determine_outcome(a: SimBody, b: SimBody,
 		result: CollisionDetector.CollisionResult) -> String:
+
+	# Star absorbs everything that touches it
+	if a.body_type == SimBody.BodyType.STAR or b.body_type == SimBody.BodyType.STAR:
+		return "star_impact"
 
 	var heavy: SimBody = a if a.mass >= b.mass else b
 	var light: SimBody = b if a.mass >= b.mass else a
@@ -77,15 +82,19 @@ func _bounce(a: SimBody, b: SimBody,
 		result: CollisionDetector.CollisionResult) -> void:
 	if result.approach_speed <= 0.0:
 		return  # Bodies already moving apart; no impulse needed
+	# Impulse formula: j = (1+e) * approach_speed / (1/ma + 1/mb)
+	# collision_normal points from b → a, so:
+	#   a gets +j/ma in the normal direction (pushed away from b) ✓
+	#   b gets -j/mb in the normal direction (pushed away from a) ✓
 	var e: float = SimConstants.RESTITUTION
-	var n: Vector2 = result.collision_normal
+	var n: Vector2 = result.collision_normal  # from b toward a
 	var inv_mass_sum: float = (1.0 / a.mass) + (1.0 / b.mass)
-	var impulse_scalar: float = -(1.0 + e) * result.approach_speed / inv_mass_sum
+	var impulse_scalar: float = (1.0 + e) * result.approach_speed / inv_mass_sum
 	var impulse: Vector2 = n * impulse_scalar
 	if not a.kinematic:
-		a.velocity += impulse / a.mass
+		a.velocity += impulse / a.mass   # a pushed away from b
 	if not b.kinematic:
-		b.velocity -= impulse / b.mass
+		b.velocity -= impulse / b.mass   # b pushed away from a
 
 func _merge(a: SimBody, b: SimBody) -> void:
 	var heavy: SimBody = a if a.mass >= b.mass else b
@@ -127,27 +136,47 @@ func _impact(a: SimBody, b: SimBody,
 
 func _fragment(a: SimBody, b: SimBody,
 		result: CollisionDetector.CollisionResult) -> void:
+	# --- Mass-conserving fragmentation ---
+	# 15% of combined mass becomes fragments (or debris if too small).
+	# That exact mass is removed from the two bodies proportionally to their masses
+	# so that: (a.mass_after + b.mass_after) + fragment_total = a.mass_before + b.mass_before
+	var original_total: float = a.mass + b.mass
+	var frag_pool: float = original_total * 0.15       # mass to split off
+	var a_share: float = frag_pool * (a.mass / original_total)
+	var b_share: float = frag_pool * (b.mass / original_total)
+
 	var frag_count: int = randi_range(2, SimConstants.MAX_ACTIVE_FRAGMENTS / 5)
-	var total_frag_mass: float = (a.mass + b.mass) * 0.15  # 15% becomes fragments
-	var per_frag_mass: float = total_frag_mass / float(frag_count)
+	var per_frag_mass: float = frag_pool / float(frag_count)
+
+	# Remove mass from each body first (do this before bounce so radii are updated)
+	a.mass -= a_share
+	b.mass -= b_share
+	a.radius = _radius_for_mass(a.mass, a.body_type)
+	b.radius = _radius_for_mass(b.mass, b.body_type)
 
 	if per_frag_mass < SimConstants.MIN_FRAGMENT_MASS:
-		# Too small for real fragments → go straight to debris
-		_world.add_debris_at(a.position, total_frag_mass)
+		# Fragments too small for real SimBodies → send entire pool to debris
+		_world.add_debris_at(a.position, frag_pool)
 		_bounce(a, b, result)
 		return
 
-	# Shrink colliding bodies (they lose 15% of combined mass)
-	a.mass *= 0.925
-	b.mass *= 0.925
-	a.radius = _radius_for_mass(a.mass, a.body_type)
-	b.radius = _radius_for_mass(b.mass, b.body_type)
 	_bounce(a, b, result)
 
-	# Spawn fragments in a spread cone
+	# Spawn fragments — their total mass exactly equals frag_pool
 	for i in range(frag_count):
 		var frag := _make_fragment(per_frag_mass, a, result, i, frag_count)
 		_world.add_body(frag)
+
+func _star_impact(a: SimBody, b: SimBody) -> void:
+	# Non-star body collides with the star. The star absorbs the impactor.
+	# A small fraction of the impactor mass becomes a visible debris flash near the impact.
+	var star: SimBody   = a if a.body_type == SimBody.BodyType.STAR else b
+	var impactor: SimBody = b if a.body_type == SimBody.BodyType.STAR else a
+
+	var debris_fraction: float = impactor.mass * 0.05  # 5% of impactor mass → debris cloud
+	star.mass += impactor.mass - debris_fraction
+	_world.add_debris_at(impactor.position, debris_fraction)
+	impactor.marked_for_removal = true
 
 # -------------------------------------------------------------------------
 # Helpers

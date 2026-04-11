@@ -23,8 +23,6 @@ func broadphase(bodies: Array) -> Array:
 	for body in bodies:
 		if not body.active or body.sleeping:
 			continue
-		if body.body_type == SimBody.BodyType.STAR:
-			continue  # Star handles impacts differently; skip as broadphase source
 		var cell: Vector2i = _cell(body.position, cell_size)
 		if not grid.has(cell):
 			grid[cell] = []
@@ -81,6 +79,8 @@ func narrowphase(body_a: SimBody, body_b: SimBody) -> CollisionResult:
 	return result
 
 func _estimate_cell_size(bodies: Array) -> float:
+	# Use non-star body radii for cell sizing to avoid the star's large radius
+	# dominating the grid resolution (which would create huge cells).
 	var total_r: float = 0.0
 	var count: int = 0
 	for body in bodies:
