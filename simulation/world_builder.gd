@@ -90,12 +90,21 @@ static func _place_stars(black_hole: SimBody, config, rng: RandomNumberGenerator
 	var n: int = config.star_count
 	var inner: float = config.star_inner_orbit_au * SimConstants.AU
 	var outer: float = config.star_outer_orbit_au * SimConstants.AU
-	var band_width: float = (outer - inner) / float(n)
+
+	# Geometric (log-uniform) spacing keeps the d/R stability ratio constant across
+	# all adjacent pairs, regardless of star count. For M_star/M_BH = 1/4 the
+	# critical ratio is d/R ≈ 0.5; at inner=4 AU, outer=20 AU, N=4 this yields
+	# d/R ≈ 0.49 which sits right at the stability margin.
+	# Arithmetic spacing would cluster all stars near the same radius and destroy
+	# that margin immediately.
+	var log_inner: float = log(inner)
+	var log_outer: float = log(outer)
+	var log_band: float = (log_outer - log_inner) / float(n)
 
 	for i in range(n):
-		var band_center: float = inner + (float(i) + 0.5) * band_width
-		var offset: float = rng.randf_range(-0.2, 0.2) * band_width
-		var orbit_radius: float = band_center + offset
+		var log_center: float = log_inner + (float(i) + 0.5) * log_band
+		var log_jitter: float = rng.randf_range(-0.1, 0.1) * log_band
+		var orbit_radius: float = exp(log_center + log_jitter)
 		var phase: float = (float(i) / float(n)) * TAU + rng.randf_range(-0.25, 0.25)
 		var mass_scale: float = rng.randf_range(0.7, 1.3)
 

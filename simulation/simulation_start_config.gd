@@ -21,7 +21,7 @@ const DEFAULT_CHAOS_BODY_COUNT: int = 4
 const DEFAULT_STAR_COUNT: int = 1
 const DEFAULT_PLANETS_PER_STAR: int = 2
 const DEFAULT_STAR_INNER_ORBIT_AU: float = 4.0
-const DEFAULT_STAR_OUTER_ORBIT_AU: float = 7.5
+const DEFAULT_STAR_OUTER_ORBIT_AU: float = 20.0
 
 var mode: int = StartMode.STABLE_ANCHOR
 var seed: int = DEFAULT_SEED
@@ -71,5 +71,5 @@ func clamp_values() -> void:
 	chaos_body_count = clampi(chaos_body_count, 1, 12)
 	star_count = clampi(star_count, 1, 4)
 	planets_per_star = clampi(planets_per_star, 1, 3)
-	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 6.0)
-	star_outer_orbit_au = clampf(star_outer_orbit_au, 5.0, 10.0)
+	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
+	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
