@@ -14,6 +14,16 @@ config/name="Atraxis"
 config/features=PackedStringArray("4.6", "Mobile")
 config/icon="res://icon.svg"
 
+[autoload]
+
+PhantomCameraManager="*uid://duq6jhf6unyis"
+AntialiasedLine2DTexture="*uid://d4b0weywwrw52"
+Signal_Debugger="*uid://c6hdiw0dpoolg"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/SignalVisualizer/plugin.cfg", "res://addons/antialiased_line2d/plugin.cfg", "res://addons/gut/plugin.cfg", "res://addons/phantom_camera/plugin.cfg")
+
 [physics]
 
 3d/physics_engine="Jolt Physics"
