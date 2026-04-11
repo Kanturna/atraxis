@@ -19,21 +19,21 @@ func broadphase(bodies: Array) -> Array:
 	var grid: Dictionary = {}
 	var cell_size: float = _estimate_cell_size(bodies)
 	var checked: Dictionary = {}
-	var star_bodies: Array = []
+	var anchor_bodies: Array = []
 
 	# Insert bodies into grid
 	for body in bodies:
 		if not body.active or body.sleeping:
 			continue
-		if body.body_type == SimBody.BodyType.STAR:
-			star_bodies.append(body)
+		if _uses_anchor_collision_pass(body):
+			anchor_bodies.append(body)
 		var cell: Vector2i = _cell(body.position, cell_size)
 		if not grid.has(cell):
 			grid[cell] = []
 		grid[cell].append(body)
 
-	# Dedicated star-against-all pass so star impacts do not depend on grid size.
-	for star in star_bodies:
+	# Dedicated anchor-against-all pass so large-body impacts do not depend on grid size.
+	for star in anchor_bodies:
 		for body in bodies:
 			if not body.active or body.sleeping or body.id == star.id:
 				continue
@@ -82,12 +82,12 @@ func narrowphase(body_a: SimBody, body_b: SimBody) -> CollisionResult:
 	return result
 
 func _estimate_cell_size(bodies: Array) -> float:
-	# Use non-star body radii for cell sizing to avoid the star's large radius
+	# Use non-anchor body radii for cell sizing to avoid large-body radii
 	# dominating the grid resolution (which would create huge cells).
 	var total_r: float = 0.0
 	var count: int = 0
 	for body in bodies:
-		if body.active and body.body_type != SimBody.BodyType.STAR:
+		if body.active and not _uses_anchor_collision_pass(body):
 			total_r += body.radius
 			count += 1
 	if count == 0:
@@ -118,3 +118,6 @@ func _append_if_overlapping(candidates: Array, checked: Dictionary,
 	var sum_r: float = body_a.radius + body_b.radius
 	if body_a.position.distance_squared_to(body_b.position) <= sum_r * sum_r:
 		candidates.append([body_a, body_b])
+
+func _uses_anchor_collision_pass(body: SimBody) -> bool:
+	return body.body_type in [SimBody.BodyType.STAR, SimBody.BodyType.BLACK_HOLE]

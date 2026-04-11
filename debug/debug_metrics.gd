@@ -10,7 +10,7 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var sleeping_bodies: int = 0
 	var awake_dynamic_bodies: int = 0
 	var fragment_count: int = 0
-	var scripted_planets: int = 0
+	var analytic_planets: int = 0
 	var radial_deviation_sum: float = 0.0
 	var radial_deviation_max: float = 0.0
 	var speed_deviation_sum: float = 0.0
@@ -31,8 +31,8 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 		if body.body_type == SimBody.BodyType.FRAGMENT:
 			fragment_count += 1
 
-		if body.body_type == SimBody.BodyType.PLANET and body.scripted_orbit_enabled:
-			scripted_planets += 1
+		if body.body_type == SimBody.BodyType.PLANET and body.is_analytic_orbit_bound():
+			analytic_planets += 1
 			var radial_error: float = abs(body.position.distance_to(body.orbit_center) - body.orbit_radius)
 			var expected_speed: float = body.orbit_angular_speed * body.orbit_radius
 			var speed_error: float = abs(body.velocity.length() - expected_speed)
@@ -43,9 +43,9 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var debris_count: int = world.get_active_debris_count()
 	var average_radial_deviation: float = 0.0
 	var average_speed_deviation: float = 0.0
-	if scripted_planets > 0:
-		average_radial_deviation = radial_deviation_sum / scripted_planets
-		average_speed_deviation = speed_deviation_sum / scripted_planets
+	if analytic_planets > 0:
+		average_radial_deviation = radial_deviation_sum / analytic_planets
+		average_speed_deviation = speed_deviation_sum / analytic_planets
 
 	var collision_pressure: float = clampf(collisions_last_3s / 8.0, 0.0, 1.0)
 	var fragment_pressure: float = _safe_ratio(fragment_count, SimConstants.MAX_ACTIVE_FRAGMENTS)
@@ -75,7 +75,7 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			"debris_count": debris_count,
 		},
 		"orbit": {
-			"scripted_planets": scripted_planets,
+			"analytic_planets": analytic_planets,
 			"average_radial_deviation": average_radial_deviation,
 			"max_radial_deviation": radial_deviation_max,
 			"average_speed_deviation": average_speed_deviation,

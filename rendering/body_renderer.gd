@@ -60,6 +60,8 @@ static func sim_dist_to_screen(sim_dist: float) -> float:
 
 static func color_for_body(body: SimBody) -> Color:
 	match body.body_type:
+		SimBody.BodyType.BLACK_HOLE:
+			return Color(0.22, 0.28, 0.42, 1.0)
 		SimBody.BodyType.STAR:
 			return Color(1.0, 0.92, 0.4, 1.0)
 		SimBody.BodyType.PLANET:

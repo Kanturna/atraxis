@@ -9,6 +9,7 @@ func test_scripted_planet_metrics_report_orbit_deviation() -> void:
 	planet.body_type = SimBody.BodyType.PLANET
 	planet.kinematic = true
 	planet.scripted_orbit_enabled = true
+	planet.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
 	planet.orbit_center = Vector2.ZERO
 	planet.orbit_radius = 100.0
 	planet.orbit_angular_speed = 0.5
@@ -19,7 +20,7 @@ func test_scripted_planet_metrics_report_orbit_deviation() -> void:
 	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
 	var orbit: Dictionary = snapshot["orbit"]
 
-	assert_eq(orbit["scripted_planets"], 1, "scripted planet should be counted")
+	assert_eq(orbit["analytic_planets"], 1, "analytic planet should be counted")
 	assert_almost_eq(orbit["average_radial_deviation"], 2.0, 0.001, "average radial deviation should match the configured offset")
 	assert_almost_eq(orbit["max_radial_deviation"], 2.0, 0.001, "max radial deviation should match the configured offset")
 	assert_almost_eq(orbit["average_speed_deviation"], 3.0, 0.001, "average speed deviation should match the configured offset")
@@ -86,7 +87,7 @@ func test_empty_world_metrics_are_stable() -> void:
 	assert_eq(sim_stats["sleeping_bodies"], 0, "empty worlds should report zero sleeping bodies")
 	assert_eq(sim_stats["fragment_count"], 0, "empty worlds should report zero fragments")
 	assert_eq(sim_stats["debris_count"], 0, "empty worlds should report zero debris")
-	assert_eq(orbit["scripted_planets"], 0, "empty worlds should report zero scripted planets")
+	assert_eq(orbit["analytic_planets"], 0, "empty worlds should report zero analytic planets")
 	assert_almost_eq(orbit["average_radial_deviation"], 0.0, 0.001, "empty worlds should not divide by zero for radial deviation")
 	assert_almost_eq(orbit["average_speed_deviation"], 0.0, 0.001, "empty worlds should not divide by zero for speed deviation")
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.0, 0.001, "empty worlds should not divide by zero for awake ratio")

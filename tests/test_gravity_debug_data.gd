@@ -84,3 +84,16 @@ func test_multiple_stars_build_separate_centers() -> void:
 
 	assert_eq(count_a, SimConstants.GRAVITY_DEBUG_THRESHOLDS.size(), "star A should get one ring per threshold")
 	assert_eq(count_b, SimConstants.GRAVITY_DEBUG_THRESHOLDS.size(), "star B should get one ring per threshold")
+
+func test_black_hole_also_contributes_gravity_debug_rings() -> void:
+	var black_hole := SimBody.new()
+	black_hole.id = 9
+	black_hole.active = true
+	black_hole.body_type = SimBody.BodyType.BLACK_HOLE
+	black_hole.mass = SimConstants.BLACK_HOLE_MASS
+
+	var specs: Array = DATA_SCRIPT.new().build_ring_specs([black_hole])
+
+	assert_eq(specs.size(), SimConstants.GRAVITY_DEBUG_THRESHOLDS.size(), "black hole should emit one gravity ring per threshold")
+	for spec in specs:
+		assert_eq(spec["body_id"], black_hole.id, "black hole rings should belong to the black hole source")

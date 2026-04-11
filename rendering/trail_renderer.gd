@@ -24,16 +24,17 @@ var _lines_a: Dictionary = {}
 var _trails_a: Dictionary = {}  # body_id → PackedVector2Array (screen pos)
 
 func add_trail(body: SimBody) -> void:
-	if body.influence_level == SimBody.InfluenceLevel.A and \
-			body.body_type != SimBody.BodyType.STAR:
-		# Planets get AntialiasedLine2D nodes
+	if body.body_type == SimBody.BodyType.BLACK_HOLE:
+		return
+	if body.influence_level == SimBody.InfluenceLevel.A:
+		# Key macro bodies and core planets get AntialiasedLine2D nodes.
 		var line := AntialiasedLine2D.new()
 		line.width = 1.5
 		line.default_color = _trail_color(body)
 		add_child(line)
 		_lines_a[body.id] = line
 		_trails_a[body.id] = PackedVector2Array()
-	elif body.body_type != SimBody.BodyType.STAR:
+	else:
 		# Asteroids and fragments use _draw()
 		_trails_bc[body.id] = PackedVector2Array()
 		_colors_bc[body.id] = _trail_color(body)
@@ -84,6 +85,7 @@ func _draw() -> void:
 
 static func _trail_color(body: SimBody) -> Color:
 	match body.body_type:
+		SimBody.BodyType.STAR: return Color(1.0, 0.92, 0.5, 0.55)
 		SimBody.BodyType.PLANET:
 			match body.material_type:
 				SimBody.MaterialType.ROCKY: return Color(0.62, 0.47, 0.33, 0.6)

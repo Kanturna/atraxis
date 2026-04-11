@@ -35,4 +35,4 @@ func radius_from_mass_and_threshold(mass: float, threshold: float) -> float:
 	return sqrt((SimConstants.G * mass) / threshold)
 
 func _is_debug_star(body: SimBody) -> bool:
-	return body.active and body.body_type == SimBody.BodyType.STAR
+	return body.active and body.body_type in [SimBody.BodyType.STAR, SimBody.BodyType.BLACK_HOLE]

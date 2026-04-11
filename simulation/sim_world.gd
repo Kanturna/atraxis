@@ -1,4 +1,3 @@
-## sim_world.gd
 ## Central simulation container. Owns all SimBody and DebrisField objects.
 ## step_sim() is the sole entry point for advancing simulation state.
 ##
@@ -6,28 +5,16 @@
 class_name SimWorld
 extends RefCounted
 
-# -------------------------------------------------------------------------
-# Signals (renderer / UI subscribe to these)
-# -------------------------------------------------------------------------
-
 signal body_added(body: SimBody)
 signal body_removed(body_id: int)
 signal debris_field_changed(field: DebrisField)
 signal collision_occurred(pos: Vector2)
 
-# -------------------------------------------------------------------------
-# State
-# -------------------------------------------------------------------------
-
-var bodies: Array = []          # Array[SimBody]
-var debris_fields: Array = []   # Array[DebrisField]
+var bodies: Array = []
+var debris_fields: Array = []
 var time_elapsed: float = 0.0
 var time_scale: float = 1.0
 var _next_id: int = 0
-
-# -------------------------------------------------------------------------
-# Sub-systems (instantiated once, reused every step)
-# -------------------------------------------------------------------------
 
 var _gravity: GravitySolver
 var _detector: CollisionDetector
@@ -38,29 +25,15 @@ func _init() -> void:
 	_detector = CollisionDetector.new()
 	_resolver = CollisionResolver.new(self)
 
-# -------------------------------------------------------------------------
-# Main simulation step
-# -------------------------------------------------------------------------
-
-## Advance the simulation by dt seconds (already scaled by time_scale externally).
 func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
 
-	# 1. Scripted orbiters update before gravity so B/C bodies see their
-	#    current-tick positions during acceleration and collision evaluation.
-	_update_scripted_orbiters(sim_dt)
-
-	# 2. Reset per-frame transient acceleration
 	for body in bodies:
 		if body.active:
 			body.acceleration = Vector2.ZERO
 
-	# 3. Gravity (hierarchy-aware)
 	_gravity.apply_gravity(bodies)
 
-	# 4. Symplectic Euler integration
-	#    Update velocity first, then position — conserves orbital energy better
-	#    than standard Euler.
 	for body in bodies:
 		if not body.active or body.sleeping or body.kinematic:
 			continue
@@ -68,7 +41,8 @@ func step_sim(dt: float) -> void:
 		body.position += body.velocity * sim_dt
 		body.age += sim_dt
 
-	# 5. Sleep state management
+	_update_scripted_orbiters(sim_dt)
+
 	for body in bodies:
 		if not body.active or body.kinematic or body.scripted_orbit_enabled:
 			continue
@@ -79,7 +53,6 @@ func step_sim(dt: float) -> void:
 		else:
 			body.reset_sleep_timer()
 
-	# 6. Collision detection and resolution
 	var pairs: Array = _detector.broadphase(bodies)
 	for pair in pairs:
 		var result: CollisionDetector.CollisionResult = _detector.narrowphase(pair[0], pair[1])
@@ -87,22 +60,11 @@ func step_sim(dt: float) -> void:
 			_resolver.resolve(result)
 			collision_occurred.emit(result.body_a.position)
 
-	# 7. Debris field aggregation and cleanup
 	_aggregate_debris_fields()
 	_cleanup_inactive_debris_fields()
-
-	# 8. Deferred removal of marked bodies
 	_flush_removals()
-
-	# 9. Fragment cap enforcement: convert excess smallest fragments to debris
 	_enforce_fragment_cap()
-
-	# 10. Advance time
 	time_elapsed += sim_dt
-
-# -------------------------------------------------------------------------
-# Body management (called by resolver and world builder)
-# -------------------------------------------------------------------------
 
 func add_body(body: SimBody) -> void:
 	body.id = _next_id
@@ -113,7 +75,6 @@ func add_body(body: SimBody) -> void:
 func add_debris_at(pos: Vector2, mass: float) -> void:
 	if mass <= 0.0:
 		return
-	# Find nearest active debris field within merge radius
 	var nearest: DebrisField = null
 	var nearest_dist_sq: float = SimConstants.DEBRIS_MERGE_RADIUS * SimConstants.DEBRIS_MERGE_RADIUS
 	for field in debris_fields:
@@ -136,7 +97,6 @@ func add_debris_at(pos: Vector2, mass: float) -> void:
 		field.active = true
 		debris_fields.append(field)
 		debris_field_changed.emit(field)
-	# If at cap and no nearby field: mass is lost (acceptable MVP simplification)
 
 func count_bodies_by_type(type: int) -> int:
 	var count: int = 0
@@ -168,21 +128,27 @@ func get_star() -> SimBody:
 			return body
 	return null
 
-# -------------------------------------------------------------------------
-# Private phase helpers
-# -------------------------------------------------------------------------
+func get_black_hole() -> SimBody:
+	for body in bodies:
+		if body.active and body.body_type == SimBody.BodyType.BLACK_HOLE:
+			return body
+	return null
 
 func _update_scripted_orbiters(sim_dt: float) -> void:
 	for body in bodies:
-		if not body.active or not body.scripted_orbit_enabled:
+		if not body.active or not body.is_analytic_orbit_bound():
+			continue
+		var parent: SimBody = _find_body_by_id(body.orbit_parent_id)
+		if parent == null or not parent.active:
 			continue
 		body.sleeping = false
 		body.sleep_timer = 0.0
 		body.orbit_angle = wrapf(body.orbit_angle + body.orbit_angular_speed * sim_dt, 0.0, TAU)
 		var radial: Vector2 = Vector2(cos(body.orbit_angle), sin(body.orbit_angle))
 		var tangent: Vector2 = Vector2(-sin(body.orbit_angle), cos(body.orbit_angle))
-		body.position = body.orbit_center + radial * body.orbit_radius
-		body.velocity = tangent * (body.orbit_angular_speed * body.orbit_radius)
+		body.orbit_center = parent.position
+		body.position = parent.position + radial * body.orbit_radius
+		body.velocity = parent.velocity + tangent * (body.orbit_angular_speed * body.orbit_radius)
 		body.age += sim_dt
 
 func _aggregate_debris_fields() -> void:
@@ -209,10 +175,10 @@ func _cleanup_inactive_debris_fields() -> void:
 func _flush_removals() -> void:
 	var i: int = bodies.size() - 1
 	while i >= 0:
-		var b: SimBody = bodies[i]
-		if b.marked_for_removal:
+		var body: SimBody = bodies[i]
+		if body.marked_for_removal:
 			bodies.remove_at(i)
-			body_removed.emit(b.id)
+			body_removed.emit(body.id)
 		i -= 1
 
 func _enforce_fragment_cap() -> void:
@@ -222,7 +188,6 @@ func _enforce_fragment_cap() -> void:
 			fragments.append(body)
 	if fragments.size() <= SimConstants.MAX_ACTIVE_FRAGMENTS:
 		return
-	# Sort smallest first, convert excess to debris
 	fragments.sort_custom(func(a, b): return a.mass < b.mass)
 	var excess: int = fragments.size() - SimConstants.MAX_ACTIVE_FRAGMENTS
 	for i in range(excess):
@@ -237,3 +202,9 @@ func _active_debris_count() -> int:
 		if field.active:
 			count += 1
 	return count
+
+func _find_body_by_id(body_id: int) -> SimBody:
+	for body in bodies:
+		if body.id == body_id:
+			return body
+	return null

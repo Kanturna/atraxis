@@ -46,6 +46,8 @@ func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
 		_on_body_added(body)
 
 func render_frame(world: SimWorld) -> void:
+	if _zone_renderer != null:
+		_zone_renderer.update_all(world)
 	if _gravity_debug_renderer != null:
 		_gravity_debug_renderer.update_all(world.bodies)
 	if _body_renderer != null:

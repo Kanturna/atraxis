@@ -1,6 +1,6 @@
 ## zone_renderer.gd
 ## Draws zone boundary rings using AntialiasedLine2D for smooth arcs.
-## Zones are static in Phase 1 (computed once from star properties).
+## In Stable Anchor the rings follow the moving star instead of the world origin.
 class_name ZoneRenderer
 extends Node2D
 
@@ -9,6 +9,13 @@ var _zones: WorldBuilder.ZoneBoundaries = null
 func setup(zones: WorldBuilder.ZoneBoundaries) -> void:
 	_zones = zones
 	_rebuild_lines()
+
+func update_all(world: SimWorld) -> void:
+	if world == null:
+		return
+	var star: SimBody = world.get_star()
+	if star != null:
+		position = BodyRenderer.sim_to_screen(star.position)
 
 func _rebuild_lines() -> void:
 	# Remove any existing children

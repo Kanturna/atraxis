@@ -34,12 +34,21 @@ res://tests/test_gravity_debug_data.gd
 * test_build_ring_specs_only_uses_active_stars
 * test_small_rings_under_screen_threshold_are_not_emitted
 * test_multiple_stars_build_separate_centers
+* test_black_hole_also_contributes_gravity_debug_rings
+5/5 passed.
+
+
+res://tests/test_start_modes.gd
+* test_stable_anchor_builds_one_black_hole_one_sun_and_configured_bodies
+* test_stable_anchor_sun_moves_while_black_hole_stays_fixed
+* test_chaos_mode_creates_dynamic_inflow_bodies_without_black_hole
+* test_chaos_mode_same_seed_rebuilds_identical_start_state
 4/4 passed.
 
 
 res://tests/test_world_builder.gd
-* test_world_builder_creates_phase1_mvp_layout
-* test_scripted_planet_orbit_advances_without_leaving_its_radius
+* test_world_builder_creates_stable_anchor_reference_layout
+* test_bound_core_planet_advances_with_moving_parent
 2/2 passed.
 
 
@@ -51,10 +60,10 @@ res://tests/test_world_builder.gd
 
 Totals
 ------
-Scripts               5
-Tests                15
-Passing Tests        15
-Asserts              73
+Scripts               6
+Tests                20
+Passing Tests        20
+Asserts             164
 Time              0.384s
 
 

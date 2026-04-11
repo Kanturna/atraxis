@@ -28,6 +28,7 @@ func resolve(result: CollisionDetector.CollisionResult) -> void:
 
 	var outcome: String = _determine_outcome(a, b, result)
 	match outcome:
+		"black_hole_impact": _black_hole_impact(a, b)
 		"star_impact": _star_impact(a, b)
 		"absorb": _absorb(a, b)
 		"impact": _impact(a, b, result)
@@ -41,7 +42,9 @@ func resolve(result: CollisionDetector.CollisionResult) -> void:
 
 func _determine_outcome(a: SimBody, b: SimBody,
 		result: CollisionDetector.CollisionResult) -> String:
-	# Star absorbs everything that touches it.
+	if a.body_type == SimBody.BodyType.BLACK_HOLE or b.body_type == SimBody.BodyType.BLACK_HOLE:
+		return "black_hole_impact"
+
 	if a.body_type == SimBody.BodyType.STAR or b.body_type == SimBody.BodyType.STAR:
 		return "star_impact"
 
@@ -153,11 +156,13 @@ func _fragment(a: SimBody, b: SimBody,
 		_world.add_body(frag)
 
 func _star_impact(a: SimBody, b: SimBody) -> void:
-	# Phase 1: the star is an immutable world anchor.
-	# The impactor is always removed and only a fixed debris flash is emitted.
 	var impactor: SimBody = b if a.body_type == SimBody.BodyType.STAR else a
 	var debris_mass: float = impactor.mass * STAR_IMPACT_DEBRIS_FRACTION
 	_world.add_debris_at(impactor.position, debris_mass)
+	impactor.marked_for_removal = true
+
+func _black_hole_impact(a: SimBody, b: SimBody) -> void:
+	var impactor: SimBody = b if a.body_type == SimBody.BodyType.BLACK_HOLE else a
 	impactor.marked_for_removal = true
 
 # -------------------------------------------------------------------------
@@ -202,6 +207,8 @@ func _make_fragment(mass: float, source: SimBody,
 
 func _radius_for_mass(mass: float, body_type: int) -> float:
 	match body_type:
+		SimBody.BodyType.BLACK_HOLE:
+			return SimConstants.BLACK_HOLE_RADIUS
 		SimBody.BodyType.STAR:
 			return SimConstants.STAR_RADIUS
 		SimBody.BodyType.PLANET:

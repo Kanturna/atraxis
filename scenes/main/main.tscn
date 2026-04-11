@@ -65,7 +65,7 @@ anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
 offset_top = 156.0
-offset_bottom = 434.0
+offset_bottom = 512.0
 
 [node name="VBox" type="VBoxContainer" parent="DebugOverlay/StartPanel" unique_id=1791068595]
 layout_mode = 2
@@ -94,6 +94,53 @@ text = "Seed"
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
 max_value = 999999.0
+rounded = true
+
+[node name="SunOrbitRadiusLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320001]
+layout_mode = 2
+text = "Sun Orbit R"
+
+[node name="SunOrbitRadiusSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320002]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 2.5
+max_value = 8.0
+step = 0.1
+value = 4.0
+
+[node name="SunOrbitSpeedLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320003]
+layout_mode = 2
+text = "Orbit Speed"
+
+[node name="SunOrbitSpeedSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320004]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 0.2
+max_value = 2.0
+step = 0.05
+value = 1.0
+
+[node name="CorePlanetCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320005]
+layout_mode = 2
+text = "Core Planets"
+
+[node name="CorePlanetCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320006]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 1.0
+max_value = 4.0
+value = 3.0
+rounded = true
+
+[node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320007]
+layout_mode = 2
+text = "Disturbances"
+
+[node name="DisturbanceCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320008]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+max_value = 8.0
+value = 6.0
 rounded = true
 
 [node name="SpawnRadiusLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=766452196]
@@ -142,11 +189,11 @@ max_value = 1.0
 step = 0.05
 value = 0.65
 
-[node name="BodyCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1806982036]
+[node name="ChaosBodyCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1806982036]
 layout_mode = 2
 text = "Body Count"
 
-[node name="BodyCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1509422310]
+[node name="ChaosBodyCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1509422310]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
 min_value = 1.0

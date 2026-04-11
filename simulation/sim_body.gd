@@ -9,11 +9,12 @@ extends RefCounted
 # -------------------------------------------------------------------------
 
 enum BodyType {
-	STAR = 0,
-	PLANET = 1,
-	ASTEROID = 2,
-	FRAGMENT = 3,
-	DEBRIS_FIELD = 4,
+	BLACK_HOLE = 0,
+	STAR = 1,
+	PLANET = 2,
+	ASTEROID = 3,
+	FRAGMENT = 4,
+	DEBRIS_FIELD = 5,
 }
 
 enum MaterialType {
@@ -32,6 +33,12 @@ enum InfluenceLevel {
 	A = 0,
 	B = 1,
 	C = 2,
+}
+
+enum OrbitBindingState {
+	BOUND_ANALYTIC = 0,
+	FREE_DYNAMIC = 1,
+	CAPTURED_ANALYTIC = 2,
 }
 
 # -------------------------------------------------------------------------
@@ -71,10 +78,12 @@ var temperature: float = 200.0
 # to move them into full N-body mutual attraction.
 var kinematic: bool = false
 
-## Phase-1 scripted orbit support for kinematic planets.
-## These bodies are analytically advanced each tick before gravity is applied
-## so other bodies see the updated planet position immediately.
+## Analytic orbit support for calm reference bodies.
+## In Stable Anchor, bound core planets are analytically updated relative to a
+## moving parent after dynamic bodies have already advanced for the tick.
 var scripted_orbit_enabled: bool = false
+var orbit_binding_state: int = OrbitBindingState.FREE_DYNAMIC
+var orbit_parent_id: int = -1
 var orbit_center: Vector2 = Vector2.ZERO
 var orbit_radius: float = 0.0
 var orbit_angle: float = 0.0
@@ -134,3 +143,9 @@ func check_sleep_eligible() -> bool:
 func reset_sleep_timer() -> void:
 	sleep_timer = 0.0
 	sleeping = false
+
+func is_analytic_orbit_bound() -> bool:
+	return scripted_orbit_enabled and orbit_binding_state in [
+		OrbitBindingState.BOUND_ANALYTIC,
+		OrbitBindingState.CAPTURED_ANALYTIC,
+	]

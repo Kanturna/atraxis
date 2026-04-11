@@ -12,6 +12,7 @@ const G: float = 100.0
 
 # --- Mass scale (game units) ---
 const STAR_MASS: float        = 1_000_000.0
+const BLACK_HOLE_MASS: float  = 4_000_000.0
 const PLANET_MASS_MIN: float  = 500.0
 const PLANET_MASS_MAX: float  = 3_000.0
 const ASTEROID_MASS_MIN: float = 1.0
@@ -71,6 +72,7 @@ const GRAVITY_DEBUG_MIN_SCREEN_RADIUS: float = 8.0
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
 const STAR_RADIUS: float     = 30.0
+const BLACK_HOLE_RADIUS: float = 20.0
 const PLANET_RADIUS_MIN: float = 8.0
 const PLANET_RADIUS_MAX: float = 16.0
 const ASTEROID_RADIUS_MIN: float = 2.0

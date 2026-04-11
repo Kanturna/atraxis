@@ -23,16 +23,29 @@ var _smoothed_frame_ms: float = 0.0
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
 @onready var _mode_option: OptionButton = $StartPanel/VBox/SettingsGrid/ModeOption
 @onready var _seed_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SeedSpin
+@onready var _sun_orbit_radius_label: Label = $StartPanel/VBox/SettingsGrid/SunOrbitRadiusLabel
+@onready var _sun_orbit_radius_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SunOrbitRadiusSpin
+@onready var _sun_orbit_speed_label: Label = $StartPanel/VBox/SettingsGrid/SunOrbitSpeedLabel
+@onready var _sun_orbit_speed_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SunOrbitSpeedSpin
+@onready var _core_planet_count_label: Label = $StartPanel/VBox/SettingsGrid/CorePlanetCountLabel
+@onready var _core_planet_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/CorePlanetCountSpin
+@onready var _disturbance_count_label: Label = $StartPanel/VBox/SettingsGrid/DisturbanceCountLabel
+@onready var _disturbance_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/DisturbanceCountSpin
 @onready var _spawn_radius_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpawnRadiusSpin
+@onready var _spawn_radius_label: Label = $StartPanel/VBox/SettingsGrid/SpawnRadiusLabel
 @onready var _spawn_spread_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpawnSpreadSpin
+@onready var _spawn_spread_label: Label = $StartPanel/VBox/SettingsGrid/SpawnSpreadLabel
 @onready var _speed_scale_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpeedScaleSpin
+@onready var _speed_scale_label: Label = $StartPanel/VBox/SettingsGrid/SpeedScaleLabel
 @onready var _tangential_bias_spin: SpinBox = $StartPanel/VBox/SettingsGrid/TangentialBiasSpin
-@onready var _body_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/BodyCountSpin
+@onready var _tangential_bias_label: Label = $StartPanel/VBox/SettingsGrid/TangentialBiasLabel
+@onready var _chaos_body_count_label: Label = $StartPanel/VBox/SettingsGrid/ChaosBodyCountLabel
+@onready var _chaos_body_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/ChaosBodyCountSpin
 @onready var _restart_button: Button = $StartPanel/VBox/RestartButton
 
 func _ready() -> void:
 	_mode_option.clear()
-	_mode_option.add_item("Stable MVP", START_CONFIG_SCRIPT.StartMode.STABLE_MVP)
+	_mode_option.add_item("Stable Anchor", START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR)
 	_mode_option.add_item("Chaos Inflow", START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW)
 	if not _mode_option.item_selected.is_connected(_on_mode_selected):
 		_mode_option.item_selected.connect(_on_mode_selected)
@@ -139,7 +152,7 @@ func _update_stats_text() -> void:
 		+ "Fragments       %d / %d\n" % [sim_stats["fragment_count"], SimConstants.MAX_ACTIVE_FRAGMENTS]
 		+ "Debris fields   %d / %d\n\n" % [sim_stats["debris_count"], SimConstants.MAX_DEBRIS_FIELDS]
 		+ "Orbit Stability\n"
-		+ "Scripted planets %d\n" % orbit_stats["scripted_planets"]
+		+ "Analytic planets %d\n" % orbit_stats["analytic_planets"]
 		+ "Radial avg      %.3f\n" % orbit_stats["average_radial_deviation"]
 		+ "Radial max      %.3f\n" % orbit_stats["max_radial_deviation"]
 		+ "Speed avg       %.3f\n\n" % orbit_stats["average_speed_deviation"]
@@ -168,33 +181,61 @@ func _sync_start_controls(config) -> void:
 	safe_config.clamp_values()
 	_mode_option.select(safe_config.mode)
 	_seed_spin.value = safe_config.seed
+	_sun_orbit_radius_spin.value = safe_config.sun_orbit_radius_au
+	_sun_orbit_speed_spin.value = safe_config.sun_orbit_speed_scale
+	_core_planet_count_spin.value = safe_config.core_planet_count
+	_disturbance_count_spin.value = safe_config.disturbance_body_count
 	_spawn_radius_spin.value = safe_config.spawn_radius_au
 	_spawn_spread_spin.value = safe_config.spawn_spread_au
 	_speed_scale_spin.value = safe_config.inflow_speed_scale
 	_tangential_bias_spin.value = safe_config.tangential_bias
-	_body_count_spin.value = safe_config.body_count
+	_chaos_body_count_spin.value = safe_config.chaos_body_count
 	_update_mode_specific_inputs()
 
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = _mode_option.get_selected_id()
 	config.seed = int(_seed_spin.value)
+	config.sun_orbit_radius_au = _sun_orbit_radius_spin.value
+	config.sun_orbit_speed_scale = _sun_orbit_speed_spin.value
+	config.core_planet_count = int(_core_planet_count_spin.value)
+	config.disturbance_body_count = int(_disturbance_count_spin.value)
 	config.spawn_radius_au = _spawn_radius_spin.value
 	config.spawn_spread_au = _spawn_spread_spin.value
 	config.inflow_speed_scale = _speed_scale_spin.value
 	config.tangential_bias = _tangential_bias_spin.value
-	config.body_count = int(_body_count_spin.value)
+	config.chaos_body_count = int(_chaos_body_count_spin.value)
 	config.clamp_values()
 	return config
 
 func _update_mode_specific_inputs() -> void:
 	var chaos_enabled: bool = _mode_option.get_selected_id() == START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW
-	_seed_spin.editable = chaos_enabled
-	_spawn_radius_spin.editable = chaos_enabled
-	_spawn_spread_spin.editable = chaos_enabled
-	_speed_scale_spin.editable = chaos_enabled
-	_tangential_bias_spin.editable = chaos_enabled
-	_body_count_spin.editable = chaos_enabled
+	var stable_nodes: Array[CanvasItem] = [
+		_sun_orbit_radius_label,
+		_sun_orbit_radius_spin,
+		_sun_orbit_speed_label,
+		_sun_orbit_speed_spin,
+		_core_planet_count_label,
+		_core_planet_count_spin,
+		_disturbance_count_label,
+		_disturbance_count_spin,
+	]
+	var chaos_nodes: Array[CanvasItem] = [
+		_spawn_radius_label,
+		_spawn_radius_spin,
+		_spawn_spread_label,
+		_spawn_spread_spin,
+		_speed_scale_label,
+		_speed_scale_spin,
+		_tangential_bias_label,
+		_tangential_bias_spin,
+		_chaos_body_count_label,
+		_chaos_body_count_spin,
+	]
+	for node in stable_nodes:
+		node.visible = not chaos_enabled
+	for node in chaos_nodes:
+		node.visible = chaos_enabled
 
 func _on_mode_selected(_index: int) -> void:
 	_update_mode_specific_inputs()
