@@ -91,22 +91,22 @@ const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy to
 # Phase A is intentionally numerical only: bodies very close to a dominant BH
 # are integrated with smaller local timesteps so high speed resolves as
 # stronger curvature/orbital steering, not as a coarse-timestep escape spike.
-# 0.35 ≈ 2.2 AU for a 12M BH — larger than the previous 0.22 (1.4 AU) so that
-# the 8-substep window catches fast-approaching stars earlier and reduces
-# numerical energy injection before periapsis.
-const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.35
+# 0.65 ≈ 7.1 AU for a 12M BH — this covers the default inner star orbit range
+# (4–20 AU) so that orbiting stars are reliably in 8-substep mode and the
+# broad energy guardrail (see below) applies wherever stars can actually orbit.
+# Previous values: 0.22 (1.4 AU), 0.35 (3.8 AU) — both too small: stars at 4 AU
+# fell just outside the nearfield and were integrated with a single coarse step.
+const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.65
 const BH_NEARFIELD_SUBSTEPS: int = 8
 # Small star-specific periapsis guardrail used after nearfield substeps.
 # This does not capture or rebind stars; it only prevents ultra-close inward
 # passages from collapsing into unusable near-singularity spikes.
 const BH_STAR_APPROACH_PADDING: float = 8.0
-# Post-guardrail escape-velocity clamp factor.
-# After the guardrail corrects a star's position and removes its inward radial
-# velocity, the remaining tangential speed may still exceed local escape velocity
-# if numerical energy was injected during a coarse-timestep near-miss (especially
-# at high time_scale values). This factor clamps the post-guardrail speed to
-# MARGIN × v_esc so the star stays bound. It is a deliberate local binding aid,
-# not a generic solver fix. 0.92 is the tuning start point — adjust here to taste.
+# Escape-velocity clamp margin — used by both guardrail stages (see sim_world.gd).
+# Both the hard periapsis guardrail and the broad energy guardrail clamp star
+# speed to MARGIN × v_esc(r) so the star stays bound after intervention.
+# 0.92 = intentional tuning start point, not a physical constant. Closer to 1.0
+# = more tightly bound; lower values = more conservative buffer.
 const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.92
 # Gravity contribution cutoff for kinematic BHs only.
 # BH→body gravity is skipped when G*M/r² falls below this threshold.

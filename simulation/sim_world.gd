@@ -36,6 +36,8 @@ func _init() -> void:
 
 func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
+	# Build cache once to determine substep count. BHs are kinematic (no position
+	# change during the frame) so this initial build is safe for that decision.
 	_rebuild_dominant_bh_cache()
 	var integration_substeps: int = _determine_black_hole_nearfield_substeps()
 	var sub_dt: float = sim_dt / float(integration_substeps)
@@ -46,6 +48,14 @@ func step_sim(dt: float) -> void:
 				body.acceleration = Vector2.ZERO
 
 		_gravity.apply_gravity(bodies)
+
+		# Rebuild the cache every substep so that the guardrail always uses the
+		# dominant BH relative to each star's current substep position.
+		# At high time_scale a fast star can cross into a different BH's dominance
+		# zone mid-frame; using a stale cache would apply the guardrail against
+		# the wrong BH (or miss it entirely). BHs never move so the BH-side of
+		# the lookup is stable; only star distances change between substeps.
+		_rebuild_dominant_bh_cache()
 
 		for body in bodies:
 			if not body.active or body.sleeping or body.kinematic:
@@ -206,7 +216,13 @@ func _rebuild_dominant_bh_cache() -> void:
 				best_bh = bh
 				best_dist = delta.length()
 		if best_bh != null:
-			_dominant_bh_cache[body.id] = {"dominant_bh": best_bh, "distance": best_dist}
+			_dominant_bh_cache[body.id] = {
+				"dominant_bh": best_bh,
+				"distance": best_dist,
+				# Cache the nearfield radius so guardrail calls don't recompute it.
+				# Depends only on BH mass (fixed), safe to cache per rebuild.
+				"nearfield_radius": ANCHOR_FIELD_SCRIPT.nearfield_radius_for_mass(best_bh.mass),
+			}
 
 func _determine_black_hole_nearfield_substeps() -> int:
 	if _dominant_bh_cache.is_empty():
@@ -238,43 +254,61 @@ func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position
 		return
 	if not _dominant_bh_cache.has(body.id):
 		return
-	var dominant_black_hole: SimBody = _dominant_bh_cache[body.id]["dominant_bh"]
+	var entry: Dictionary = _dominant_bh_cache[body.id]
+	var dominant_black_hole: SimBody = entry["dominant_bh"]
+	var nearfield_radius: float = entry["nearfield_radius"]
 	var offset_from_black_hole: Vector2 = body.position - dominant_black_hole.position
 	var current_distance: float = offset_from_black_hole.length()
 	var minimum_distance: float = dominant_black_hole.radius + body.radius + SimConstants.BH_STAR_APPROACH_PADDING
-	if minimum_distance <= 0.0 or current_distance > minimum_distance:
-		return
-	var previous_distance: float = previous_position.distance_to(dominant_black_hole.position)
-	if previous_distance < minimum_distance:
-		return
-	if current_distance > 0.0:
-		var radial_direction: Vector2 = offset_from_black_hole / current_distance
-		var radial_velocity: float = body.velocity.dot(radial_direction)
-		if radial_velocity >= 0.0:
-			return
-		# Project the star back onto the smallest allowed periapsis radius while
-		# preserving visible tangential motion. This is a local guardrail against
-		# unusable ultra-close inward passes, not a capture or parent-change rule.
-		var tangential_velocity: Vector2 = body.velocity - radial_direction * radial_velocity
-		body.position = dominant_black_hole.position + radial_direction * minimum_distance
-		# Local binding aid: if the remaining tangential speed already exceeds local
-		# escape velocity (v_esc = sqrt(2·G·M/r)) — e.g. due to numerical energy
-		# injection at high time_scale — clamp it to BH_GUARDRAIL_ESCAPE_MARGIN × v_esc
-		# so the star stays bound. The direction is preserved; only the magnitude is
-		# reduced. BH_GUARDRAIL_ESCAPE_MARGIN is a tuning constant in sim_constants.gd.
-		var escape_vel_sq: float = 2.0 * SimConstants.G * dominant_black_hole.mass / minimum_distance
-		if tangential_velocity.length_squared() >= escape_vel_sq:
-			tangential_velocity = tangential_velocity.normalized() * (sqrt(escape_vel_sq) * SimConstants.BH_GUARDRAIL_ESCAPE_MARGIN)
-		body.velocity = tangential_velocity
-		return
-	var fallback_offset: Vector2 = previous_position - dominant_black_hole.position
-	if fallback_offset == Vector2.ZERO:
-		fallback_offset = Vector2.RIGHT
-	var fallback_direction: Vector2 = fallback_offset.normalized()
-	body.position = dominant_black_hole.position + fallback_direction * minimum_distance
-	var fallback_radial_velocity: float = body.velocity.dot(fallback_direction)
-	if fallback_radial_velocity < 0.0:
-		body.velocity -= fallback_direction * fallback_radial_velocity
+
+	# --- Stage 1: Hard periapsis guardrail (minimum approach distance) ---
+	# Fires when the star has just crossed inward past minimum_distance.
+	# Repositions to minimum_distance and removes inward radial velocity.
+	if minimum_distance > 0.0 and current_distance <= minimum_distance:
+		var previous_distance: float = previous_position.distance_to(dominant_black_hole.position)
+		if previous_distance >= minimum_distance:
+			# Star just crossed the minimum boundary inward.
+			if current_distance > 0.0:
+				var radial_direction: Vector2 = offset_from_black_hole / current_distance
+				var radial_velocity: float = body.velocity.dot(radial_direction)
+				if radial_velocity < 0.0:
+					# Project back to minimum radius, preserve tangential motion.
+					var tangential_velocity: Vector2 = body.velocity - radial_direction * radial_velocity
+					body.position = dominant_black_hole.position + radial_direction * minimum_distance
+					# Escape-velocity clamp: even the tangential component can exceed v_esc
+					# after numerical energy injection at high time_scale.
+					var escape_vel_sq: float = 2.0 * SimConstants.G * dominant_black_hole.mass / minimum_distance
+					if tangential_velocity.length_squared() >= escape_vel_sq:
+						tangential_velocity = tangential_velocity.normalized() \
+							* (sqrt(escape_vel_sq) * SimConstants.BH_GUARDRAIL_ESCAPE_MARGIN)
+					body.velocity = tangential_velocity
+					return
+			else:
+				# Degenerate: star at exact BH position.
+				var fallback_offset: Vector2 = previous_position - dominant_black_hole.position
+				if fallback_offset == Vector2.ZERO:
+					fallback_offset = Vector2.RIGHT
+				var fallback_direction: Vector2 = fallback_offset.normalized()
+				body.position = dominant_black_hole.position + fallback_direction * minimum_distance
+				var fallback_radial_velocity: float = body.velocity.dot(fallback_direction)
+				if fallback_radial_velocity < 0.0:
+					body.velocity -= fallback_direction * fallback_radial_velocity
+				return
+
+	# --- Stage 2: Broad energy guardrail (anywhere within nearfield) ---
+	# Stage 1 only fires when the star physically crosses minimum_distance.
+	# A star that passes at e.g. 100–500 units never triggers Stage 1, but can
+	# still receive a massive velocity kick from a coarse-timestep integration
+	# and escape. This stage catches those cases: whenever a star inside the
+	# nearfield has positive specific orbital energy (i.e. it would escape the
+	# dominant BH), its speed is clamped to MARGIN × v_esc at its current radius.
+	# Direction is preserved so orbital motion remains visually coherent.
+	if nearfield_radius > 0.0 and current_distance > 0.0 and current_distance <= nearfield_radius:
+		var gm: float = SimConstants.G * dominant_black_hole.mass
+		var specific_energy: float = 0.5 * body.velocity.length_squared() - gm / current_distance
+		if specific_energy > 0.0:
+			var escape_speed: float = sqrt(2.0 * gm / current_distance)
+			body.velocity = body.velocity.normalized() * escape_speed * SimConstants.BH_GUARDRAIL_ESCAPE_MARGIN
 
 func _requires_star_black_hole_guardrail(body: SimBody) -> bool:
 	return body.active \

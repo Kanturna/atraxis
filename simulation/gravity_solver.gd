@@ -33,8 +33,14 @@ func apply_gravity(bodies: Array) -> void:
 		_apply_from_source(source, level_c)
 
 	# A ↔ A mutual (empty in single-star MVP; ready for multi-star)
+	# Skip pairs where both bodies are kinematic (e.g. two fixed BHs): neither
+	# receives acceleration, so the full distance/direction computation is wasted.
+	# With N kinematic BHs this saves N*(N-1)/2 iterations per substep — the
+	# dominant cost with large BH counts.
 	for i in range(level_a.size()):
 		for j in range(i + 1, level_a.size()):
+			if level_a[i].kinematic and level_a[j].kinematic:
+				continue
 			_apply_mutual(level_a[i], level_a[j])
 
 	# B ↔ B mutual, proximity-limited

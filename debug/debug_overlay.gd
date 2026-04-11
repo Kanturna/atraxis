@@ -87,6 +87,17 @@ func _ready() -> void:
 	_anchor_topology_option.add_item("Central BH", START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
 	_anchor_topology_option.add_item("Galaxy Cluster", START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER)
+	# BH dominance radius ≈ sqrt(G*M/10). For a 12M BH that is ~11 AU, so the
+	# field spacing must exceed ~11 AU to avoid gravity-field overlap. Widen the
+	# spinbox range to 60 AU so the user can actually reach sensible values.
+	_field_spacing_spin.max_value = 60.0
+	# Update the hint label text with useful spacing guidance.
+	_field_patch_hint_label.text = (
+		"Field Patch: multiple BHs shape the gravity field. "
+		+ "BH spacing AU controls how far apart each BH is. "
+		+ "Dominance radius ≈ sqrt(G·M/10) ≈ 11 AU for 12M BH — "
+		+ "set spacing above that value to keep gravity fields separate."
+	)
 	_create_galaxy_controls()
 	if not _mode_option.item_selected.is_connected(_on_mode_selected):
 		_mode_option.item_selected.connect(_on_mode_selected)

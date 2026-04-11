@@ -98,7 +98,9 @@ func clamp_values() -> void:
 		if anchor_topology == AnchorTopology.GALAXY_CLUSTER \
 		else SimConstants.MAX_FIELD_PATCH_BLACK_HOLES
 	black_hole_count = clampi(black_hole_count, 1, max_bh)
-	field_spacing_au = clampf(field_spacing_au, 6.0, 20.0)
+	# Upper bound raised to 60 AU so users can spread BHs beyond the dominance
+	# radius (~11 AU for a 12M BH) and avoid gravity-field overlap.
+	field_spacing_au = clampf(field_spacing_au, 6.0, 60.0)
 	galaxy_cluster_count = clampi(galaxy_cluster_count, 2, 12)
 	galaxy_cluster_radius_au = clampf(galaxy_cluster_radius_au, 1.0, 8.0)
 	galaxy_void_scale = clampf(galaxy_void_scale, 2.0, 6.0)
