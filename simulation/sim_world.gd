@@ -42,8 +42,10 @@ func step_sim(dt: float) -> void:
 		for body in bodies:
 			if not body.active or body.sleeping or body.kinematic:
 				continue
+			var previous_position: Vector2 = body.position
 			body.velocity += body.acceleration * sub_dt
 			body.position += body.velocity * sub_dt
+			_apply_star_black_hole_periapsis_guardrail(body, previous_position)
 			body.age += sub_dt
 
 	_update_scripted_orbiters(sim_dt)
@@ -199,6 +201,51 @@ func _requires_black_hole_nearfield_substeps(body: SimBody) -> bool:
 		SimBody.BodyType.PLANET,
 		SimBody.BodyType.ASTEROID,
 	]
+
+func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position: Vector2) -> void:
+	if not _requires_star_black_hole_guardrail(body):
+		return
+	var black_holes: Array = get_black_holes()
+	if black_holes.is_empty():
+		return
+	var ranked: Array = ANCHOR_FIELD_SCRIPT.rank_black_holes_for_body(body, black_holes)
+	if ranked.is_empty():
+		return
+	var dominant_black_hole: SimBody = ranked[0]["black_hole"]
+	var offset_from_black_hole: Vector2 = body.position - dominant_black_hole.position
+	var current_distance: float = offset_from_black_hole.length()
+	var minimum_distance: float = dominant_black_hole.radius + body.radius + SimConstants.BH_STAR_APPROACH_PADDING
+	if minimum_distance <= 0.0 or current_distance > minimum_distance:
+		return
+	var previous_distance: float = previous_position.distance_to(dominant_black_hole.position)
+	if previous_distance < minimum_distance:
+		return
+	if current_distance > 0.0:
+		var radial_direction: Vector2 = offset_from_black_hole / current_distance
+		var radial_velocity: float = body.velocity.dot(radial_direction)
+		if radial_velocity >= 0.0:
+			return
+		# Project the star back onto the smallest allowed periapsis radius while
+		# preserving visible tangential motion. This is a local guardrail against
+		# unusable ultra-close inward passes, not a capture or parent-change rule.
+		var tangential_velocity: Vector2 = body.velocity - radial_direction * radial_velocity
+		body.position = dominant_black_hole.position + radial_direction * minimum_distance
+		body.velocity = tangential_velocity
+		return
+	var fallback_offset: Vector2 = previous_position - dominant_black_hole.position
+	if fallback_offset == Vector2.ZERO:
+		fallback_offset = Vector2.RIGHT
+	var fallback_direction: Vector2 = fallback_offset.normalized()
+	body.position = dominant_black_hole.position + fallback_direction * minimum_distance
+	var fallback_radial_velocity: float = body.velocity.dot(fallback_direction)
+	if fallback_radial_velocity < 0.0:
+		body.velocity -= fallback_direction * fallback_radial_velocity
+
+func _requires_star_black_hole_guardrail(body: SimBody) -> bool:
+	return body.active \
+		and not body.sleeping \
+		and not body.kinematic \
+		and body.body_type == SimBody.BodyType.STAR
 
 func _update_scripted_orbiters(sim_dt: float) -> void:
 	for body in bodies:

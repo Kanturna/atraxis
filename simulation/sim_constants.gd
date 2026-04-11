@@ -82,6 +82,10 @@ const ANCHOR_FIELD_RING_SLOT_SCALE: int = 6
 # stronger curvature/orbital steering, not as a coarse-timestep escape spike.
 const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.22
 const BH_NEARFIELD_SUBSTEPS: int = 8
+# Small star-specific periapsis guardrail used after nearfield substeps.
+# This does not capture or rebind stars; it only prevents ultra-close inward
+# passages from collapsing into unusable near-singularity spikes.
+const BH_STAR_APPROACH_PADDING: float = 8.0
 
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
