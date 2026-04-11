@@ -30,6 +30,19 @@ script = ExtResource("6")
 visible = false
 script = ExtResource("3")
 
+[node name="StatsPanel" type="PanelContainer" parent="DebugOverlay" unique_id=1760491034]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 376.0
+offset_bottom = 316.0
+
+[node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/StatsPanel" unique_id=499680202]
+custom_minimum_size = Vector2(340, 280)
+layout_mode = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+
 [node name="Inspector" type="PanelContainer" parent="DebugOverlay" unique_id=105414783]
 anchors_preset = 2
 anchor_top = 1.0

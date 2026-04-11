@@ -65,6 +65,7 @@ func _process(delta: float) -> void:
 
 	# Render the current sim state (after all steps for this frame)
 	_world_renderer.render_frame(sim_world)
+	_debug_overlay.update_runtime_metrics(delta, steps)
 	_hud.update_display(sim_world)
 
 # -------------------------------------------------------------------------

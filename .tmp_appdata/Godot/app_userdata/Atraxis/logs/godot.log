@@ -14,6 +14,14 @@ res://tests/test_collision.gd
 2/2 passed.
 
 
+res://tests/test_debug_metrics.gd
+* test_scripted_planet_metrics_report_orbit_deviation
+* test_chaos_score_uses_fixed_phase1_formula
+* test_empty_world_metrics_are_stable
+* test_simulation_counts_include_sleeping_fragments_and_debris
+4/4 passed.
+
+
 res://tests/test_gravity.gd
 * test_kinematic_source_accelerates_dynamic_target
 * test_kinematic_target_does_not_collect_acceleration
@@ -34,11 +42,11 @@ res://tests/test_world_builder.gd
 
 Totals
 ------
-Scripts               3
-Tests                 6
-Passing Tests         6
-Asserts              26
-Time              0.397s
+Scripts               4
+Tests                10
+Passing Tests        10
+Asserts              52
+Time              0.374s
 
 
 ---- All tests passed! ----
