@@ -4,6 +4,7 @@ class_name WorldBuilder
 extends RefCounted
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
 
 class ZoneBoundaries:
 	var inner_max: float
@@ -37,10 +38,22 @@ static func _build_dynamic_anchor(world: SimWorld, config) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = config.seed
 
-	var black_hole := _make_black_hole(config.black_hole_mass)
-	world.add_body(black_hole)
+	var black_holes: Array = []
+	var central_black_hole: SimBody = null
+	if config.anchor_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
+		for spec in ANCHOR_FIELD_SCRIPT.build_field_patch_specs(config.field_spacing_au, config.black_hole_mass):
+			var black_hole := _make_black_hole(spec["mass"])
+			black_hole.position = spec["position"]
+			world.add_body(black_hole)
+			black_holes.append(black_hole)
+			if spec["is_central"]:
+				central_black_hole = black_hole
+	else:
+		central_black_hole = _make_black_hole(config.black_hole_mass)
+		world.add_body(central_black_hole)
+		black_holes.append(central_black_hole)
 
-	var stars := _place_dynamic_stars(black_hole, config, rng)
+	var stars := _place_dynamic_stars(central_black_hole, config, rng)
 	for star in stars:
 		world.add_body(star)
 	for star in stars:

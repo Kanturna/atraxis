@@ -50,8 +50,8 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
-offset_top = 528.0
-offset_bottom = 618.0
+offset_top = 592.0
+offset_bottom = 682.0
 
 [node name="VBox" type="VBoxContainer" parent="DebugOverlay/AnchorPanel" unique_id=148800002]
 layout_mode = 2
@@ -96,7 +96,7 @@ anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
 offset_top = 156.0
-offset_bottom = 512.0
+offset_bottom = 576.0
 
 [node name="VBox" type="VBoxContainer" parent="DebugOverlay/StartPanel" unique_id=1791068595]
 layout_mode = 2
@@ -114,6 +114,14 @@ layout_mode = 2
 text = "Mode"
 
 [node name="ModeOption" type="OptionButton" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1861459480]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+
+[node name="AnchorTopologyLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1861459481]
+layout_mode = 2
+text = "Anchor Topology"
+
+[node name="AnchorTopologyOption" type="OptionButton" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1861459482]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
 
@@ -186,6 +194,18 @@ min_value = 6.0
 max_value = 40.0
 step = 0.1
 value = 20.0
+
+[node name="FieldSpacingLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320013]
+layout_mode = 2
+text = "Field Spacing"
+
+[node name="FieldSpacingSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320014]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 6.0
+max_value = 20.0
+step = 0.1
+value = 9.0
 
 [node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320011]
 layout_mode = 2

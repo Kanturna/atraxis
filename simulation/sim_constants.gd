@@ -69,6 +69,12 @@ const GRAVITY_DEBUG_COLORS := [
 const GRAVITY_DEBUG_LINE_WIDTH: float = 1.0
 const GRAVITY_DEBUG_MIN_SCREEN_RADIUS: float = 8.0
 
+# --- Anchor field debug/layout ---
+# Practical dominance threshold used for BH field layout and diagnostics.
+# This is a read-only helper value, not a hard gravity cutoff.
+const ANCHOR_DOMINANCE_THRESHOLD: float = 10.0
+const ANCHOR_FIELD_OUTER_COUNT: int = 4
+
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
 const STAR_RADIUS: float     = 30.0

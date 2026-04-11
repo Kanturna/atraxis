@@ -9,6 +9,11 @@ enum StartMode {
 	CHAOS_INFLOW = 2,
 }
 
+enum AnchorTopology {
+	CENTRAL_BH = 0,
+	FIELD_PATCH = 1,
+}
+
 const DEFAULT_SEED: int = 1337
 const DEFAULT_BLACK_HOLE_MASS: float = 12_000_000.0
 const DEFAULT_DISTURBANCE_BODY_COUNT: int = 4
@@ -21,8 +26,10 @@ const DEFAULT_STAR_COUNT: int = 2
 const DEFAULT_PLANETS_PER_STAR: int = 2
 const DEFAULT_STAR_INNER_ORBIT_AU: float = 4.0
 const DEFAULT_STAR_OUTER_ORBIT_AU: float = 20.0
+const DEFAULT_FIELD_SPACING_AU: float = 9.0
 
 var mode: int = StartMode.DYNAMIC_ANCHOR
+var anchor_topology: int = AnchorTopology.CENTRAL_BH
 var seed: int = DEFAULT_SEED
 var black_hole_mass: float = DEFAULT_BLACK_HOLE_MASS
 var disturbance_body_count: int = DEFAULT_DISTURBANCE_BODY_COUNT
@@ -35,10 +42,12 @@ var star_count: int = DEFAULT_STAR_COUNT
 var planets_per_star: int = DEFAULT_PLANETS_PER_STAR
 var star_inner_orbit_au: float = DEFAULT_STAR_INNER_ORBIT_AU
 var star_outer_orbit_au: float = DEFAULT_STAR_OUTER_ORBIT_AU
+var field_spacing_au: float = DEFAULT_FIELD_SPACING_AU
 
 func copy():
 	var config = get_script().new()
 	config.mode = mode
+	config.anchor_topology = anchor_topology
 	config.seed = seed
 	config.black_hole_mass = black_hole_mass
 	config.disturbance_body_count = disturbance_body_count
@@ -51,10 +60,12 @@ func copy():
 	config.planets_per_star = planets_per_star
 	config.star_inner_orbit_au = star_inner_orbit_au
 	config.star_outer_orbit_au = star_outer_orbit_au
+	config.field_spacing_au = field_spacing_au
 	return config
 
 func clamp_values() -> void:
 	seed = maxi(seed, 0)
+	anchor_topology = clampi(anchor_topology, AnchorTopology.CENTRAL_BH, AnchorTopology.FIELD_PATCH)
 	black_hole_mass = clampf(black_hole_mass, 2_000_000.0, 30_000_000.0)
 	disturbance_body_count = clampi(disturbance_body_count, 0, 8)
 	spawn_radius_au = clampf(spawn_radius_au, 2.5, 12.0)
@@ -67,3 +78,4 @@ func clamp_values() -> void:
 	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
 	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
 	star_outer_orbit_au = maxf(star_outer_orbit_au, star_inner_orbit_au + 0.5)
+	field_spacing_au = clampf(field_spacing_au, 6.0, 20.0)

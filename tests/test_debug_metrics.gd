@@ -175,3 +175,42 @@ func test_anchor_metrics_report_bound_and_unbound_stars() -> void:
 	assert_eq(anchor["bound_stars"], 1, "one star should remain bound to the black hole")
 	assert_eq(anchor["unbound_stars"], 1, "one star should be reported as unbound")
 	assert_almost_eq(anchor["anchor_ratio"], black_hole.mass / (bound_star.mass + unbound_star.mass), 0.001, "anchor ratio should compare BH mass to total star mass")
+
+func test_anchor_metrics_report_dominant_and_secondary_black_holes_per_star() -> void:
+	var world := SimWorld.new()
+
+	var central_bh := SimBody.new()
+	central_bh.active = true
+	central_bh.body_type = SimBody.BodyType.BLACK_HOLE
+	central_bh.kinematic = true
+	central_bh.mass = 12_000_000.0
+	central_bh.position = Vector2.ZERO
+	world.add_body(central_bh)
+
+	var outer_bh := SimBody.new()
+	outer_bh.active = true
+	outer_bh.body_type = SimBody.BodyType.BLACK_HOLE
+	outer_bh.kinematic = true
+	outer_bh.mass = 12_000_000.0
+	outer_bh.position = Vector2(9000.0, 0.0)
+	world.add_body(outer_bh)
+
+	var star := SimBody.new()
+	star.active = true
+	star.body_type = SimBody.BodyType.STAR
+	star.kinematic = false
+	star.mass = SimConstants.STAR_MASS
+	star.position = Vector2(2500.0, 0.0)
+	star.velocity = Vector2(0.0, 300.0)
+	world.add_body(star)
+
+	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
+	var anchor: Dictionary = snapshot["anchor"]
+	var star_states: Array = anchor["star_anchor_states"]
+
+	assert_eq(anchor["black_hole_count"], 2, "anchor metrics should count multiple black holes in a field patch")
+	assert_almost_eq(anchor["black_hole_mass"], central_bh.mass + outer_bh.mass, 0.001, "anchor metrics should sum the mass of all black holes")
+	assert_eq(star_states.size(), 1, "one star should yield one anchor-state entry")
+	assert_eq(star_states[0]["dominant_bh_id"], central_bh.id, "the closer central BH should dominate the star")
+	assert_eq(star_states[0]["secondary_bh_id"], outer_bh.id, "the next strongest BH should be reported as the secondary anchor")
+	assert_gt(star_states[0]["dominance_ratio"], 1.0, "dominant anchor should report a ratio above 1.0 against the secondary BH")

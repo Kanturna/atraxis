@@ -4,6 +4,8 @@
 class_name DebugMetrics
 extends RefCounted
 
+const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
+
 func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var active_bodies: int = 0
 	var dynamic_bodies: int = 0
@@ -15,14 +17,15 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var radial_deviation_max: float = 0.0
 	var speed_deviation_sum: float = 0.0
 	var total_star_mass: float = 0.0
+	var total_black_hole_mass: float = 0.0
 	var bound_stars: int = 0
 	var unbound_stars: int = 0
 	var min_star_star_distance: float = INF
 	var min_star_bh_distance: float = INF
-	var black_hole_mass: float = 0.0
-	var black_hole: SimBody = world.get_black_hole()
-	if black_hole != null:
-		black_hole_mass = black_hole.mass
+	var star_anchor_states: Array = []
+	var black_holes: Array = world.get_black_holes()
+	for black_hole in black_holes:
+		total_black_hole_mass += black_hole.mass
 
 	for body in world.bodies:
 		if not body.active:
@@ -51,17 +54,14 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 
 		if body.body_type == SimBody.BodyType.STAR:
 			total_star_mass += body.mass
-			if black_hole != null:
-				var rel_pos: Vector2 = body.position - black_hole.position
-				var rel_vel: Vector2 = body.velocity - black_hole.velocity
-				var distance: float = rel_pos.length()
-				min_star_bh_distance = minf(min_star_bh_distance, distance)
-				if distance > 0.0:
-					var specific_energy: float = 0.5 * rel_vel.length_squared() - (SimConstants.G * black_hole.mass / distance)
-					if specific_energy < 0.0:
-						bound_stars += 1
-					else:
-						unbound_stars += 1
+			var anchor_state: Dictionary = ANCHOR_FIELD_SCRIPT.build_star_anchor_state(body, black_holes)
+			star_anchor_states.append(anchor_state)
+			if anchor_state["bound"]:
+				bound_stars += 1
+			else:
+				unbound_stars += 1
+			if anchor_state["dominant_distance"] > 0.0:
+				min_star_bh_distance = minf(min_star_bh_distance, anchor_state["dominant_distance"])
 
 	var stars: Array = world.get_stars()
 	for i in range(stars.size()):
@@ -83,7 +83,8 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 		min_star_bh_distance = 0.0
 	var anchor_ratio: float = 0.0
 	if total_star_mass > 0.0:
-		anchor_ratio = black_hole_mass / total_star_mass
+		anchor_ratio = total_black_hole_mass / total_star_mass
+	star_anchor_states.sort_custom(func(a, b): return a["star_id"] < b["star_id"])
 
 	var collision_pressure: float = clampf(collisions_last_3s / 8.0, 0.0, 1.0)
 	var fragment_pressure: float = _safe_ratio(fragment_count, SimConstants.MAX_ACTIVE_FRAGMENTS)
@@ -128,13 +129,15 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			"score": chaos_score,
 		},
 		"anchor": {
-			"black_hole_mass": black_hole_mass,
+			"black_hole_count": black_holes.size(),
+			"black_hole_mass": total_black_hole_mass,
 			"total_star_mass": total_star_mass,
 			"anchor_ratio": anchor_ratio,
 			"bound_stars": bound_stars,
 			"unbound_stars": unbound_stars,
 			"min_star_star_distance": min_star_star_distance,
 			"min_star_bh_distance": min_star_bh_distance,
+			"star_anchor_states": star_anchor_states,
 		},
 	}
 

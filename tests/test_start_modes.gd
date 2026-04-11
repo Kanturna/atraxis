@@ -5,6 +5,7 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 func test_default_config_prefers_dynamic_anchor() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	assert_eq(config.mode, START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR, "dynamic anchor should be the default main mode")
+	assert_eq(config.anchor_topology, START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH, "dynamic anchor should default to the existing central-BH topology")
 
 func test_dynamic_anchor_builds_macro_topology_with_dynamic_stars() -> void:
 	var world := SimWorld.new()
@@ -67,3 +68,20 @@ func test_chaos_mode_creates_dynamic_inflow_bodies_without_black_hole() -> void:
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 1, "chaos inflow should still create one central star")
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 4, "chaos inflow should create the configured inflow body count")
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.ASTEROID), 0, "chaos inflow should not mix in anchor disturbance asteroids")
+
+func test_dynamic_anchor_field_patch_builds_central_and_outer_black_holes() -> void:
+	var world := SimWorld.new()
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	config.star_count = 2
+	config.planets_per_star = 1
+	config.disturbance_body_count = 2
+	config.field_spacing_au = 9.0
+
+	WorldBuilder.build_from_config(world, config)
+
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 5, "field patch should build one central black hole plus four ordered outer anchors")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 2, "field patch should still build the configured stars")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 2, "field patch should keep the configured planets per star")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.ASTEROID), 2, "field patch should keep the configured disturbance count")
