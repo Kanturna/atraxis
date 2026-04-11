@@ -11,7 +11,7 @@ const PAN_SCREEN_FRACTION_PER_SECOND: float = 0.85
 const FAST_PAN_MULTIPLIER: float = 4.0
 const ZOOM_SPEED: float = 0.15
 const ZOOM_SMOOTHNESS: float = 10.0
-const ZOOM_MIN: float = 0.05
+const ZOOM_MIN: float = 0.015
 const ZOOM_MAX: float = 5.0
 
 var _dragging: bool = false
