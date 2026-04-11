@@ -5,7 +5,10 @@
 class_name WorldRenderer
 extends Node2D
 
+const GRAVITY_DEBUG_RENDERER_SCRIPT := preload("res://rendering/gravity_debug_renderer.gd")
+
 @onready var _zone_layer: Node2D = $ZoneLayer
+@onready var _gravity_debug_layer: Node2D = $GravityDebugLayer
 @onready var _trail_layer: Node2D = $TrailLayer
 @onready var _body_layer: Node2D = $BodyLayer
 @onready var _debris_layer: Node2D = $DebrisLayer
@@ -13,29 +16,38 @@ extends Node2D
 var _body_renderer: BodyRenderer
 var _trail_renderer: TrailRenderer
 var _zone_renderer: ZoneRenderer
+var _gravity_debug_renderer: Node2D
 var _debris_renderer: DebrisRenderer
 
 func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
 	_body_renderer = BodyRenderer.new()
 	_trail_renderer = TrailRenderer.new()
 	_zone_renderer = ZoneRenderer.new()
+	_gravity_debug_renderer = GRAVITY_DEBUG_RENDERER_SCRIPT.new()
 	_debris_renderer = DebrisRenderer.new()
 
 	_zone_layer.add_child(_zone_renderer)
+	_gravity_debug_layer.add_child(_gravity_debug_renderer)
 	_trail_layer.add_child(_trail_renderer)
 	_body_layer.add_child(_body_renderer)
 	_debris_layer.add_child(_debris_renderer)
 
 	_zone_renderer.setup(zones)
+	set_gravity_debug_visible(false)
 
 	# Create visuals for bodies already in the world
 	for body in world.bodies:
 		_on_body_added(body)
 
 func render_frame(world: SimWorld) -> void:
+	_gravity_debug_renderer.update_all(world.bodies)
 	_body_renderer.update_all(world.bodies)
 	_trail_renderer.update_all(world.bodies)
 	_debris_renderer.update_all(world.debris_fields)
+
+func set_gravity_debug_visible(enabled: bool) -> void:
+	if _gravity_debug_renderer != null:
+		_gravity_debug_renderer.visible = enabled
 
 func _on_body_added(body: SimBody) -> void:
 	_body_renderer.add_body_visual(body)

@@ -55,6 +55,19 @@ const MIN_TIME_SCALE: float = 0.1
 # Tune this to control how much of the system is visible at default zoom.
 const SIM_TO_SCREEN: float = 0.4   # pixels per sim-unit (1 AU = 400 px at default)
 
+# --- Debug gravity rings ---
+# Fixed acceleration thresholds used by the debug renderer. These are visual
+# reference bands around stars, not physical gravity cutoffs.
+const GRAVITY_DEBUG_THRESHOLDS := [300.0, 100.0, 30.0, 10.0]
+const GRAVITY_DEBUG_COLORS := [
+	Color(1.0, 0.78, 0.26, 0.30),
+	Color(0.95, 0.52, 0.22, 0.26),
+	Color(0.38, 0.86, 0.92, 0.22),
+	Color(0.36, 0.58, 1.0, 0.18),
+]
+const GRAVITY_DEBUG_LINE_WIDTH: float = 1.0
+const GRAVITY_DEBUG_MIN_SCREEN_RADIUS: float = 8.0
+
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
 const STAR_RADIUS: float     = 30.0

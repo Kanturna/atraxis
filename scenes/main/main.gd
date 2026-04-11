@@ -48,6 +48,7 @@ func _ready() -> void:
 	_world_renderer.initialize(sim_world, _zone_bounds)
 	_debug_overlay.initialize(sim_world)
 	_hud.initialize(sim_world)
+	_world_renderer.set_gravity_debug_visible(false)
 	_world_renderer.render_frame(sim_world)
 	_hud.update_display(sim_world)
 
@@ -75,6 +76,7 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_debug"):
 		_debug_overlay.toggle()
+		_world_renderer.set_gravity_debug_visible(_debug_overlay.visible)
 
 	# Body selection by click: convert viewport pixel → 2D world position
 	if event is InputEventMouseButton and event.pressed \

@@ -29,14 +29,6 @@ res://tests/test_gravity.gd
 2/2 passed.
 
 
-res://tests/test_gravity_debug_data.gd
-* test_radius_from_mass_and_threshold_matches_inverse_square_formula
-* test_build_ring_specs_only_uses_active_stars
-* test_small_rings_under_screen_threshold_are_not_emitted
-* test_multiple_stars_build_separate_centers
-4/4 passed.
-
-
 res://tests/test_world_builder.gd
 * test_world_builder_creates_phase1_mvp_layout
 * test_scripted_planet_orbit_advances_without_leaving_its_radius
@@ -51,11 +43,11 @@ res://tests/test_world_builder.gd
 
 Totals
 ------
-Scripts               5
-Tests                15
-Passing Tests        15
-Asserts              73
-Time              0.384s
+Scripts               4
+Tests                11
+Passing Tests        11
+Asserts              56
+Time              0.374s
 
 
 ---- All tests passed! ----
