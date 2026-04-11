@@ -6,8 +6,9 @@
 ## Phantom Camera stays installed but is intentionally not integrated yet.
 extends Camera2D
 
-const PAN_SPEED: float = 900.0
-const FAST_PAN_MULTIPLIER: float = 3.0
+const MIN_PAN_SPEED: float = 600.0
+const PAN_SCREEN_FRACTION_PER_SECOND: float = 0.85
+const FAST_PAN_MULTIPLIER: float = 4.0
 const ZOOM_SPEED: float = 0.15
 const ZOOM_SMOOTHNESS: float = 10.0
 const ZOOM_MIN: float = 0.05
@@ -45,7 +46,11 @@ func _update_keyboard_pan(delta: float) -> void:
 	var input_dir := Input.get_vector("camera_left", "camera_right", "camera_up", "camera_down")
 	if input_dir == Vector2.ZERO:
 		return
-	var speed: float = PAN_SPEED * zoom.x
+	# Scale pan speed by the currently visible world span so zoomed-out navigation
+	# covers large systems much faster while keeping close-up movement controllable.
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var visible_world_span: float = max(viewport_size.x, viewport_size.y) / max(zoom.x, 0.001)
+	var speed: float = max(MIN_PAN_SPEED, visible_world_span * PAN_SCREEN_FRACTION_PER_SECOND)
 	if Input.is_action_pressed("camera_fast"):
 		speed *= FAST_PAN_MULTIPLIER
 	position += input_dir.normalized() * speed * delta
