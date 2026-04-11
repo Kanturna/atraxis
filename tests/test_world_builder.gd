@@ -75,12 +75,13 @@ func test_field_patch_layout_keeps_central_bh_at_origin_and_outer_ring_spaced() 
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	config.black_hole_count = 7
 	config.field_spacing_au = 9.0
 
 	WorldBuilder.build_from_config(world, config)
 	var black_holes: Array = world.get_black_holes()
 
-	assert_eq(black_holes.size(), 5, "field patch should create the central BH plus four outer anchors")
+	assert_eq(black_holes.size(), 7, "field patch should create the configured total BH count")
 
 	var central_count: int = 0
 	var outer_distances: Array = []
@@ -92,7 +93,7 @@ func test_field_patch_layout_keeps_central_bh_at_origin_and_outer_ring_spaced() 
 			outer_distances.append(distance)
 
 	assert_eq(central_count, 1, "field patch should keep exactly one black hole at the center")
-	assert_eq(outer_distances.size(), 4, "field patch should place the remaining black holes on the outer ring")
+	assert_eq(outer_distances.size(), 6, "field patch should place the remaining black holes on the outer ring")
 	for distance in outer_distances:
 		assert_almost_eq(distance, config.field_spacing_au * SimConstants.AU, 0.01, "outer BHs should follow the configured field spacing")
 

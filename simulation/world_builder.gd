@@ -60,7 +60,10 @@ static func _build_dynamic_anchor_central_bh(world: SimWorld, config, rng: Rando
 
 static func _build_dynamic_anchor_field_patch(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
 	var central_spawn_black_hole: SimBody = null
-	for spec in ANCHOR_FIELD_SCRIPT.build_field_patch_specs(config.field_spacing_au, config.black_hole_mass):
+	for spec in ANCHOR_FIELD_SCRIPT.build_field_patch_specs(
+			config.black_hole_count,
+			config.field_spacing_au,
+			config.black_hole_mass):
 		var black_hole := _make_black_hole(spec["mass"])
 		black_hole.position = spec["position"]
 		world.add_body(black_hole)
@@ -69,7 +72,9 @@ static func _build_dynamic_anchor_field_patch(world: SimWorld, config, rng: Rand
 
 	# First field-patch stage: multiple black holes shape the gravity field, but
 	# stars still start around the central BH instead of being distributed across
-	# the whole patch. This keeps the rollout honest and incremental.
+	# all black holes in the patch. This keeps the rollout honest and incremental:
+	# field patch currently means "multi-BH gravity field", not yet "one star
+	# system per BH".
 	var stars := _place_dynamic_stars(central_spawn_black_hole, config, rng)
 	for star in stars:
 		world.add_body(star)

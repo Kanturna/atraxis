@@ -4,40 +4,26 @@
 class_name AnchorField
 extends RefCounted
 
-static func build_field_patch_specs(field_spacing_au: float, mass: float) -> Array:
+static func build_field_patch_specs(total_count: int, field_spacing_au: float, mass: float) -> Array:
 	var spacing: float = field_spacing_au * SimConstants.AU
-	return [
+	var specs: Array = [
 		{
 			"id": 0,
 			"is_central": true,
 			"position": Vector2.ZERO,
 			"mass": mass,
 		},
-		{
-			"id": 1,
-			"is_central": false,
-			"position": Vector2.RIGHT * spacing,
-			"mass": mass,
-		},
-		{
-			"id": 2,
-			"is_central": false,
-			"position": Vector2.DOWN * spacing,
-			"mass": mass,
-		},
-		{
-			"id": 3,
-			"is_central": false,
-			"position": Vector2.LEFT * spacing,
-			"mass": mass,
-		},
-		{
-			"id": 4,
-			"is_central": false,
-			"position": Vector2.UP * spacing,
-			"mass": mass,
-		},
 	]
+	var outer_count: int = maxi(total_count - 1, 0)
+	for i in range(outer_count):
+		var angle: float = -PI * 0.5 + (TAU * float(i) / float(outer_count))
+		specs.append({
+			"id": i + 1,
+			"is_central": false,
+			"position": Vector2(cos(angle), sin(angle)) * spacing,
+			"mass": mass,
+		})
+	return specs
 
 static func dominance_radius_for_mass(mass: float) -> float:
 	if mass <= 0.0 or SimConstants.ANCHOR_DOMINANCE_THRESHOLD <= 0.0:

@@ -36,7 +36,7 @@ script = ExtResource("3")
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 376.0
-offset_bottom = 470.0
+offset_bottom = 430.0
 
 [node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/StatsPanel" unique_id=499680202]
 custom_minimum_size = Vector2(340, 280)
@@ -147,6 +147,18 @@ max_value = 30000000.0
 step = 100000.0
 value = 12000000.0
 
+[node name="BlackHoleCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320016]
+layout_mode = 2
+text = "Black Holes"
+
+[node name="BlackHoleCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320017]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 3.0
+max_value = 9.0
+value = 5.0
+rounded = true
+
 [node name="StarCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320003]
 layout_mode = 2
 text = "Star Count"
@@ -206,13 +218,6 @@ min_value = 6.0
 max_value = 20.0
 step = 0.1
 value = 9.0
-
-[node name="FieldPatchHintLabel" type="Label" parent="DebugOverlay/StartPanel/VBox" unique_id=1100320015]
-visible = false
-custom_minimum_size = Vector2(280, 0)
-layout_mode = 2
-autowrap_mode = 3
-text = "Field Patch: multiple BHs shape the gravity field, but stars still start around the central BH in this first stage."
 
 [node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320011]
 layout_mode = 2
@@ -283,9 +288,31 @@ max_value = 12.0
 value = 4.0
 rounded = true
 
+[node name="FieldPatchHintLabel" type="Label" parent="DebugOverlay/StartPanel/VBox" unique_id=1100320015]
+visible = false
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+text = "Field Patch: multiple BHs shape the gravity field, but stars still start around the central BH in this first stage. Black Holes sets the total count, including the center."
+autowrap_mode = 3
+
 [node name="RestartButton" type="Button" parent="DebugOverlay/StartPanel/VBox" unique_id=1453386492]
 layout_mode = 2
 text = "Restart"
+
+[node name="AnchorDiagnosticsPanel" type="PanelContainer" parent="DebugOverlay" unique_id=148800010]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -320.0
+offset_top = 738.0
+offset_bottom = 1046.0
+
+[node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/AnchorDiagnosticsPanel" unique_id=148800011]
+custom_minimum_size = Vector2(300, 290)
+layout_mode = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1701775918]
 script = ExtResource("5")

@@ -74,6 +74,7 @@ func test_dynamic_anchor_field_patch_builds_central_and_outer_black_holes() -> v
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	config.black_hole_count = 6
 	config.star_count = 2
 	config.planets_per_star = 1
 	config.disturbance_body_count = 2
@@ -81,7 +82,7 @@ func test_dynamic_anchor_field_patch_builds_central_and_outer_black_holes() -> v
 
 	WorldBuilder.build_from_config(world, config)
 
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 5, "field patch should build one central black hole plus four ordered outer anchors")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 6, "field patch should build the configured total black-hole count")
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 2, "field patch should still build the configured stars")
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 2, "field patch should keep the configured planets per star")
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.ASTEROID), 2, "field patch should keep the configured disturbance count")

@@ -26,12 +26,16 @@ var _anchor_switch_count: int = 0
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
 @onready var _anchor_panel: PanelContainer = $AnchorPanel
 @onready var _live_bh_mass_spin: SpinBox = $AnchorPanel/VBox/SettingsGrid/LiveBHMassSpin
+@onready var _anchor_diagnostics_panel: PanelContainer = $AnchorDiagnosticsPanel
+@onready var _anchor_diagnostics_label: RichTextLabel = $AnchorDiagnosticsPanel/RichTextLabel
 @onready var _mode_option: OptionButton = $StartPanel/VBox/SettingsGrid/ModeOption
 @onready var _anchor_topology_label: Label = $StartPanel/VBox/SettingsGrid/AnchorTopologyLabel
 @onready var _anchor_topology_option: OptionButton = $StartPanel/VBox/SettingsGrid/AnchorTopologyOption
 @onready var _seed_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SeedSpin
 @onready var _bh_mass_label: Label = $StartPanel/VBox/SettingsGrid/BHMassLabel
 @onready var _bh_mass_spin: SpinBox = $StartPanel/VBox/SettingsGrid/BHMassSpin
+@onready var _black_hole_count_label: Label = $StartPanel/VBox/SettingsGrid/BlackHoleCountLabel
+@onready var _black_hole_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/BlackHoleCountSpin
 @onready var _star_count_label: Label = $StartPanel/VBox/SettingsGrid/StarCountLabel
 @onready var _star_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/StarCountSpin
 @onready var _planets_per_star_label: Label = $StartPanel/VBox/SettingsGrid/PlanetsPerStarLabel
@@ -164,6 +168,7 @@ func _update_stats_text() -> void:
 	var frame_ms: float = _last_frame_delta * 1000.0
 	_update_anchor_switch_tracking(anchor_stats["star_anchor_states"])
 	var star_anchor_lines: String = _format_star_anchor_lines(anchor_stats["star_anchor_states"])
+	_update_anchor_diagnostics_text(anchor_stats, star_anchor_lines)
 
 	_stats_label.text = (
 		"[code]"
@@ -184,7 +189,21 @@ func _update_stats_text() -> void:
 		+ "Radial avg      %.3f\n" % orbit_stats["average_radial_deviation"]
 		+ "Radial max      %.3f\n" % orbit_stats["max_radial_deviation"]
 		+ "Speed avg       %.3f\n\n" % orbit_stats["average_speed_deviation"]
-		+ "Anchor\n"
+		+ "Chaos / Unruhe\n"
+		+ "Collisions 3s   %d\n" % chaos_stats["collisions_last_3s"]
+		+ "Fragment press  %.2f\n" % chaos_stats["fragment_pressure"]
+		+ "Debris press    %.2f\n" % chaos_stats["debris_pressure"]
+		+ "Awake ratio     %.2f\n" % chaos_stats["awake_dynamic_ratio"]
+		+ "Chaos score     %d / 100" % chaos_stats["score"]
+		+ "[/code]"
+	)
+
+func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines: String) -> void:
+	if _anchor_diagnostics_label == null:
+		return
+	_anchor_diagnostics_label.text = (
+		"[code]"
+		+ "Anchor Diagnostics\n"
 		+ "BH count        %d\n" % anchor_stats["black_hole_count"]
 		+ "BH mass total   %.0f\n" % anchor_stats["black_hole_mass"]
 		+ "Star mass       %.0f\n" % anchor_stats["total_star_mass"]
@@ -195,13 +214,6 @@ func _update_stats_text() -> void:
 		+ "Min star-BH     %.0f\n" % anchor_stats["min_star_bh_distance"]
 		+ "BH switches     %d\n" % _anchor_switch_count
 		+ star_anchor_lines
-		+ "\n"
-		+ "Chaos / Unruhe\n"
-		+ "Collisions 3s   %d\n" % chaos_stats["collisions_last_3s"]
-		+ "Fragment press  %.2f\n" % chaos_stats["fragment_pressure"]
-		+ "Debris press    %.2f\n" % chaos_stats["debris_pressure"]
-		+ "Awake ratio     %.2f\n" % chaos_stats["awake_dynamic_ratio"]
-		+ "Chaos score     %d / 100" % chaos_stats["score"]
 		+ "[/code]"
 	)
 
@@ -223,6 +235,7 @@ func _sync_start_controls(config) -> void:
 	_anchor_topology_option.select(safe_config.anchor_topology)
 	_seed_spin.value = safe_config.seed
 	_bh_mass_spin.value = safe_config.black_hole_mass
+	_black_hole_count_spin.value = safe_config.black_hole_count
 	_star_count_spin.value = safe_config.star_count
 	_planets_per_star_spin.value = safe_config.planets_per_star
 	_star_inner_orbit_spin.value = safe_config.star_inner_orbit_au
@@ -240,7 +253,9 @@ func _sync_live_anchor_controls(config) -> void:
 	var safe_config = config.copy()
 	safe_config.clamp_values()
 	_live_bh_mass_spin.set_value_no_signal(safe_config.black_hole_mass)
-	_anchor_panel.visible = _sim != null and not _sim.get_black_holes().is_empty()
+	var has_anchors: bool = _sim != null and not _sim.get_black_holes().is_empty()
+	_anchor_panel.visible = has_anchors
+	_anchor_diagnostics_panel.visible = has_anchors
 
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
@@ -248,6 +263,7 @@ func _read_start_config():
 	config.anchor_topology = _anchor_topology_option.get_selected_id()
 	config.seed = int(_seed_spin.value)
 	config.black_hole_mass = _bh_mass_spin.value
+	config.black_hole_count = int(_black_hole_count_spin.value)
 	config.star_count = int(_star_count_spin.value)
 	config.planets_per_star = int(_planets_per_star_spin.value)
 	config.star_inner_orbit_au = _star_inner_orbit_spin.value
@@ -287,6 +303,8 @@ func _update_mode_specific_inputs() -> void:
 		_anchor_topology_option,
 	]
 	var field_patch_nodes: Array[CanvasItem] = [
+		_black_hole_count_label,
+		_black_hole_count_spin,
 		_field_spacing_label,
 		_field_spacing_spin,
 	]
@@ -313,6 +331,8 @@ func _update_mode_specific_inputs() -> void:
 	_field_patch_hint_label.visible = field_patch_enabled
 
 func _on_mode_selected(_index: int) -> void:
+	if _mode_option.get_selected_id() != START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR:
+		_anchor_topology_option.select(START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_update_mode_specific_inputs()
 
 func _on_anchor_topology_selected(_index: int) -> void:

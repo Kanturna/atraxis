@@ -27,6 +27,7 @@ const DEFAULT_STAR_COUNT: int = 2
 const DEFAULT_PLANETS_PER_STAR: int = 2
 const DEFAULT_STAR_INNER_ORBIT_AU: float = 4.0
 const DEFAULT_STAR_OUTER_ORBIT_AU: float = 20.0
+const DEFAULT_BLACK_HOLE_COUNT: int = 5
 const DEFAULT_FIELD_SPACING_AU: float = 9.0
 
 var mode: int = StartMode.DYNAMIC_ANCHOR
@@ -43,6 +44,7 @@ var star_count: int = DEFAULT_STAR_COUNT
 var planets_per_star: int = DEFAULT_PLANETS_PER_STAR
 var star_inner_orbit_au: float = DEFAULT_STAR_INNER_ORBIT_AU
 var star_outer_orbit_au: float = DEFAULT_STAR_OUTER_ORBIT_AU
+var black_hole_count: int = DEFAULT_BLACK_HOLE_COUNT
 var field_spacing_au: float = DEFAULT_FIELD_SPACING_AU
 
 func copy():
@@ -61,6 +63,7 @@ func copy():
 	config.planets_per_star = planets_per_star
 	config.star_inner_orbit_au = star_inner_orbit_au
 	config.star_outer_orbit_au = star_outer_orbit_au
+	config.black_hole_count = black_hole_count
 	config.field_spacing_au = field_spacing_au
 	return config
 
@@ -81,4 +84,5 @@ func clamp_values() -> void:
 	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
 	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
 	star_outer_orbit_au = maxf(star_outer_orbit_au, star_inner_orbit_au + 0.5)
+	black_hole_count = clampi(black_hole_count, 3, 9)
 	field_spacing_au = clampf(field_spacing_au, 6.0, 20.0)
