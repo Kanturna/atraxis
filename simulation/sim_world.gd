@@ -144,6 +144,18 @@ func get_black_hole() -> SimBody:
 			return body
 	return null
 
+func set_black_hole_mass(new_mass: float) -> void:
+	var black_hole: SimBody = get_black_hole()
+	if black_hole == null:
+		return
+	black_hole.mass = new_mass
+	for body in bodies:
+		if not body.active or body.body_type != SimBody.BodyType.STAR:
+			continue
+		if body.is_analytic_orbit_bound() and body.orbit_parent_id == black_hole.id and body.orbit_radius > 0.0:
+			var orbit_speed: float = sqrt(SimConstants.G * black_hole.mass / body.orbit_radius)
+			body.orbit_angular_speed = orbit_speed / body.orbit_radius
+
 func _update_scripted_orbiters(sim_dt: float) -> void:
 	for body in bodies:
 		if not body.active or not body.is_analytic_orbit_bound():

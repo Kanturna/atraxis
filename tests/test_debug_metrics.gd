@@ -81,6 +81,7 @@ func test_empty_world_metrics_are_stable() -> void:
 	var sim_stats: Dictionary = snapshot["simulation"]
 	var orbit: Dictionary = snapshot["orbit"]
 	var chaos: Dictionary = snapshot["chaos"]
+	var anchor: Dictionary = snapshot["anchor"]
 
 	assert_eq(sim_stats["active_bodies"], 0, "empty worlds should report zero active bodies")
 	assert_eq(sim_stats["dynamic_bodies"], 0, "empty worlds should report zero dynamic bodies")
@@ -92,6 +93,9 @@ func test_empty_world_metrics_are_stable() -> void:
 	assert_almost_eq(orbit["average_speed_deviation"], 0.0, 0.001, "empty worlds should not divide by zero for speed deviation")
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.0, 0.001, "empty worlds should not divide by zero for awake ratio")
 	assert_eq(chaos["score"], 0, "empty worlds should have a zero chaos score")
+	assert_almost_eq(anchor["black_hole_mass"], 0.0, 0.001, "empty worlds should report zero black-hole mass")
+	assert_eq(anchor["bound_stars"], 0, "empty worlds should report zero bound stars")
+	assert_eq(anchor["unbound_stars"], 0, "empty worlds should report zero unbound stars")
 
 func test_simulation_counts_include_sleeping_fragments_and_debris() -> void:
 	var world := SimWorld.new()
@@ -134,3 +138,40 @@ func test_simulation_counts_include_sleeping_fragments_and_debris() -> void:
 	assert_eq(sim_stats["fragment_count"], 1, "fragment count should include active fragments")
 	assert_eq(sim_stats["debris_count"], 1, "debris count should ignore inactive debris fields")
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.5, 0.001, "awake ratio should use active dynamic bodies only")
+
+func test_anchor_metrics_report_bound_and_unbound_stars() -> void:
+	var world := SimWorld.new()
+
+	var black_hole := SimBody.new()
+	black_hole.active = true
+	black_hole.body_type = SimBody.BodyType.BLACK_HOLE
+	black_hole.kinematic = true
+	black_hole.mass = 10_000_000.0
+	world.add_body(black_hole)
+
+	var bound_star := SimBody.new()
+	bound_star.active = true
+	bound_star.body_type = SimBody.BodyType.STAR
+	bound_star.kinematic = false
+	bound_star.mass = SimConstants.STAR_MASS
+	bound_star.position = Vector2(4000.0, 0.0)
+	bound_star.velocity = Vector2(0.0, 300.0)
+	world.add_body(bound_star)
+
+	var unbound_star := SimBody.new()
+	unbound_star.active = true
+	unbound_star.body_type = SimBody.BodyType.STAR
+	unbound_star.kinematic = false
+	unbound_star.mass = SimConstants.STAR_MASS
+	unbound_star.position = Vector2(-7000.0, 0.0)
+	unbound_star.velocity = Vector2(0.0, 700.0)
+	world.add_body(unbound_star)
+
+	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
+	var anchor: Dictionary = snapshot["anchor"]
+
+	assert_almost_eq(anchor["black_hole_mass"], black_hole.mass, 0.001, "anchor metrics should expose current black-hole mass")
+	assert_almost_eq(anchor["total_star_mass"], bound_star.mass + unbound_star.mass, 0.001, "anchor metrics should aggregate star mass")
+	assert_eq(anchor["bound_stars"], 1, "one star should remain bound to the black hole")
+	assert_eq(anchor["unbound_stars"], 1, "one star should be reported as unbound")
+	assert_almost_eq(anchor["anchor_ratio"], black_hole.mass / (bound_star.mass + unbound_star.mass), 0.001, "anchor ratio should compare BH mass to total star mass")

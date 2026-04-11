@@ -17,6 +17,8 @@ static func build_from_config(world: SimWorld, start_config) -> void:
 	safe_config.clamp_values()
 
 	match safe_config.mode:
+		START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR:
+			_build_dynamic_anchor(world, safe_config)
 		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
 			_build_chaos_inflow(world, safe_config)
 		_:
@@ -31,14 +33,30 @@ static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	bounds.outer_min = SimConstants.OUTER_ZONE_MIN * mass_factor
 	return bounds
 
+static func _build_dynamic_anchor(world: SimWorld, config) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = config.seed
+
+	var black_hole := _make_black_hole(config.black_hole_mass)
+	world.add_body(black_hole)
+
+	var stars := _place_dynamic_stars(black_hole, config, rng)
+	for star in stars:
+		world.add_body(star)
+	for star in stars:
+		for i in range(config.planets_per_star):
+			world.add_body(_make_core_planet(star, i, config.planets_per_star))
+	for i in range(config.disturbance_body_count):
+		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
+
 static func _build_stable_anchor(world: SimWorld, config) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = config.seed
 
-	var black_hole := _make_black_hole()
+	var black_hole := _make_black_hole(config.black_hole_mass)
 	world.add_body(black_hole)
 
-	var stars := _place_stars(black_hole, config, rng)
+	var stars := _place_analytic_stars(black_hole, config, rng)
 	for star in stars:
 		world.add_body(star)
 	for star in stars:
@@ -57,12 +75,12 @@ static func _build_chaos_inflow(world: SimWorld, config) -> void:
 	for i in range(config.chaos_body_count):
 		world.add_body(_make_inflow_body(star, config, rng, i))
 
-static func _make_black_hole() -> SimBody:
+static func _make_black_hole(mass: float) -> SimBody:
 	var body := SimBody.new()
 	body.body_type = SimBody.BodyType.BLACK_HOLE
 	body.influence_level = SimBody.InfluenceLevel.A
 	body.material_type = SimBody.MaterialType.STELLAR
-	body.mass = SimConstants.BLACK_HOLE_MASS
+	body.mass = mass
 	body.radius = SimConstants.BLACK_HOLE_RADIUS
 	body.position = Vector2.ZERO
 	body.velocity = Vector2.ZERO
@@ -85,8 +103,8 @@ static func _make_star() -> SimBody:
 	body.active = true
 	return body
 
-static func _place_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
-	var stars: Array = []
+static func _build_star_specs(config, rng: RandomNumberGenerator) -> Array:
+	var specs: Array = []
 	var n: int = config.star_count
 	var inner: float = config.star_inner_orbit_au * SimConstants.AU
 	var outer: float = config.star_outer_orbit_au * SimConstants.AU
@@ -107,21 +125,39 @@ static func _place_stars(black_hole: SimBody, config, rng: RandomNumberGenerator
 		var orbit_radius: float = exp(log_center + log_jitter)
 		var phase: float = (float(i) / float(n)) * TAU + rng.randf_range(-0.25, 0.25)
 		var mass_scale: float = rng.randf_range(0.7, 1.3)
+		specs.append({
+			"orbit_radius": orbit_radius,
+			"phase": phase,
+			"mass_scale": mass_scale,
+		})
 
-		var star := SimBody.new()
-		star.body_type = SimBody.BodyType.STAR
-		star.influence_level = SimBody.InfluenceLevel.A
-		star.material_type = SimBody.MaterialType.STELLAR
-		star.mass = SimConstants.STAR_MASS * mass_scale
-		star.radius = SimConstants.STAR_RADIUS * sqrt(mass_scale)
-		star.temperature = 5778.0
+	return specs
+
+static func _place_dynamic_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
+	var stars: Array = []
+	for spec in _build_star_specs(config, rng):
+		var star := _make_star()
+		star.mass = SimConstants.STAR_MASS * spec["mass_scale"]
+		star.radius = SimConstants.STAR_RADIUS * sqrt(spec["mass_scale"])
 		star.kinematic = false
 		star.scripted_orbit_enabled = false
 		star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
-		_place_in_orbit(star, black_hole, orbit_radius, phase, 0.0)
-		star.velocity *= config.sun_orbit_speed_scale
+		_place_in_orbit(star, black_hole, spec["orbit_radius"], spec["phase"], 0.0)
 		stars.append(star)
+	return stars
 
+static func _place_analytic_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
+	var stars: Array = []
+	for spec in _build_star_specs(config, rng):
+		var star := _make_star()
+		star.mass = SimConstants.STAR_MASS * spec["mass_scale"]
+		star.radius = SimConstants.STAR_RADIUS * sqrt(spec["mass_scale"])
+		star.kinematic = true
+		star.scripted_orbit_enabled = true
+		star.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
+		star.orbit_parent_id = black_hole.id
+		_place_in_orbit(star, black_hole, spec["orbit_radius"], spec["phase"], 0.0)
+		stars.append(star)
 	return stars
 
 static func _make_core_planet(star: SimBody, index: int, total_count: int) -> SimBody:

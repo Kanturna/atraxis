@@ -10,6 +10,7 @@ const DEBUG_METRICS_SCRIPT := preload("res://debug/debug_metrics.gd")
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 
 signal restart_requested(start_config)
+signal black_hole_mass_changed(new_mass: float)
 
 var _sim: SimWorld = null
 var _selected_id: int = -1
@@ -21,14 +22,20 @@ var _smoothed_frame_ms: float = 0.0
 
 @onready var _inspector: BodyInspector = $Inspector
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
+@onready var _anchor_panel: PanelContainer = $AnchorPanel
+@onready var _live_bh_mass_spin: SpinBox = $AnchorPanel/VBox/SettingsGrid/LiveBHMassSpin
 @onready var _mode_option: OptionButton = $StartPanel/VBox/SettingsGrid/ModeOption
 @onready var _seed_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SeedSpin
-@onready var _sun_orbit_radius_label: Label = $StartPanel/VBox/SettingsGrid/SunOrbitRadiusLabel
-@onready var _sun_orbit_radius_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SunOrbitRadiusSpin
-@onready var _sun_orbit_speed_label: Label = $StartPanel/VBox/SettingsGrid/SunOrbitSpeedLabel
-@onready var _sun_orbit_speed_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SunOrbitSpeedSpin
-@onready var _core_planet_count_label: Label = $StartPanel/VBox/SettingsGrid/CorePlanetCountLabel
-@onready var _core_planet_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/CorePlanetCountSpin
+@onready var _bh_mass_label: Label = $StartPanel/VBox/SettingsGrid/BHMassLabel
+@onready var _bh_mass_spin: SpinBox = $StartPanel/VBox/SettingsGrid/BHMassSpin
+@onready var _star_count_label: Label = $StartPanel/VBox/SettingsGrid/StarCountLabel
+@onready var _star_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/StarCountSpin
+@onready var _planets_per_star_label: Label = $StartPanel/VBox/SettingsGrid/PlanetsPerStarLabel
+@onready var _planets_per_star_spin: SpinBox = $StartPanel/VBox/SettingsGrid/PlanetsPerStarSpin
+@onready var _star_inner_orbit_label: Label = $StartPanel/VBox/SettingsGrid/StarInnerOrbitLabel
+@onready var _star_inner_orbit_spin: SpinBox = $StartPanel/VBox/SettingsGrid/StarInnerOrbitSpin
+@onready var _star_outer_orbit_label: Label = $StartPanel/VBox/SettingsGrid/StarOuterOrbitLabel
+@onready var _star_outer_orbit_spin: SpinBox = $StartPanel/VBox/SettingsGrid/StarOuterOrbitSpin
 @onready var _disturbance_count_label: Label = $StartPanel/VBox/SettingsGrid/DisturbanceCountLabel
 @onready var _disturbance_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/DisturbanceCountSpin
 @onready var _spawn_radius_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpawnRadiusSpin
@@ -45,12 +52,15 @@ var _smoothed_frame_ms: float = 0.0
 
 func _ready() -> void:
 	_mode_option.clear()
+	_mode_option.add_item("Dynamic Anchor", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR)
 	_mode_option.add_item("Stable Anchor", START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR)
 	_mode_option.add_item("Chaos Inflow", START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW)
 	if not _mode_option.item_selected.is_connected(_on_mode_selected):
 		_mode_option.item_selected.connect(_on_mode_selected)
 	if not _restart_button.pressed.is_connected(_on_restart_button_pressed):
 		_restart_button.pressed.connect(_on_restart_button_pressed)
+	if not _live_bh_mass_spin.value_changed.is_connected(_on_live_bh_mass_changed):
+		_live_bh_mass_spin.value_changed.connect(_on_live_bh_mass_changed)
 	_sync_start_controls(START_CONFIG_SCRIPT.new())
 
 func initialize(world: SimWorld, start_config = null) -> void:
@@ -66,6 +76,7 @@ func initialize(world: SimWorld, start_config = null) -> void:
 	_smoothed_frame_ms = 0.0
 	_inspector.display_body(null)
 	_sync_start_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
+	_sync_live_anchor_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
 	_update_stats_text()
 
 func toggle() -> void:
@@ -134,6 +145,7 @@ func _update_stats_text() -> void:
 	var sim_stats: Dictionary = snapshot["simulation"]
 	var orbit_stats: Dictionary = snapshot["orbit"]
 	var chaos_stats: Dictionary = snapshot["chaos"]
+	var anchor_stats: Dictionary = snapshot["anchor"]
 	var fps: int = Engine.get_frames_per_second()
 	var frame_ms: float = _last_frame_delta * 1000.0
 
@@ -156,6 +168,14 @@ func _update_stats_text() -> void:
 		+ "Radial avg      %.3f\n" % orbit_stats["average_radial_deviation"]
 		+ "Radial max      %.3f\n" % orbit_stats["max_radial_deviation"]
 		+ "Speed avg       %.3f\n\n" % orbit_stats["average_speed_deviation"]
+		+ "Anchor\n"
+		+ "BH mass         %.0f\n" % anchor_stats["black_hole_mass"]
+		+ "Star mass       %.0f\n" % anchor_stats["total_star_mass"]
+		+ "Anchor ratio    %.2f\n" % anchor_stats["anchor_ratio"]
+		+ "Stars bound     %d\n" % anchor_stats["bound_stars"]
+		+ "Stars unbound   %d\n" % anchor_stats["unbound_stars"]
+		+ "Min star-star   %.0f\n" % anchor_stats["min_star_star_distance"]
+		+ "Min star-BH     %.0f\n\n" % anchor_stats["min_star_bh_distance"]
 		+ "Chaos / Unruhe\n"
 		+ "Collisions 3s   %d\n" % chaos_stats["collisions_last_3s"]
 		+ "Fragment press  %.2f\n" % chaos_stats["fragment_pressure"]
@@ -181,9 +201,11 @@ func _sync_start_controls(config) -> void:
 	safe_config.clamp_values()
 	_mode_option.select(safe_config.mode)
 	_seed_spin.value = safe_config.seed
-	_sun_orbit_radius_spin.value = safe_config.sun_orbit_radius_au
-	_sun_orbit_speed_spin.value = safe_config.sun_orbit_speed_scale
-	_core_planet_count_spin.value = safe_config.core_planet_count
+	_bh_mass_spin.value = safe_config.black_hole_mass
+	_star_count_spin.value = safe_config.star_count
+	_planets_per_star_spin.value = safe_config.planets_per_star
+	_star_inner_orbit_spin.value = safe_config.star_inner_orbit_au
+	_star_outer_orbit_spin.value = safe_config.star_outer_orbit_au
 	_disturbance_count_spin.value = safe_config.disturbance_body_count
 	_spawn_radius_spin.value = safe_config.spawn_radius_au
 	_spawn_spread_spin.value = safe_config.spawn_spread_au
@@ -192,13 +214,21 @@ func _sync_start_controls(config) -> void:
 	_chaos_body_count_spin.value = safe_config.chaos_body_count
 	_update_mode_specific_inputs()
 
+func _sync_live_anchor_controls(config) -> void:
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+	_live_bh_mass_spin.set_value_no_signal(safe_config.black_hole_mass)
+	_anchor_panel.visible = _sim != null and _sim.get_black_hole() != null
+
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = _mode_option.get_selected_id()
 	config.seed = int(_seed_spin.value)
-	config.sun_orbit_radius_au = _sun_orbit_radius_spin.value
-	config.sun_orbit_speed_scale = _sun_orbit_speed_spin.value
-	config.core_planet_count = int(_core_planet_count_spin.value)
+	config.black_hole_mass = _bh_mass_spin.value
+	config.star_count = int(_star_count_spin.value)
+	config.planets_per_star = int(_planets_per_star_spin.value)
+	config.star_inner_orbit_au = _star_inner_orbit_spin.value
+	config.star_outer_orbit_au = _star_outer_orbit_spin.value
 	config.disturbance_body_count = int(_disturbance_count_spin.value)
 	config.spawn_radius_au = _spawn_radius_spin.value
 	config.spawn_spread_au = _spawn_spread_spin.value
@@ -211,12 +241,16 @@ func _read_start_config():
 func _update_mode_specific_inputs() -> void:
 	var chaos_enabled: bool = _mode_option.get_selected_id() == START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW
 	var stable_nodes: Array[CanvasItem] = [
-		_sun_orbit_radius_label,
-		_sun_orbit_radius_spin,
-		_sun_orbit_speed_label,
-		_sun_orbit_speed_spin,
-		_core_planet_count_label,
-		_core_planet_count_spin,
+		_bh_mass_label,
+		_bh_mass_spin,
+		_star_count_label,
+		_star_count_spin,
+		_planets_per_star_label,
+		_planets_per_star_spin,
+		_star_inner_orbit_label,
+		_star_inner_orbit_spin,
+		_star_outer_orbit_label,
+		_star_outer_orbit_spin,
 		_disturbance_count_label,
 		_disturbance_count_spin,
 	]
@@ -239,6 +273,10 @@ func _update_mode_specific_inputs() -> void:
 
 func _on_mode_selected(_index: int) -> void:
 	_update_mode_specific_inputs()
+
+func _on_live_bh_mass_changed(value: float) -> void:
+	_bh_mass_spin.set_value_no_signal(value)
+	black_hole_mass_changed.emit(value)
 
 func _on_restart_button_pressed() -> void:
 	restart_requested.emit(_read_start_config())

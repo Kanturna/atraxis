@@ -20,7 +20,8 @@ res://tests/test_debug_metrics.gd
 * test_calm_but_awake_world_stays_near_zero_chaos
 * test_empty_world_metrics_are_stable
 * test_simulation_counts_include_sleeping_fragments_and_debris
-5/5 passed.
+* test_anchor_metrics_report_bound_and_unbound_stars
+6/6 passed.
 
 
 res://tests/test_gravity.gd
@@ -34,21 +35,23 @@ res://tests/test_gravity_debug_data.gd
 * test_build_ring_specs_only_uses_active_stars
 * test_small_rings_under_screen_threshold_are_not_emitted
 * test_multiple_stars_build_separate_centers
-4/4 passed.
+* test_black_hole_also_contributes_gravity_debug_rings
+5/5 passed.
 
 
 res://tests/test_start_modes.gd
-* test_stable_mode_preserves_existing_mvp_reference_layout
-* test_chaos_mode_creates_dynamic_inflow_bodies
-* test_chaos_mode_same_seed_rebuilds_identical_start_state
-* test_chaos_mode_different_seed_changes_the_inflow_layout
+* test_default_config_prefers_dynamic_anchor
+* test_dynamic_anchor_builds_macro_topology_with_dynamic_stars
+* test_stable_anchor_builds_same_topology_with_analytic_stars
+* test_chaos_mode_creates_dynamic_inflow_bodies_without_black_hole
 4/4 passed.
 
 
 res://tests/test_world_builder.gd
-* test_world_builder_creates_phase1_mvp_layout
-* test_scripted_planet_orbit_advances_without_leaving_its_radius
-2/2 passed.
+* test_world_builder_creates_stable_anchor_reference_layout
+* test_bound_core_planet_advances_with_moving_parent
+* test_live_black_hole_mass_updates_analytic_star_carrier_speed
+3/3 passed.
 
 
 
@@ -60,10 +63,10 @@ res://tests/test_world_builder.gd
 Totals
 ------
 Scripts               6
-Tests                19
-Passing Tests        19
-Asserts             129
-Time              0.386s
+Tests                22
+Passing Tests        22
+Asserts             130
+Time              0.371s
 
 
 ---- All tests passed! ----

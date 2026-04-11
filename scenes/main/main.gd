@@ -35,6 +35,8 @@ const MAX_STEPS_PER_FRAME: int = 10
 func _ready() -> void:
 	if not _debug_overlay.restart_requested.is_connected(_on_restart_requested):
 		_debug_overlay.restart_requested.connect(_on_restart_requested)
+	if not _debug_overlay.black_hole_mass_changed.is_connected(_on_black_hole_mass_changed):
+		_debug_overlay.black_hole_mass_changed.connect(_on_black_hole_mass_changed)
 	restart_simulation(_current_start_config)
 
 # -------------------------------------------------------------------------
@@ -111,3 +113,9 @@ func _disconnect_world_signals() -> void:
 
 func _on_restart_requested(config) -> void:
 	restart_simulation(config)
+
+func _on_black_hole_mass_changed(new_mass: float) -> void:
+	_current_start_config.black_hole_mass = new_mass
+	_current_start_config.clamp_values()
+	if sim_world != null:
+		sim_world.set_black_hole_mass(_current_start_config.black_hole_mass)

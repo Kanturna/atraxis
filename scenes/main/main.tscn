@@ -36,7 +36,7 @@ script = ExtResource("3")
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 376.0
-offset_bottom = 316.0
+offset_bottom = 470.0
 
 [node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/StatsPanel" unique_id=499680202]
 custom_minimum_size = Vector2(340, 280)
@@ -44,6 +44,35 @@ layout_mode = 2
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
+
+[node name="AnchorPanel" type="PanelContainer" parent="DebugOverlay" unique_id=148800001]
+offset_left = 16.0
+offset_top = 486.0
+offset_right = 376.0
+offset_bottom = 576.0
+
+[node name="VBox" type="VBoxContainer" parent="DebugOverlay/AnchorPanel" unique_id=148800002]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="DebugOverlay/AnchorPanel/VBox" unique_id=148800003]
+layout_mode = 2
+text = "Anchor Tuning"
+
+[node name="SettingsGrid" type="GridContainer" parent="DebugOverlay/AnchorPanel/VBox" unique_id=148800004]
+layout_mode = 2
+columns = 2
+
+[node name="LiveBHMassLabel" type="Label" parent="DebugOverlay/AnchorPanel/VBox/SettingsGrid" unique_id=148800005]
+layout_mode = 2
+text = "Live BH Mass"
+
+[node name="LiveBHMassSpin" type="SpinBox" parent="DebugOverlay/AnchorPanel/VBox/SettingsGrid" unique_id=148800006]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 2000000.0
+max_value = 30000000.0
+step = 100000.0
+value = 12000000.0
 
 [node name="Inspector" type="PanelContainer" parent="DebugOverlay" unique_id=105414783]
 anchors_preset = 2
@@ -96,51 +125,75 @@ layout_mode = 2
 max_value = 999999.0
 rounded = true
 
-[node name="SunOrbitRadiusLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320001]
+[node name="BHMassLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320001]
 layout_mode = 2
-text = "Sun Orbit R"
+text = "BH Mass"
 
-[node name="SunOrbitRadiusSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320002]
+[node name="BHMassSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320002]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
-min_value = 2.5
-max_value = 8.0
-step = 0.1
-value = 4.0
+min_value = 2000000.0
+max_value = 30000000.0
+step = 100000.0
+value = 12000000.0
 
-[node name="SunOrbitSpeedLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320003]
+[node name="StarCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320003]
 layout_mode = 2
-text = "Orbit Speed"
+text = "Star Count"
 
-[node name="SunOrbitSpeedSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320004]
-custom_minimum_size = Vector2(170, 0)
-layout_mode = 2
-min_value = 0.2
-max_value = 2.0
-step = 0.05
-value = 1.0
-
-[node name="CorePlanetCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320005]
-layout_mode = 2
-text = "Core Planets"
-
-[node name="CorePlanetCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320006]
+[node name="StarCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320004]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
 min_value = 1.0
 max_value = 4.0
-value = 3.0
+value = 2.0
 rounded = true
 
-[node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320007]
+[node name="PlanetsPerStarLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320005]
+layout_mode = 2
+text = "Planets / Star"
+
+[node name="PlanetsPerStarSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320006]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 1.0
+max_value = 3.0
+value = 2.0
+rounded = true
+
+[node name="StarInnerOrbitLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320007]
+layout_mode = 2
+text = "Star Inner Orbit"
+
+[node name="StarInnerOrbitSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320008]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 3.5
+max_value = 8.0
+step = 0.1
+value = 4.0
+
+[node name="StarOuterOrbitLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320009]
+layout_mode = 2
+text = "Star Outer Orbit"
+
+[node name="StarOuterOrbitSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320010]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 6.0
+max_value = 40.0
+step = 0.1
+value = 20.0
+
+[node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320011]
 layout_mode = 2
 text = "Disturbances"
 
-[node name="DisturbanceCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320008]
+[node name="DisturbanceCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320012]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
 max_value = 8.0
-value = 6.0
+value = 4.0
 rounded = true
 
 [node name="SpawnRadiusLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=766452196]

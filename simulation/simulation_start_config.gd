@@ -4,30 +4,27 @@ class_name SimulationStartConfig
 extends RefCounted
 
 enum StartMode {
-	STABLE_ANCHOR = 0,
-	CHAOS_INFLOW = 1,
+	DYNAMIC_ANCHOR = 0,
+	STABLE_ANCHOR = 1,
+	CHAOS_INFLOW = 2,
 }
 
 const DEFAULT_SEED: int = 1337
-const DEFAULT_SUN_ORBIT_RADIUS_AU: float = 4.0
-const DEFAULT_SUN_ORBIT_SPEED_SCALE: float = 1.0
-const DEFAULT_CORE_PLANET_COUNT: int = 3
-const DEFAULT_DISTURBANCE_BODY_COUNT: int = 6
+const DEFAULT_BLACK_HOLE_MASS: float = 12_000_000.0
+const DEFAULT_DISTURBANCE_BODY_COUNT: int = 4
 const DEFAULT_SPAWN_RADIUS_AU: float = 3.2
 const DEFAULT_SPAWN_SPREAD_AU: float = 0.8
 const DEFAULT_INFLOW_SPEED_SCALE: float = 0.85
 const DEFAULT_TANGENTIAL_BIAS: float = 0.65
 const DEFAULT_CHAOS_BODY_COUNT: int = 4
-const DEFAULT_STAR_COUNT: int = 4
+const DEFAULT_STAR_COUNT: int = 2
 const DEFAULT_PLANETS_PER_STAR: int = 2
 const DEFAULT_STAR_INNER_ORBIT_AU: float = 4.0
 const DEFAULT_STAR_OUTER_ORBIT_AU: float = 20.0
 
-var mode: int = StartMode.STABLE_ANCHOR
+var mode: int = StartMode.DYNAMIC_ANCHOR
 var seed: int = DEFAULT_SEED
-var sun_orbit_radius_au: float = DEFAULT_SUN_ORBIT_RADIUS_AU
-var sun_orbit_speed_scale: float = DEFAULT_SUN_ORBIT_SPEED_SCALE
-var core_planet_count: int = DEFAULT_CORE_PLANET_COUNT
+var black_hole_mass: float = DEFAULT_BLACK_HOLE_MASS
 var disturbance_body_count: int = DEFAULT_DISTURBANCE_BODY_COUNT
 var spawn_radius_au: float = DEFAULT_SPAWN_RADIUS_AU
 var spawn_spread_au: float = DEFAULT_SPAWN_SPREAD_AU
@@ -43,9 +40,7 @@ func copy():
 	var config = get_script().new()
 	config.mode = mode
 	config.seed = seed
-	config.sun_orbit_radius_au = sun_orbit_radius_au
-	config.sun_orbit_speed_scale = sun_orbit_speed_scale
-	config.core_planet_count = core_planet_count
+	config.black_hole_mass = black_hole_mass
 	config.disturbance_body_count = disturbance_body_count
 	config.spawn_radius_au = spawn_radius_au
 	config.spawn_spread_au = spawn_spread_au
@@ -60,9 +55,7 @@ func copy():
 
 func clamp_values() -> void:
 	seed = maxi(seed, 0)
-	sun_orbit_radius_au = clampf(sun_orbit_radius_au, 2.5, 8.0)
-	sun_orbit_speed_scale = clampf(sun_orbit_speed_scale, 0.2, 2.0)
-	core_planet_count = clampi(core_planet_count, 1, 4)
+	black_hole_mass = clampf(black_hole_mass, 2_000_000.0, 30_000_000.0)
 	disturbance_body_count = clampi(disturbance_body_count, 0, 8)
 	spawn_radius_au = clampf(spawn_radius_au, 2.5, 12.0)
 	spawn_spread_au = clampf(spawn_spread_au, 0.0, 4.0)
@@ -73,3 +66,4 @@ func clamp_values() -> void:
 	planets_per_star = clampi(planets_per_star, 1, 3)
 	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
 	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
+	star_outer_orbit_au = maxf(star_outer_orbit_au, star_inner_orbit_au + 0.5)
