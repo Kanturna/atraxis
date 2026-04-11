@@ -78,6 +78,15 @@ const ANCHOR_DOMINANCE_THRESHOLD: float = 10.0
 const MAX_FIELD_PATCH_BLACK_HOLES: int = 61
 const ANCHOR_FIELD_RING_SLOT_SCALE: int = 6
 
+# --- Galaxy Cluster layout ---
+# Galaxy Cluster places BHs in N compact sub-clusters separated by large voids.
+# Each cluster uses the existing ring layout internally; clusters are positioned
+# using the same ring logic at macro scale.
+const DEFAULT_GALAXY_CLUSTER_COUNT: int = 7         # 1 centre + 6 in ring 1
+const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = 5.0 # BH spread within each cluster
+const DEFAULT_GALAXY_VOID_SCALE: float = 4.0        # inter-cluster spacing as multiple of cluster radius
+const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy topology
+
 # --- Dominant BH nearfield integration ---
 # Phase A is intentionally numerical only: bodies very close to a dominant BH
 # are integrated with smaller local timesteps so high speed resolves as

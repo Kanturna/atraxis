@@ -24,6 +24,16 @@ var _anchor_switch_count: int = 0
 var _left_panels_collapsed: bool = false
 var _right_panels_collapsed: bool = false
 
+# Galaxy Cluster controls — created programmatically in _ready() so the scene
+# file does not need to be modified for each new topology.
+var _galaxy_cluster_count_label: Label = null
+var _galaxy_cluster_count_spin: SpinBox = null
+var _galaxy_cluster_radius_label: Label = null
+var _galaxy_cluster_radius_spin: SpinBox = null
+var _galaxy_void_scale_label: Label = null
+var _galaxy_void_scale_spin: SpinBox = null
+var _galaxy_hint_label: Label = null
+
 @onready var _inspector: BodyInspector = $Inspector
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
 @onready var _stats_panel: PanelContainer = $StatsPanel
@@ -76,6 +86,8 @@ func _ready() -> void:
 	_anchor_topology_option.clear()
 	_anchor_topology_option.add_item("Central BH", START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
+	_anchor_topology_option.add_item("Galaxy Cluster", START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER)
+	_create_galaxy_controls()
 	if not _mode_option.item_selected.is_connected(_on_mode_selected):
 		_mode_option.item_selected.connect(_on_mode_selected)
 	if not _anchor_topology_option.item_selected.is_connected(_on_anchor_topology_selected):
@@ -241,6 +253,47 @@ func _prune_collision_timestamps() -> void:
 	while not _collision_timestamps.is_empty() and _collision_timestamps[0] < cutoff:
 		_collision_timestamps.remove_at(0)
 
+func _create_galaxy_controls() -> void:
+	var settings_grid: GridContainer = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid
+
+	_galaxy_cluster_count_label = Label.new()
+	_galaxy_cluster_count_label.text = "Cluster count"
+	settings_grid.add_child(_galaxy_cluster_count_label)
+	_galaxy_cluster_count_spin = SpinBox.new()
+	_galaxy_cluster_count_spin.min_value = 2
+	_galaxy_cluster_count_spin.max_value = 12
+	_galaxy_cluster_count_spin.step = 1
+	_galaxy_cluster_count_spin.value = SimConstants.DEFAULT_GALAXY_CLUSTER_COUNT
+	settings_grid.add_child(_galaxy_cluster_count_spin)
+
+	_galaxy_cluster_radius_label = Label.new()
+	_galaxy_cluster_radius_label.text = "Cluster radius AU"
+	settings_grid.add_child(_galaxy_cluster_radius_label)
+	_galaxy_cluster_radius_spin = SpinBox.new()
+	_galaxy_cluster_radius_spin.min_value = 1.0
+	_galaxy_cluster_radius_spin.max_value = 8.0
+	_galaxy_cluster_radius_spin.step = 0.5
+	_galaxy_cluster_radius_spin.value = SimConstants.DEFAULT_GALAXY_CLUSTER_RADIUS_AU
+	settings_grid.add_child(_galaxy_cluster_radius_spin)
+
+	_galaxy_void_scale_label = Label.new()
+	_galaxy_void_scale_label.text = "Void scale"
+	settings_grid.add_child(_galaxy_void_scale_label)
+	_galaxy_void_scale_spin = SpinBox.new()
+	_galaxy_void_scale_spin.min_value = 2.0
+	_galaxy_void_scale_spin.max_value = 6.0
+	_galaxy_void_scale_spin.step = 0.5
+	_galaxy_void_scale_spin.value = SimConstants.DEFAULT_GALAXY_VOID_SCALE
+	settings_grid.add_child(_galaxy_void_scale_spin)
+
+	# Hint label sits below the grid in the VBox, before the restart button.
+	_galaxy_hint_label = Label.new()
+	_galaxy_hint_label.text = "BHs in compact clusters with large voids between them."
+	_galaxy_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var vbox: VBoxContainer = _restart_button.get_parent()
+	vbox.add_child(_galaxy_hint_label)
+	vbox.move_child(_galaxy_hint_label, _restart_button.get_index())
+
 func _sync_start_controls(config) -> void:
 	if _mode_option == null:
 		return
@@ -256,6 +309,10 @@ func _sync_start_controls(config) -> void:
 	_star_inner_orbit_spin.value = safe_config.star_inner_orbit_au
 	_star_outer_orbit_spin.value = safe_config.star_outer_orbit_au
 	_field_spacing_spin.value = safe_config.field_spacing_au
+	if _galaxy_cluster_count_spin != null:
+		_galaxy_cluster_count_spin.value = safe_config.galaxy_cluster_count
+		_galaxy_cluster_radius_spin.value = safe_config.galaxy_cluster_radius_au
+		_galaxy_void_scale_spin.value = safe_config.galaxy_void_scale
 	_disturbance_count_spin.value = safe_config.disturbance_body_count
 	_spawn_radius_spin.value = safe_config.spawn_radius_au
 	_spawn_spread_spin.value = safe_config.spawn_spread_au
@@ -282,6 +339,10 @@ func _read_start_config():
 	config.star_inner_orbit_au = _star_inner_orbit_spin.value
 	config.star_outer_orbit_au = _star_outer_orbit_spin.value
 	config.field_spacing_au = _field_spacing_spin.value
+	if _galaxy_cluster_count_spin != null:
+		config.galaxy_cluster_count = int(_galaxy_cluster_count_spin.value)
+		config.galaxy_cluster_radius_au = _galaxy_cluster_radius_spin.value
+		config.galaxy_void_scale = _galaxy_void_scale_spin.value
 	config.disturbance_body_count = int(_disturbance_count_spin.value)
 	config.spawn_radius_au = _spawn_radius_spin.value
 	config.spawn_spread_au = _spawn_spread_spin.value
@@ -295,8 +356,11 @@ func _update_mode_specific_inputs() -> void:
 	var selected_mode: int = _mode_option.get_selected_id()
 	var chaos_enabled: bool = selected_mode == START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW
 	var dynamic_anchor_enabled: bool = selected_mode == START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	var selected_topology: int = _anchor_topology_option.get_selected_id()
 	var field_patch_enabled: bool = dynamic_anchor_enabled \
-		and _anchor_topology_option.get_selected_id() == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+		and selected_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	var galaxy_cluster_enabled: bool = dynamic_anchor_enabled \
+		and selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	var shared_anchor_nodes: Array[CanvasItem] = [
 		_bh_mass_label,
 		_bh_mass_spin,
@@ -339,6 +403,20 @@ func _update_mode_specific_inputs() -> void:
 		node.visible = dynamic_anchor_enabled
 	for node in field_patch_nodes:
 		node.visible = field_patch_enabled
+	var galaxy_nodes: Array = []
+	if _galaxy_cluster_count_label != null:
+		galaxy_nodes = [
+			_galaxy_cluster_count_label,
+			_galaxy_cluster_count_spin,
+			_galaxy_cluster_radius_label,
+			_galaxy_cluster_radius_spin,
+			_galaxy_void_scale_label,
+			_galaxy_void_scale_spin,
+		]
+	for node in galaxy_nodes:
+		node.visible = galaxy_cluster_enabled
+	if _galaxy_hint_label != null:
+		_galaxy_hint_label.visible = galaxy_cluster_enabled
 	for node in chaos_nodes:
 		node.visible = chaos_enabled
 	_field_patch_hint_label.visible = field_patch_enabled

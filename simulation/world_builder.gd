@@ -42,6 +42,8 @@ static func _build_dynamic_anchor(world: SimWorld, config) -> void:
 	match config.anchor_topology:
 		START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
 			_build_dynamic_anchor_field_patch(world, config, rng)
+		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER:
+			_build_dynamic_anchor_galaxy_cluster(world, config, rng)
 		_:
 			_build_dynamic_anchor_central_bh(world, config, rng)
 
@@ -75,6 +77,32 @@ static func _build_dynamic_anchor_field_patch(world: SimWorld, config, rng: Rand
 	# all black holes in the patch. This keeps the rollout honest and incremental:
 	# field patch currently means "multi-BH gravity field", not yet "one star
 	# system per BH".
+	var stars := _place_dynamic_stars(central_spawn_black_hole, config, rng)
+	for star in stars:
+		world.add_body(star)
+	for star in stars:
+		for i in range(config.planets_per_star):
+			world.add_body(_make_core_planet(star, i, config.planets_per_star))
+	for i in range(config.disturbance_body_count):
+		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
+
+static func _build_dynamic_anchor_galaxy_cluster(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
+	var central_spawn_black_hole: SimBody = null
+	for spec in ANCHOR_FIELD_SCRIPT.build_galaxy_cluster_specs(
+			config.black_hole_count,
+			config.galaxy_cluster_count,
+			config.galaxy_cluster_radius_au,
+			config.galaxy_void_scale,
+			config.black_hole_mass):
+		var black_hole := _make_black_hole(spec["mass"])
+		black_hole.position = spec["position"]
+		world.add_body(black_hole)
+		if spec["is_central"]:
+			central_spawn_black_hole = black_hole
+
+	# Stars and planets orbit the central cluster's central BH, consistent with
+	# the field-patch approach: multi-BH gravity field shapes the dynamics,
+	# but initial star placement is anchored to a single reference point.
 	var stars := _place_dynamic_stars(central_spawn_black_hole, config, rng)
 	for star in stars:
 		world.add_body(star)

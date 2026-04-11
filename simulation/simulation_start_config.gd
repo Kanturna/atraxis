@@ -13,6 +13,7 @@ enum StartMode {
 enum AnchorTopology {
 	CENTRAL_BH = 0,
 	FIELD_PATCH = 1,
+	GALAXY_CLUSTER = 2,
 }
 
 const DEFAULT_SEED: int = 1337
@@ -29,6 +30,9 @@ const DEFAULT_STAR_INNER_ORBIT_AU: float = 4.0
 const DEFAULT_STAR_OUTER_ORBIT_AU: float = 20.0
 const DEFAULT_BLACK_HOLE_COUNT: int = 5
 const DEFAULT_FIELD_SPACING_AU: float = 9.0
+const DEFAULT_GALAXY_CLUSTER_COUNT: int = SimConstants.DEFAULT_GALAXY_CLUSTER_COUNT
+const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = SimConstants.DEFAULT_GALAXY_CLUSTER_RADIUS_AU
+const DEFAULT_GALAXY_VOID_SCALE: float = SimConstants.DEFAULT_GALAXY_VOID_SCALE
 
 var mode: int = StartMode.DYNAMIC_ANCHOR
 var anchor_topology: int = AnchorTopology.CENTRAL_BH
@@ -46,6 +50,9 @@ var star_inner_orbit_au: float = DEFAULT_STAR_INNER_ORBIT_AU
 var star_outer_orbit_au: float = DEFAULT_STAR_OUTER_ORBIT_AU
 var black_hole_count: int = DEFAULT_BLACK_HOLE_COUNT
 var field_spacing_au: float = DEFAULT_FIELD_SPACING_AU
+var galaxy_cluster_count: int = DEFAULT_GALAXY_CLUSTER_COUNT
+var galaxy_cluster_radius_au: float = DEFAULT_GALAXY_CLUSTER_RADIUS_AU
+var galaxy_void_scale: float = DEFAULT_GALAXY_VOID_SCALE
 
 func copy():
 	var config = get_script().new()
@@ -65,13 +72,16 @@ func copy():
 	config.star_outer_orbit_au = star_outer_orbit_au
 	config.black_hole_count = black_hole_count
 	config.field_spacing_au = field_spacing_au
+	config.galaxy_cluster_count = galaxy_cluster_count
+	config.galaxy_cluster_radius_au = galaxy_cluster_radius_au
+	config.galaxy_void_scale = galaxy_void_scale
 	return config
 
 func clamp_values() -> void:
 	seed = maxi(seed, 0)
 	# Anchor topologies belong to the Dynamic Anchor mainline only.
 	# Other modes intentionally fall back to the central single-BH setup.
-	anchor_topology = clampi(anchor_topology, AnchorTopology.CENTRAL_BH, AnchorTopology.FIELD_PATCH)
+	anchor_topology = clampi(anchor_topology, AnchorTopology.CENTRAL_BH, AnchorTopology.GALAXY_CLUSTER)
 	black_hole_mass = clampf(black_hole_mass, 2_000_000.0, 30_000_000.0)
 	disturbance_body_count = clampi(disturbance_body_count, 0, 8)
 	spawn_radius_au = clampf(spawn_radius_au, 2.5, 12.0)
@@ -84,5 +94,11 @@ func clamp_values() -> void:
 	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
 	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
 	star_outer_orbit_au = maxf(star_outer_orbit_au, star_inner_orbit_au + 0.5)
-	black_hole_count = clampi(black_hole_count, 1, SimConstants.MAX_FIELD_PATCH_BLACK_HOLES)
+	var max_bh: int = SimConstants.MAX_GALAXY_BLACK_HOLES \
+		if anchor_topology == AnchorTopology.GALAXY_CLUSTER \
+		else SimConstants.MAX_FIELD_PATCH_BLACK_HOLES
+	black_hole_count = clampi(black_hole_count, 1, max_bh)
 	field_spacing_au = clampf(field_spacing_au, 6.0, 20.0)
+	galaxy_cluster_count = clampi(galaxy_cluster_count, 2, 12)
+	galaxy_cluster_radius_au = clampf(galaxy_cluster_radius_au, 1.0, 8.0)
+	galaxy_void_scale = clampf(galaxy_void_scale, 2.0, 6.0)

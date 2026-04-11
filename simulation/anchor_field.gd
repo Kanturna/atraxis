@@ -124,6 +124,62 @@ static func build_star_anchor_state(star: SimBody, black_holes: Array) -> Dictio
 		"dominant_distance": ranked[0]["distance"],
 	}
 
+## build_galaxy_cluster_specs
+## Distributes total_count black holes across cluster_count compact sub-clusters
+## that are themselves arranged in the same concentric-ring pattern used by
+## build_field_patch_specs.  The two-level recursion means both scales reuse
+## identical geometry — no separate algorithm is needed.
+##
+## cluster_radius_au  — BH spread within a single cluster (tight)
+## void_scale         — cluster-centre spacing = void_scale × cluster_radius_au
+##                      (typically 3–5 so clusters are visually separated by voids)
+##
+## The spec dict returned per BH contains all fields from build_field_patch_specs
+## plus "cluster_index: int" for diagnostics.
+static func build_galaxy_cluster_specs(
+		total_count: int,
+		cluster_count: int,
+		cluster_radius_au: float,
+		void_scale: float,
+		mass: float) -> Array:
+	var safe_total: int = maxi(total_count, 1)
+	var safe_clusters: int = clampi(cluster_count, 1, safe_total)
+
+	# Macro-level: place cluster centres using the same ring layout.
+	# The inter-cluster spacing is void_scale × cluster_radius_au so voids
+	# between clusters are clearly larger than the clusters themselves.
+	var cluster_spacing_au: float = cluster_radius_au * void_scale
+	var cluster_centre_specs: Array = build_field_patch_specs(safe_clusters, cluster_spacing_au, mass)
+
+	# Distribute BHs as evenly as possible across clusters.
+	var base_per_cluster: int = safe_total / safe_clusters
+	var remainder: int = safe_total % safe_clusters
+
+	var all_specs: Array = []
+	var next_id: int = 0
+
+	for cluster_idx in range(cluster_centre_specs.size()):
+		var centre_spec: Dictionary = cluster_centre_specs[cluster_idx]
+		var centre_pos: Vector2 = centre_spec["position"]
+		var bh_in_cluster: int = base_per_cluster + (1 if cluster_idx < remainder else 0)
+		if bh_in_cluster <= 0:
+			continue
+
+		# Micro-level: ring layout within the cluster.
+		var inner_specs: Array = build_field_patch_specs(bh_in_cluster, cluster_radius_au, mass)
+
+		for inner_spec in inner_specs:
+			var spec: Dictionary = inner_spec.duplicate()
+			spec["id"] = next_id
+			spec["position"] = centre_pos + inner_spec["position"]
+			# Global is_central: only the central BH of cluster 0 (nearest origin).
+			spec["is_central"] = cluster_idx == 0 and inner_spec["is_central"]
+			spec["cluster_index"] = cluster_idx
+			all_specs.append(spec)
+			next_id += 1
+
+	return all_specs
+
 static func _spread_slot_indices(slot_count: int, used_count: int) -> Array:
 	var indices: Array = []
 	if used_count >= slot_count:
