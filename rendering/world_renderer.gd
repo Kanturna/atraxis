@@ -1,0 +1,46 @@
+## world_renderer.gd
+## Orchestrates all rendering sub-layers.
+## Wired to SimWorld signals to add/remove visuals reactively.
+## Reads sim state each frame via render_frame(); never writes to simulation.
+class_name WorldRenderer
+extends Node2D
+
+@onready var _zone_layer: Node2D = $ZoneLayer
+@onready var _trail_layer: Node2D = $TrailLayer
+@onready var _body_layer: Node2D = $BodyLayer
+@onready var _debris_layer: Node2D = $DebrisLayer
+
+var _body_renderer: BodyRenderer
+var _trail_renderer: TrailRenderer
+var _zone_renderer: ZoneRenderer
+var _debris_renderer: DebrisRenderer
+
+func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
+	_body_renderer = BodyRenderer.new()
+	_trail_renderer = TrailRenderer.new()
+	_zone_renderer = ZoneRenderer.new()
+	_debris_renderer = DebrisRenderer.new()
+
+	_zone_layer.add_child(_zone_renderer)
+	_trail_layer.add_child(_trail_renderer)
+	_body_layer.add_child(_body_renderer)
+	_debris_layer.add_child(_debris_renderer)
+
+	_zone_renderer.setup(zones)
+
+	# Create visuals for bodies already in the world
+	for body in world.bodies:
+		_on_body_added(body)
+
+func render_frame(world: SimWorld) -> void:
+	_body_renderer.update_all(world.bodies)
+	_trail_renderer.update_all(world.bodies)
+	_debris_renderer.update_all(world.debris_fields)
+
+func _on_body_added(body: SimBody) -> void:
+	_body_renderer.add_body_visual(body)
+	_trail_renderer.add_trail(body)
+
+func _on_body_removed(body_id: int) -> void:
+	_body_renderer.remove_body_visual(body_id)
+	_trail_renderer.remove_trail(body_id)
