@@ -1,73 +1,77 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene format=3 uid="uid://de3hh1iuvrwyp"]
 
-[ext_resource type="Script" path="res://scenes/main/main.gd" id="1"]
-[ext_resource type="Script" path="res://rendering/world_renderer.gd" id="2"]
-[ext_resource type="Script" path="res://debug/debug_overlay.gd" id="3"]
-[ext_resource type="Script" path="res://debug/body_inspector.gd" id="4"]
-[ext_resource type="Script" path="res://ui/hud.gd" id="5"]
-[ext_resource type="Script" path="res://scenes/main/sim_camera.gd" id="6"]
+[ext_resource type="Script" uid="uid://crcsbe548cxxk" path="res://scenes/main/main.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwih3gepdo0au" path="res://rendering/world_renderer.gd" id="2"]
+[ext_resource type="Script" uid="uid://dg2dkbfynhahi" path="res://debug/debug_overlay.gd" id="3"]
+[ext_resource type="Script" uid="uid://s0ewyy74kju3" path="res://debug/body_inspector.gd" id="4"]
+[ext_resource type="Script" uid="uid://dxncycanh5wee" path="res://ui/hud.gd" id="5"]
+[ext_resource type="Script" uid="uid://vju4tejhmdhd" path="res://scenes/main/sim_camera.gd" id="6"]
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node2D" unique_id=1670842342]
 script = ExtResource("1")
 
-[node name="WorldRenderer" type="Node2D" parent="."]
+[node name="WorldRenderer" type="Node2D" parent="." unique_id=1351301095]
 script = ExtResource("2")
 
-[node name="ZoneLayer" type="Node2D" parent="WorldRenderer"]
+[node name="ZoneLayer" type="Node2D" parent="WorldRenderer" unique_id=955183476]
 
-[node name="TrailLayer" type="Node2D" parent="WorldRenderer"]
+[node name="TrailLayer" type="Node2D" parent="WorldRenderer" unique_id=615677517]
 
-[node name="BodyLayer" type="Node2D" parent="WorldRenderer"]
+[node name="BodyLayer" type="Node2D" parent="WorldRenderer" unique_id=2002159143]
 
-[node name="DebrisLayer" type="Node2D" parent="WorldRenderer"]
+[node name="DebrisLayer" type="Node2D" parent="WorldRenderer" unique_id=1338548485]
 
-[node name="Camera2D" type="Camera2D" parent="."]
-script = ExtResource("6")
+[node name="Camera2D" type="Camera2D" parent="." unique_id=1092101087]
 zoom = Vector2(0.5, 0.5)
 position_smoothing_enabled = true
+script = ExtResource("6")
 
-[node name="DebugOverlay" type="CanvasLayer" parent="."]
-script = ExtResource("3")
+[node name="DebugOverlay" type="CanvasLayer" parent="." unique_id=1696416256]
 visible = false
+script = ExtResource("3")
 
-[node name="Inspector" type="PanelContainer" parent="DebugOverlay"]
-script = ExtResource("4")
+[node name="Inspector" type="PanelContainer" parent="DebugOverlay" unique_id=105414783]
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_top = -260.0
 offset_right = 350.0
+script = ExtResource("4")
 
-[node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/Inspector"]
+[node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/Inspector" unique_id=325859929]
+custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
 bbcode_enabled = true
 fit_content = true
-custom_minimum_size = Vector2(0, 240)
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1701775918]
 script = ExtResource("5")
 
-[node name="Panel" type="PanelContainer" parent="HUD"]
+[node name="Panel" type="PanelContainer" parent="HUD" unique_id=1603969678]
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -230.0
+offset_left = -320.0
 offset_bottom = 140.0
 
-[node name="VBox" type="VBoxContainer" parent="HUD/Panel"]
+[node name="VBox" type="VBoxContainer" parent="HUD/Panel" unique_id=2054800351]
 layout_mode = 2
 
-[node name="TimeLabel" type="Label" parent="HUD/Panel/VBox"]
+[node name="TimeLabel" type="Label" parent="HUD/Panel/VBox" unique_id=950216451]
+layout_mode = 2
 text = "T+ 0.0 days"
 
-[node name="CountLabel" type="Label" parent="HUD/Panel/VBox"]
+[node name="CountLabel" type="Label" parent="HUD/Panel/VBox" unique_id=341416982]
+layout_mode = 2
 text = "Bodies: 0"
 
-[node name="ScaleLabel" type="Label" parent="HUD/Panel/VBox"]
+[node name="ScaleLabel" type="Label" parent="HUD/Panel/VBox" unique_id=1288875695]
+layout_mode = 2
 text = "Speed: x1"
 
-[node name="ScaleSlider" type="HSlider" parent="HUD/Panel/VBox"]
+[node name="ScaleSlider" type="HSlider" parent="HUD/Panel/VBox" unique_id=1868359225]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
 min_value = 0.1
 max_value = 500.0
-value = 1.0
-custom_minimum_size = Vector2(200, 0)
+value = 1.1

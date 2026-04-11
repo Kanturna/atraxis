@@ -1,0 +1,51 @@
+Godot Engine v4.6.2.stable.official.71f334935 - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+---  GUT  ---
+[INFO]:  using [d:/Projekte/Godot/atraxis/.tmp_appdata/Godot/app_userdata/Atraxis] for temporary output.
+Godot version:  4.6.2
+GUT version:  9.6.0
+
+
+res://tests/test_collision.gd
+* test_broadphase_detects_star_overlap_before_grid_neighbors
+* test_star_impact_removes_impactor_and_spawns_debris
+2/2 passed.
+
+
+res://tests/test_gravity.gd
+* test_kinematic_source_accelerates_dynamic_target
+* test_kinematic_target_does_not_collect_acceleration
+2/2 passed.
+
+
+res://tests/test_world_builder.gd
+* test_world_builder_creates_phase1_mvp_layout
+* test_scripted_planet_orbit_advances_without_leaving_its_radius
+2/2 passed.
+
+
+
+
+==============================================
+= Run Summary
+==============================================
+
+Totals
+------
+Scripts               3
+Tests                 6
+Passing Tests         6
+Asserts              26
+Time              0.397s
+
+
+---- All tests passed! ----
+
+ERROR: Capture not registered: 'signal_debugger'.
+   at: unregister_message_capture (core/debugger/engine_debugger.cpp:62)
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+   at: cleanup (core/object/object.cpp:2641)
+ERROR: 6 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:810)
