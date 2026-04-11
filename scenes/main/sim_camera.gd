@@ -2,13 +2,13 @@
 ## Simple pan + zoom camera for the 2D space simulation.
 ## Pan: middle-mouse drag. Zoom: scroll wheel.
 ##
-## PhantomCamera2D can be layered on top later for body-following
-## or cinematic sequences — this baseline is intentionally minimal.
+## Phase 1 keeps this Camera2D implementation on purpose.
+## Phantom Camera stays installed but is intentionally not integrated yet.
 extends Camera2D
 
 const ZOOM_SPEED: float = 0.15
-const ZOOM_MIN: float   = 0.05
-const ZOOM_MAX: float   = 5.0
+const ZOOM_MIN: float = 0.05
+const ZOOM_MAX: float = 5.0
 
 var _dragging: bool = false
 var _drag_origin: Vector2 = Vector2.ZERO
@@ -33,7 +33,6 @@ func _input(event: InputEvent) -> void:
 func _zoom_at(screen_point: Vector2, factor: float) -> void:
 	var old_zoom: float = zoom.x
 	var new_zoom: float = clamp(old_zoom * factor, ZOOM_MIN, ZOOM_MAX)
-	# Shift position so the point under the cursor stays fixed
 	var world_point: Vector2 = get_screen_center_position() + \
 			(screen_point - get_viewport().get_visible_rect().size * 0.5) / zoom
 	zoom = Vector2.ONE * new_zoom

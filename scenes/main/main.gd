@@ -8,8 +8,8 @@ extends Node2D
 # -------------------------------------------------------------------------
 
 @onready var _world_renderer: WorldRenderer = $WorldRenderer
-@onready var _debug_overlay: CanvasLayer   = $DebugOverlay
-@onready var _hud: CanvasLayer             = $HUD
+@onready var _debug_overlay: DebugOverlay = $DebugOverlay
+@onready var _hud: HUD = $HUD
 
 # -------------------------------------------------------------------------
 # Simulation state
@@ -48,6 +48,8 @@ func _ready() -> void:
 	_world_renderer.initialize(sim_world, _zone_bounds)
 	_debug_overlay.initialize(sim_world)
 	_hud.initialize(sim_world)
+	_world_renderer.render_frame(sim_world)
+	_hud.update_display(sim_world)
 
 # -------------------------------------------------------------------------
 # Main loop

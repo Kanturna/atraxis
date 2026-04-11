@@ -1,6 +1,6 @@
 ## sim_body.gd
 ## Data container for a single simulated body.
-## Pure RefCounted — no Godot scene tree dependencies.
+## Pure RefCounted - no Godot scene tree dependencies.
 class_name SimBody
 extends RefCounted
 
@@ -9,19 +9,19 @@ extends RefCounted
 # -------------------------------------------------------------------------
 
 enum BodyType {
-	STAR         = 0,
-	PLANET       = 1,
-	ASTEROID     = 2,
-	FRAGMENT     = 3,
+	STAR = 0,
+	PLANET = 1,
+	ASTEROID = 2,
+	FRAGMENT = 3,
 	DEBRIS_FIELD = 4,
 }
 
 enum MaterialType {
-	STELLAR  = 0,
-	ROCKY    = 1,
-	ICY      = 2,
+	STELLAR = 0,
+	ROCKY = 1,
+	ICY = 2,
 	METALLIC = 3,
-	MIXED    = 4,
+	MIXED = 4,
 }
 
 ## Gravity hierarchy level.
@@ -59,14 +59,26 @@ var acceleration: Vector2 = Vector2.ZERO
 var temperature: float = 200.0
 
 # -------------------------------------------------------------------------
-# MVP extension hook: kinematic bodies are "fixed" this phase
-# kinematic=true → _integrate() skips this body (star, planets in MVP)
-# kinematic=false → body moves under gravity (default for B/C bodies)
-#
-# Phase 2 upgrade: simply set kinematic=false on planets to enable
-# full N-body mutual attraction without any other changes.
+# Phase-1 motion model
 # -------------------------------------------------------------------------
+
+# kinematic=true skips the generic N-body integrator.
+# In Phase 1 the star is fixed and planets can still move analytically through
+# scripted_orbit_enabled while remaining outside the N-body integrator.
+# kinematic=false means the body moves under gravity and collisions.
+#
+# Phase 2 upgrade: set kinematic=false on planets and disable scripted orbiting
+# to move them into full N-body mutual attraction.
 var kinematic: bool = false
+
+## Phase-1 scripted orbit support for kinematic planets.
+## These bodies are analytically advanced each tick before gravity is applied
+## so other bodies see the updated planet position immediately.
+var scripted_orbit_enabled: bool = false
+var orbit_center: Vector2 = Vector2.ZERO
+var orbit_radius: float = 0.0
+var orbit_angle: float = 0.0
+var orbit_angular_speed: float = 0.0
 
 # -------------------------------------------------------------------------
 # Lifecycle
@@ -95,7 +107,7 @@ var debris_mass: float = 0.0
 # Bookkeeping
 # -------------------------------------------------------------------------
 
-var age: float = 0.0       # seconds since body was created
+var age: float = 0.0
 var sleep_timer: float = 0.0
 
 # -------------------------------------------------------------------------

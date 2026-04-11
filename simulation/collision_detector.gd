@@ -18,18 +18,28 @@ func broadphase(bodies: Array) -> Array:
 	var candidates: Array = []
 	var grid: Dictionary = {}
 	var cell_size: float = _estimate_cell_size(bodies)
+	var checked: Dictionary = {}
+	var star_bodies: Array = []
 
 	# Insert bodies into grid
 	for body in bodies:
 		if not body.active or body.sleeping:
 			continue
+		if body.body_type == SimBody.BodyType.STAR:
+			star_bodies.append(body)
 		var cell: Vector2i = _cell(body.position, cell_size)
 		if not grid.has(cell):
 			grid[cell] = []
 		grid[cell].append(body)
 
+	# Dedicated star-against-all pass so star impacts do not depend on grid size.
+	for star in star_bodies:
+		for body in bodies:
+			if not body.active or body.sleeping or body.id == star.id:
+				continue
+			_append_if_overlapping(candidates, checked, star, body)
+
 	# Check each cell against itself and 8 neighbors
-	var checked: Dictionary = {}
 	for cell in grid.keys():
 		var all_neighbors: Array = _neighbor_cells(cell)
 		for neighbor in all_neighbors:
@@ -41,14 +51,7 @@ func broadphase(bodies: Array) -> Array:
 				for bb in list_b:
 					if ba.id == bb.id:
 						continue
-					var key: int = _pair_key(ba.id, bb.id)
-					if checked.has(key):
-						continue
-					checked[key] = true
-					# Quick radius overlap pre-filter
-					var sum_r: float = ba.radius + bb.radius
-					if ba.position.distance_squared_to(bb.position) <= sum_r * sum_r:
-						candidates.append([ba, bb])
+					_append_if_overlapping(candidates, checked, ba, bb)
 
 	return candidates
 
@@ -105,3 +108,13 @@ func _pair_key(id_a: int, id_b: int) -> int:
 	var lo: int = min(id_a, id_b)
 	var hi: int = max(id_a, id_b)
 	return lo * 100_000 + hi
+
+func _append_if_overlapping(candidates: Array, checked: Dictionary,
+		body_a: SimBody, body_b: SimBody) -> void:
+	var key: int = _pair_key(body_a.id, body_b.id)
+	if checked.has(key):
+		return
+	checked[key] = true
+	var sum_r: float = body_a.radius + body_b.radius
+	if body_a.position.distance_squared_to(body_b.position) <= sum_r * sum_r:
+		candidates.append([body_a, body_b])

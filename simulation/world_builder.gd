@@ -82,7 +82,8 @@ static func _make_planet(star: SimBody, orbital_radius: float, mass: float,
 		SimConstants.PLANET_RADIUS_MAX
 	)
 	b.temperature = temperature
-	b.kinematic = true  # MVP: planets are fixed; Phase 2: set false for N-body
+	b.kinematic = true
+	b.scripted_orbit_enabled = true
 	_place_in_orbit(b, star, orbital_radius, start_angle, 0.0)
 	return b
 
@@ -122,3 +123,7 @@ static func _place_in_orbit(body: SimBody, parent: SimBody,
 	# Using (-sin, cos) avoids floating-point error from angle addition
 	var tangent: Vector2 = Vector2(-sin(angle), cos(angle))
 	body.velocity = parent.velocity + tangent * speed
+	body.orbit_center = parent.position
+	body.orbit_radius = orbital_radius
+	body.orbit_angle = angle
+	body.orbit_angular_speed = speed / orbital_radius if orbital_radius > 0.0 else 0.0

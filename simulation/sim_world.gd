@@ -46,15 +46,19 @@ func _init() -> void:
 func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
 
-	# 1. Reset per-frame transient acceleration
+	# 1. Scripted orbiters update before gravity so B/C bodies see their
+	#    current-tick positions during acceleration and collision evaluation.
+	_update_scripted_orbiters(sim_dt)
+
+	# 2. Reset per-frame transient acceleration
 	for body in bodies:
 		if body.active:
 			body.acceleration = Vector2.ZERO
 
-	# 2. Gravity (hierarchy-aware)
+	# 3. Gravity (hierarchy-aware)
 	_gravity.apply_gravity(bodies)
 
-	# 3. Symplectic Euler integration
+	# 4. Symplectic Euler integration
 	#    Update velocity first, then position — conserves orbital energy better
 	#    than standard Euler.
 	for body in bodies:
@@ -64,9 +68,9 @@ func step_sim(dt: float) -> void:
 		body.position += body.velocity * sim_dt
 		body.age += sim_dt
 
-	# 4. Sleep state management
+	# 5. Sleep state management
 	for body in bodies:
-		if not body.active or body.kinematic:
+		if not body.active or body.kinematic or body.scripted_orbit_enabled:
 			continue
 		if body.check_sleep_eligible():
 			body.sleep_timer += sim_dt
@@ -75,7 +79,7 @@ func step_sim(dt: float) -> void:
 		else:
 			body.reset_sleep_timer()
 
-	# 5 + 6. Collision detection and resolution
+	# 6. Collision detection and resolution
 	var pairs: Array = _detector.broadphase(bodies)
 	for pair in pairs:
 		var result: CollisionDetector.CollisionResult = _detector.narrowphase(pair[0], pair[1])
@@ -83,8 +87,9 @@ func step_sim(dt: float) -> void:
 			_resolver.resolve(result)
 			collision_occurred.emit(result.body_a.position)
 
-	# 7. Debris field aggregation (merge fields that have drifted together)
+	# 7. Debris field aggregation and cleanup
 	_aggregate_debris_fields()
+	_cleanup_inactive_debris_fields()
 
 	# 8. Deferred removal of marked bodies
 	_flush_removals()
@@ -167,6 +172,19 @@ func get_star() -> SimBody:
 # Private phase helpers
 # -------------------------------------------------------------------------
 
+func _update_scripted_orbiters(sim_dt: float) -> void:
+	for body in bodies:
+		if not body.active or not body.scripted_orbit_enabled:
+			continue
+		body.sleeping = false
+		body.sleep_timer = 0.0
+		body.orbit_angle = wrapf(body.orbit_angle + body.orbit_angular_speed * sim_dt, 0.0, TAU)
+		var radial: Vector2 = Vector2(cos(body.orbit_angle), sin(body.orbit_angle))
+		var tangent: Vector2 = Vector2(-sin(body.orbit_angle), cos(body.orbit_angle))
+		body.position = body.orbit_center + radial * body.orbit_radius
+		body.velocity = tangent * (body.orbit_angular_speed * body.orbit_radius)
+		body.age += sim_dt
+
 func _aggregate_debris_fields() -> void:
 	for i in range(debris_fields.size()):
 		var fi: DebrisField = debris_fields[i]
@@ -180,6 +198,13 @@ func _aggregate_debris_fields() -> void:
 			if fi.position.distance_squared_to(fj.position) < sum_r * sum_r:
 				fi.absorb(fj)
 				debris_field_changed.emit(fi)
+
+func _cleanup_inactive_debris_fields() -> void:
+	var i: int = debris_fields.size() - 1
+	while i >= 0:
+		if not debris_fields[i].active:
+			debris_fields.remove_at(i)
+		i -= 1
 
 func _flush_removals() -> void:
 	var i: int = bodies.size() - 1
