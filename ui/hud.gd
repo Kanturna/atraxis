@@ -10,12 +10,14 @@ var _sim: SimWorld = null
 @onready var _scale_label: Label      = $Panel/VBox/ScaleLabel
 @onready var _scale_slider: HSlider   = $Panel/VBox/ScaleSlider
 
-func initialize(world: SimWorld) -> void:
+func initialize(world: SimWorld, initial_time_scale: float = 1.0) -> void:
 	_sim = world
 	_scale_slider.min_value = SimConstants.MIN_TIME_SCALE
 	_scale_slider.max_value = SimConstants.MAX_TIME_SCALE
-	_scale_slider.value = 1.0
-	_scale_slider.value_changed.connect(_on_scale_changed)
+	_scale_slider.set_value_no_signal(clampf(initial_time_scale, SimConstants.MIN_TIME_SCALE, SimConstants.MAX_TIME_SCALE))
+	if not _scale_slider.value_changed.is_connected(_on_scale_changed):
+		_scale_slider.value_changed.connect(_on_scale_changed)
+	_on_scale_changed(_scale_slider.value)
 
 func update_display(world: SimWorld) -> void:
 	if _time_label == null:
@@ -32,3 +34,6 @@ func update_display(world: SimWorld) -> void:
 func _on_scale_changed(value: float) -> void:
 	if _sim:
 		_sim.time_scale = value
+
+func get_current_time_scale() -> float:
+	return _scale_slider.value if _scale_slider != null else 1.0

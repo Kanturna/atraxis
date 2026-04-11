@@ -59,6 +59,105 @@ layout_mode = 2
 bbcode_enabled = true
 fit_content = true
 
+[node name="StartPanel" type="PanelContainer" parent="DebugOverlay" unique_id=1601197842]
+offset_left = 16.0
+offset_top = 332.0
+offset_right = 336.0
+offset_bottom = 610.0
+
+[node name="VBox" type="VBoxContainer" parent="DebugOverlay/StartPanel" unique_id=1791068595]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="DebugOverlay/StartPanel/VBox" unique_id=274540226]
+layout_mode = 2
+text = "Restart Lab"
+
+[node name="SettingsGrid" type="GridContainer" parent="DebugOverlay/StartPanel/VBox" unique_id=761510455]
+layout_mode = 2
+columns = 2
+
+[node name="ModeLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1348092864]
+layout_mode = 2
+text = "Mode"
+
+[node name="ModeOption" type="OptionButton" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1861459480]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+
+[node name="SeedLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1397157564]
+layout_mode = 2
+text = "Seed"
+
+[node name="SeedSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=699639145]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+max_value = 999999.0
+step = 1.0
+rounded = true
+
+[node name="SpawnRadiusLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=766452196]
+layout_mode = 2
+text = "Spawn R (AU)"
+
+[node name="SpawnRadiusSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1922227139]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 2.5
+max_value = 12.0
+step = 0.1
+value = 3.2
+
+[node name="SpawnSpreadLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=871725578]
+layout_mode = 2
+text = "Spread (AU)"
+
+[node name="SpawnSpreadSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=734755291]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+max_value = 4.0
+step = 0.1
+value = 0.8
+
+[node name="SpeedScaleLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=159457235]
+layout_mode = 2
+text = "Inflow Speed"
+
+[node name="SpeedScaleSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=817631637]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 0.05
+max_value = 3.0
+step = 0.05
+value = 0.85
+
+[node name="TangentialBiasLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=2039019510]
+layout_mode = 2
+text = "Tangential"
+
+[node name="TangentialBiasSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1858924039]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 0.65
+
+[node name="BodyCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1806982036]
+layout_mode = 2
+text = "Body Count"
+
+[node name="BodyCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1509422310]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+min_value = 1.0
+max_value = 12.0
+step = 1.0
+value = 4.0
+rounded = true
+
+[node name="RestartButton" type="Button" parent="DebugOverlay/StartPanel/VBox" unique_id=1453386492]
+layout_mode = 2
+text = "Restart"
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1701775918]
 script = ExtResource("5")
 
@@ -89,4 +188,4 @@ custom_minimum_size = Vector2(200, 0)
 layout_mode = 2
 min_value = 0.1
 max_value = 500.0
-value = 1.1
+value = 1.0

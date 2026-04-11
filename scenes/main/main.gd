@@ -3,6 +3,8 @@
 ## loop, and wires simulation signals to the renderer.
 extends Node2D
 
+const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+
 # -------------------------------------------------------------------------
 # References
 # -------------------------------------------------------------------------
@@ -17,6 +19,7 @@ extends Node2D
 
 var sim_world: SimWorld
 var _zone_bounds: WorldBuilder.ZoneBoundaries
+var _current_start_config: RefCounted = START_CONFIG_SCRIPT.new()
 
 ## Fixed timestep accumulator. Accumulates real delta time and drains it
 ## in FIXED_DT chunks so the simulation always advances in equal steps.
@@ -31,32 +34,17 @@ const MAX_STEPS_PER_FRAME: int = 10
 # -------------------------------------------------------------------------
 
 func _ready() -> void:
-	sim_world = SimWorld.new()
-	WorldBuilder.build_mvp(sim_world)
-
-	var star: SimBody = sim_world.get_star()
-	if star:
-		_zone_bounds = WorldBuilder.compute_zones(star)
-	else:
-		_zone_bounds = WorldBuilder.ZoneBoundaries.new()
-
-	# Wire sim signals to renderer
-	sim_world.body_added.connect(_world_renderer._on_body_added)
-	sim_world.body_removed.connect(_world_renderer._on_body_removed)
-
-	# Initialize sub-systems
-	_world_renderer.initialize(sim_world, _zone_bounds)
-	_debug_overlay.initialize(sim_world)
-	_hud.initialize(sim_world)
-	_world_renderer.set_gravity_debug_visible(false)
-	_world_renderer.render_frame(sim_world)
-	_hud.update_display(sim_world)
+	if not _debug_overlay.restart_requested.is_connected(_on_restart_requested):
+		_debug_overlay.restart_requested.connect(_on_restart_requested)
+	restart_simulation(_current_start_config)
 
 # -------------------------------------------------------------------------
 # Main loop
 # -------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if sim_world == null:
+		return
 	_accumulated_dt += delta
 	var steps: int = 0
 	while _accumulated_dt >= SimConstants.FIXED_DT and steps < MAX_STEPS_PER_FRAME:
@@ -84,3 +72,45 @@ func _input(event: InputEvent) -> void:
 		var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() \
 				* event.position
 		_debug_overlay.try_select_body_at_screen(world_pos, sim_world)
+
+func restart_simulation(config) -> void:
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+	_current_start_config = safe_config
+
+	var debug_visible: bool = _debug_overlay.visible
+	var time_scale: float = _hud.get_current_time_scale()
+	_disconnect_world_signals()
+	_accumulated_dt = 0.0
+
+	sim_world = SimWorld.new()
+	WorldBuilder.build_from_config(sim_world, _current_start_config)
+
+	var star: SimBody = sim_world.get_star()
+	if star:
+		_zone_bounds = WorldBuilder.compute_zones(star)
+	else:
+		_zone_bounds = WorldBuilder.ZoneBoundaries.new()
+
+	sim_world.body_added.connect(_world_renderer._on_body_added)
+	sim_world.body_removed.connect(_world_renderer._on_body_removed)
+
+	_world_renderer.initialize(sim_world, _zone_bounds)
+	_debug_overlay.initialize(sim_world, _current_start_config)
+	_hud.initialize(sim_world, time_scale)
+	_debug_overlay.visible = debug_visible
+	_world_renderer.set_gravity_debug_visible(debug_visible)
+	_world_renderer.render_frame(sim_world)
+	_debug_overlay.update_runtime_metrics(0.0, 0)
+	_hud.update_display(sim_world)
+
+func _disconnect_world_signals() -> void:
+	if sim_world == null:
+		return
+	if sim_world.body_added.is_connected(_world_renderer._on_body_added):
+		sim_world.body_added.disconnect(_world_renderer._on_body_added)
+	if sim_world.body_removed.is_connected(_world_renderer._on_body_removed):
+		sim_world.body_removed.disconnect(_world_renderer._on_body_removed)
+
+func _on_restart_requested(config) -> void:
+	restart_simulation(config)

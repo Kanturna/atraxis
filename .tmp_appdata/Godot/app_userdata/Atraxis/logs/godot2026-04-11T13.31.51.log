@@ -17,15 +17,24 @@ res://tests/test_collision.gd
 res://tests/test_debug_metrics.gd
 * test_scripted_planet_metrics_report_orbit_deviation
 * test_chaos_score_uses_fixed_phase1_formula
+* test_calm_but_awake_world_stays_near_zero_chaos
 * test_empty_world_metrics_are_stable
 * test_simulation_counts_include_sleeping_fragments_and_debris
-4/4 passed.
+5/5 passed.
 
 
 res://tests/test_gravity.gd
 * test_kinematic_source_accelerates_dynamic_target
 * test_kinematic_target_does_not_collect_acceleration
 2/2 passed.
+
+
+res://tests/test_gravity_debug_data.gd
+* test_radius_from_mass_and_threshold_matches_inverse_square_formula
+* test_build_ring_specs_only_uses_active_stars
+* test_small_rings_under_screen_threshold_are_not_emitted
+* test_multiple_stars_build_separate_centers
+4/4 passed.
 
 
 res://tests/test_world_builder.gd
@@ -42,11 +51,11 @@ res://tests/test_world_builder.gd
 
 Totals
 ------
-Scripts               4
-Tests                10
-Passing Tests        10
-Asserts              52
-Time              0.374s
+Scripts               5
+Tests                15
+Passing Tests        15
+Asserts              73
+Time              0.384s
 
 
 ---- All tests passed! ----

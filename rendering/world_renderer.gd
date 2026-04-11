@@ -20,6 +20,12 @@ var _gravity_debug_renderer: Node2D
 var _debris_renderer: DebrisRenderer
 
 func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
+	_clear_layer(_zone_layer)
+	_clear_layer(_gravity_debug_layer)
+	_clear_layer(_trail_layer)
+	_clear_layer(_body_layer)
+	_clear_layer(_debris_layer)
+
 	_body_renderer = BodyRenderer.new()
 	_trail_renderer = TrailRenderer.new()
 	_zone_renderer = ZoneRenderer.new()
@@ -40,10 +46,14 @@ func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
 		_on_body_added(body)
 
 func render_frame(world: SimWorld) -> void:
-	_gravity_debug_renderer.update_all(world.bodies)
-	_body_renderer.update_all(world.bodies)
-	_trail_renderer.update_all(world.bodies)
-	_debris_renderer.update_all(world.debris_fields)
+	if _gravity_debug_renderer != null:
+		_gravity_debug_renderer.update_all(world.bodies)
+	if _body_renderer != null:
+		_body_renderer.update_all(world.bodies)
+	if _trail_renderer != null:
+		_trail_renderer.update_all(world.bodies)
+	if _debris_renderer != null:
+		_debris_renderer.update_all(world.debris_fields)
 
 func set_gravity_debug_visible(enabled: bool) -> void:
 	if _gravity_debug_renderer != null:
@@ -56,3 +66,7 @@ func _on_body_added(body: SimBody) -> void:
 func _on_body_removed(body_id: int) -> void:
 	_body_renderer.remove_body_visual(body_id)
 	_trail_renderer.remove_trail(body_id)
+
+func _clear_layer(layer: Node2D) -> void:
+	for child in layer.get_children():
+		child.free()

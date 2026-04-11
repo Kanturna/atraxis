@@ -37,6 +37,14 @@ res://tests/test_gravity_debug_data.gd
 4/4 passed.
 
 
+res://tests/test_start_modes.gd
+* test_stable_mode_preserves_existing_mvp_reference_layout
+* test_chaos_mode_creates_dynamic_inflow_bodies
+* test_chaos_mode_same_seed_rebuilds_identical_start_state
+* test_chaos_mode_different_seed_changes_the_inflow_layout
+4/4 passed.
+
+
 res://tests/test_world_builder.gd
 * test_world_builder_creates_phase1_mvp_layout
 * test_scripted_planet_orbit_advances_without_leaving_its_radius
@@ -51,11 +59,11 @@ res://tests/test_world_builder.gd
 
 Totals
 ------
-Scripts               5
-Tests                15
-Passing Tests        15
-Asserts              73
-Time              0.384s
+Scripts               6
+Tests                19
+Passing Tests        19
+Asserts             129
+Time              0.386s
 
 
 ---- All tests passed! ----

@@ -5,6 +5,8 @@
 class_name WorldBuilder
 extends RefCounted
 
+const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+
 ## Zone boundary data (computed from star properties).
 ## Passed to the renderer for zone visualization and later to resource logic.
 class ZoneBoundaries:
@@ -38,6 +40,17 @@ static func build_mvp(world) -> void:  # world: SimWorld
 				else SimBody.MaterialType.METALLIC
 		var asteroid := _make_asteroid(star, dist, angle, ecc, mass, mat)
 		world.add_body(asteroid)
+
+static func build_from_config(world: SimWorld, start_config) -> void:
+	var config = start_config if start_config != null else START_CONFIG_SCRIPT.new()
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+
+	match safe_config.mode:
+		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
+			_build_chaos_inflow(world, safe_config)
+		_:
+			build_mvp(world)
 
 ## Compute zone boundaries from star mass.
 ## Returns a ZoneBoundaries object for use by renderer and future systems.
@@ -127,3 +140,54 @@ static func _place_in_orbit(body: SimBody, parent: SimBody,
 	body.orbit_radius = orbital_radius
 	body.orbit_angle = angle
 	body.orbit_angular_speed = speed / orbital_radius if orbital_radius > 0.0 else 0.0
+
+static func _build_chaos_inflow(world: SimWorld, config) -> void:
+	var star := _make_star()
+	world.add_body(star)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = config.seed
+
+	for i in range(config.body_count):
+		var body := _make_inflow_body(star, config, rng, i)
+		world.add_body(body)
+
+static func _make_inflow_body(star: SimBody, config,
+		rng: RandomNumberGenerator, index: int) -> SimBody:
+	var body := SimBody.new()
+	body.body_type = SimBody.BodyType.PLANET
+	body.influence_level = SimBody.InfluenceLevel.B
+	body.material_type = _pick_inflow_material(rng, index)
+	body.mass = rng.randf_range(SimConstants.PLANET_MASS_MIN, SimConstants.PLANET_MASS_MAX)
+	body.radius = clamp(
+		SimConstants.PLANET_RADIUS_MIN + log(body.mass / SimConstants.PLANET_MASS_MIN + 1.0),
+		SimConstants.PLANET_RADIUS_MIN,
+		SimConstants.PLANET_RADIUS_MAX
+	)
+	body.temperature = rng.randf_range(120.0, 420.0)
+	body.kinematic = false
+	body.scripted_orbit_enabled = false
+
+	var spawn_radius: float = (
+		config.spawn_radius_au + rng.randf_range(-config.spawn_spread_au, config.spawn_spread_au)
+	) * SimConstants.AU
+	spawn_radius = max(spawn_radius, 0.75 * SimConstants.AU)
+	var angle: float = rng.randf_range(0.0, TAU)
+	body.position = star.position + Vector2(cos(angle), sin(angle)) * spawn_radius
+
+	var inward: Vector2 = (star.position - body.position).normalized()
+	var tangent: Vector2 = Vector2(-inward.y, inward.x)
+	if rng.randf() > 0.5:
+		tangent = -tangent
+	var travel_dir: Vector2 = inward.lerp(tangent, config.tangential_bias).normalized()
+	var reference_speed: float = sqrt(SimConstants.G * star.mass / spawn_radius)
+	body.velocity = travel_dir * (reference_speed * config.inflow_speed_scale)
+	return body
+
+static func _pick_inflow_material(rng: RandomNumberGenerator, index: int) -> int:
+	var palette: Array[int] = [
+		SimBody.MaterialType.ROCKY,
+		SimBody.MaterialType.MIXED,
+		SimBody.MaterialType.ICY,
+	]
+	return palette[(index + rng.randi_range(0, palette.size() - 1)) % palette.size()]

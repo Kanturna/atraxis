@@ -7,6 +7,9 @@ extends CanvasLayer
 const COLLISION_WINDOW_SECONDS: float = 3.0
 const FRAME_SMOOTHING_ALPHA: float = 0.18
 const DEBUG_METRICS_SCRIPT := preload("res://debug/debug_metrics.gd")
+const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+
+signal restart_requested(start_config)
 
 var _sim: SimWorld = null
 var _selected_id: int = -1
@@ -18,16 +21,39 @@ var _smoothed_frame_ms: float = 0.0
 
 @onready var _inspector: BodyInspector = $Inspector
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
+@onready var _mode_option: OptionButton = $StartPanel/VBox/SettingsGrid/ModeOption
+@onready var _seed_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SeedSpin
+@onready var _spawn_radius_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpawnRadiusSpin
+@onready var _spawn_spread_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpawnSpreadSpin
+@onready var _speed_scale_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpeedScaleSpin
+@onready var _tangential_bias_spin: SpinBox = $StartPanel/VBox/SettingsGrid/TangentialBiasSpin
+@onready var _body_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/BodyCountSpin
+@onready var _restart_button: Button = $StartPanel/VBox/RestartButton
 
-func initialize(world: SimWorld) -> void:
+func _ready() -> void:
+	_mode_option.clear()
+	_mode_option.add_item("Stable MVP", START_CONFIG_SCRIPT.StartMode.STABLE_MVP)
+	_mode_option.add_item("Chaos Inflow", START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW)
+	if not _mode_option.item_selected.is_connected(_on_mode_selected):
+		_mode_option.item_selected.connect(_on_mode_selected)
+	if not _restart_button.pressed.is_connected(_on_restart_button_pressed):
+		_restart_button.pressed.connect(_on_restart_button_pressed)
+	_sync_start_controls(START_CONFIG_SCRIPT.new())
+
+func initialize(world: SimWorld, start_config = null) -> void:
 	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
 		_sim.collision_occurred.disconnect(_on_collision_occurred)
 	_sim = world
 	if _sim != null:
 		_sim.collision_occurred.connect(_on_collision_occurred)
+	_selected_id = -1
+	_collision_timestamps.clear()
+	_last_frame_delta = 0.0
+	_last_steps_this_frame = 0
+	_smoothed_frame_ms = 0.0
 	_inspector.display_body(null)
+	_sync_start_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
 	_update_stats_text()
-	visible = false
 
 func toggle() -> void:
 	visible = not visible
@@ -134,3 +160,44 @@ func _prune_collision_timestamps() -> void:
 	var cutoff: float = Time.get_ticks_msec() / 1000.0 - COLLISION_WINDOW_SECONDS
 	while not _collision_timestamps.is_empty() and _collision_timestamps[0] < cutoff:
 		_collision_timestamps.remove_at(0)
+
+func _sync_start_controls(config) -> void:
+	if _mode_option == null:
+		return
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+	_mode_option.select(safe_config.mode)
+	_seed_spin.value = safe_config.seed
+	_spawn_radius_spin.value = safe_config.spawn_radius_au
+	_spawn_spread_spin.value = safe_config.spawn_spread_au
+	_speed_scale_spin.value = safe_config.inflow_speed_scale
+	_tangential_bias_spin.value = safe_config.tangential_bias
+	_body_count_spin.value = safe_config.body_count
+	_update_mode_specific_inputs()
+
+func _read_start_config():
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = _mode_option.get_selected_id()
+	config.seed = int(_seed_spin.value)
+	config.spawn_radius_au = _spawn_radius_spin.value
+	config.spawn_spread_au = _spawn_spread_spin.value
+	config.inflow_speed_scale = _speed_scale_spin.value
+	config.tangential_bias = _tangential_bias_spin.value
+	config.body_count = int(_body_count_spin.value)
+	config.clamp_values()
+	return config
+
+func _update_mode_specific_inputs() -> void:
+	var chaos_enabled: bool = _mode_option.get_selected_id() == START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW
+	_seed_spin.editable = chaos_enabled
+	_spawn_radius_spin.editable = chaos_enabled
+	_spawn_spread_spin.editable = chaos_enabled
+	_speed_scale_spin.editable = chaos_enabled
+	_tangential_bias_spin.editable = chaos_enabled
+	_body_count_spin.editable = chaos_enabled
+
+func _on_mode_selected(_index: int) -> void:
+	_update_mode_specific_inputs()
+
+func _on_restart_button_pressed() -> void:
+	restart_requested.emit(_read_start_config())
