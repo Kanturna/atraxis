@@ -82,12 +82,30 @@ const ANCHOR_FIELD_RING_SLOT_SCALE: int = 6
 # Phase A is intentionally numerical only: bodies very close to a dominant BH
 # are integrated with smaller local timesteps so high speed resolves as
 # stronger curvature/orbital steering, not as a coarse-timestep escape spike.
-const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.22
+# 0.35 ≈ 2.2 AU for a 12M BH — larger than the previous 0.22 (1.4 AU) so that
+# the 8-substep window catches fast-approaching stars earlier and reduces
+# numerical energy injection before periapsis.
+const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.35
 const BH_NEARFIELD_SUBSTEPS: int = 8
 # Small star-specific periapsis guardrail used after nearfield substeps.
 # This does not capture or rebind stars; it only prevents ultra-close inward
 # passages from collapsing into unusable near-singularity spikes.
 const BH_STAR_APPROACH_PADDING: float = 8.0
+# Post-guardrail escape-velocity clamp factor.
+# After the guardrail corrects a star's position and removes its inward radial
+# velocity, the remaining tangential speed may still exceed local escape velocity
+# if numerical energy was injected during a coarse-timestep near-miss (especially
+# at high time_scale values). This factor clamps the post-guardrail speed to
+# MARGIN × v_esc so the star stays bound. It is a deliberate local binding aid,
+# not a generic solver fix. 0.92 is the tuning start point — adjust here to taste.
+const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.92
+# Gravity contribution cutoff for kinematic BHs only.
+# BH→body gravity is skipped when G*M/r² falls below this threshold.
+# Conservative: 0.05 acc-units is negligible compared to near-BH values of
+# thousands of units/s². Relevant only with many BHs spread over large distances;
+# in the current 5-BH default it has almost no effect.
+# Do not raise this too high — hard gravity cutoffs create visible boundary artefacts.
+const BH_GRAVITY_MIN_ACCEL: float = 0.05
 
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.

@@ -22,6 +22,13 @@ var _gravity: GravitySolver
 var _detector: CollisionDetector
 var _resolver: CollisionResolver
 
+# Dominant-BH cache: rebuilt once per step_sim call so that the O(n_bodies × n_BH)
+# scan happens exactly once per frame, not once per substep per body.
+# Bodies use this for the periapsis guardrail and nearfield substep check.
+# BHs are kinematic and do not move within a single step, so the cache is valid
+# for all substeps of the same frame.
+var _dominant_bh_cache: Dictionary = {}  # body.id → {dominant_bh: SimBody, distance: float}
+
 func _init() -> void:
 	_gravity = GravitySolver.new()
 	_detector = CollisionDetector.new()
@@ -29,6 +36,7 @@ func _init() -> void:
 
 func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
+	_rebuild_dominant_bh_cache()
 	var integration_substeps: int = _determine_black_hole_nearfield_substeps()
 	var sub_dt: float = sim_dt / float(integration_substeps)
 
@@ -176,18 +184,41 @@ func set_black_hole_mass(new_mass: float) -> void:
 			var orbit_speed: float = sqrt(SimConstants.G * parent_black_hole.mass / body.orbit_radius)
 			body.orbit_angular_speed = orbit_speed / body.orbit_radius
 
-func _determine_black_hole_nearfield_substeps() -> int:
+func _rebuild_dominant_bh_cache() -> void:
+	_dominant_bh_cache.clear()
 	var black_holes: Array = get_black_holes()
 	if black_holes.is_empty():
+		return
+	for body in bodies:
+		if not _requires_black_hole_nearfield_substeps(body) and not _requires_star_black_hole_guardrail(body):
+			continue
+		var best_bh: SimBody = null
+		var best_strength: float = -1.0
+		var best_dist: float = INF
+		for bh in black_holes:
+			if bh == null or not bh.active:
+				continue
+			var delta: Vector2 = bh.position - body.position
+			var dist_sq: float = delta.length_squared() + SimConstants.GRAVITY_SOFTENING_SQ
+			var strength: float = SimConstants.G * bh.mass / dist_sq
+			if strength > best_strength:
+				best_strength = strength
+				best_bh = bh
+				best_dist = delta.length()
+		if best_bh != null:
+			_dominant_bh_cache[body.id] = {"dominant_bh": best_bh, "distance": best_dist}
+
+func _determine_black_hole_nearfield_substeps() -> int:
+	if _dominant_bh_cache.is_empty():
 		return 1
 	for body in bodies:
 		if not _requires_black_hole_nearfield_substeps(body):
 			continue
-		var ranked: Array = ANCHOR_FIELD_SCRIPT.rank_black_holes_for_body(body, black_holes)
-		if ranked.is_empty():
+		if not _dominant_bh_cache.has(body.id):
 			continue
-		var dominant_black_hole: SimBody = ranked[0]["black_hole"]
-		var dominant_distance: float = ranked[0]["distance"]
+		var entry: Dictionary = _dominant_bh_cache[body.id]
+		var dominant_black_hole: SimBody = entry["dominant_bh"]
+		var dominant_distance: float = entry["distance"]
 		var nearfield_radius: float = ANCHOR_FIELD_SCRIPT.nearfield_radius_for_mass(dominant_black_hole.mass)
 		if nearfield_radius > 0.0 and dominant_distance <= nearfield_radius:
 			return SimConstants.BH_NEARFIELD_SUBSTEPS
@@ -205,13 +236,9 @@ func _requires_black_hole_nearfield_substeps(body: SimBody) -> bool:
 func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position: Vector2) -> void:
 	if not _requires_star_black_hole_guardrail(body):
 		return
-	var black_holes: Array = get_black_holes()
-	if black_holes.is_empty():
+	if not _dominant_bh_cache.has(body.id):
 		return
-	var ranked: Array = ANCHOR_FIELD_SCRIPT.rank_black_holes_for_body(body, black_holes)
-	if ranked.is_empty():
-		return
-	var dominant_black_hole: SimBody = ranked[0]["black_hole"]
+	var dominant_black_hole: SimBody = _dominant_bh_cache[body.id]["dominant_bh"]
 	var offset_from_black_hole: Vector2 = body.position - dominant_black_hole.position
 	var current_distance: float = offset_from_black_hole.length()
 	var minimum_distance: float = dominant_black_hole.radius + body.radius + SimConstants.BH_STAR_APPROACH_PADDING
@@ -230,6 +257,14 @@ func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position
 		# unusable ultra-close inward passes, not a capture or parent-change rule.
 		var tangential_velocity: Vector2 = body.velocity - radial_direction * radial_velocity
 		body.position = dominant_black_hole.position + radial_direction * minimum_distance
+		# Local binding aid: if the remaining tangential speed already exceeds local
+		# escape velocity (v_esc = sqrt(2·G·M/r)) — e.g. due to numerical energy
+		# injection at high time_scale — clamp it to BH_GUARDRAIL_ESCAPE_MARGIN × v_esc
+		# so the star stays bound. The direction is preserved; only the magnitude is
+		# reduced. BH_GUARDRAIL_ESCAPE_MARGIN is a tuning constant in sim_constants.gd.
+		var escape_vel_sq: float = 2.0 * SimConstants.G * dominant_black_hole.mass / minimum_distance
+		if tangential_velocity.length_squared() >= escape_vel_sq:
+			tangential_velocity = tangential_velocity.normalized() * (sqrt(escape_vel_sq) * SimConstants.BH_GUARDRAIL_ESCAPE_MARGIN)
 		body.velocity = tangential_velocity
 		return
 	var fallback_offset: Vector2 = previous_position - dominant_black_hole.position
