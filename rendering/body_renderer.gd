@@ -17,9 +17,7 @@ func add_body_visual(body: SimBody) -> void:
 	if _body_visual_packed == null:
 		return
 	var node: Node2D = _body_visual_packed.instantiate()
-	node.position = sim_to_screen(body.position)
-	node.modulate = color_for_body(body)
-	node.scale = Vector2.ONE * screen_radius_for_body(body)
+	_apply_visual_state(node, body)
 	add_child(node)
 	_visuals[body.id] = node
 
@@ -37,9 +35,7 @@ func update_all(bodies: Array) -> void:
 			vis.visible = false
 			continue
 		vis.visible = true
-		vis.position = sim_to_screen(body.position)
-		vis.modulate = color_for_body(body)
-		vis.scale = Vector2.ONE * screen_radius_for_body(body)
+		_apply_visual_state(vis, body)
 
 # -------------------------------------------------------------------------
 # Coordinate transform - centralized here, used by all other renderers
@@ -61,7 +57,7 @@ static func sim_dist_to_screen(sim_dist: float) -> float:
 static func color_for_body(body: SimBody) -> Color:
 	match body.body_type:
 		SimBody.BodyType.BLACK_HOLE:
-			return Color(0.22, 0.28, 0.42, 1.0)
+			return Color.WHITE
 		SimBody.BodyType.STAR:
 			return Color(1.0, 0.92, 0.4, 1.0)
 		SimBody.BodyType.PLANET:
@@ -78,6 +74,12 @@ static func color_for_body(body: SimBody) -> Color:
 			return Color(0.72, 0.62, 0.50, 1.0)
 		_:
 			return Color.WHITE
+
+func _apply_visual_state(node: Node2D, body: SimBody) -> void:
+	node.position = sim_to_screen(body.position)
+	node.modulate = color_for_body(body)
+	node.scale = Vector2.ONE * screen_radius_for_body(body)
+	node.set("visual_body_type", body.body_type)
 
 static func screen_radius_for_body(body: SimBody) -> float:
 	var scaled_radius: float = body.radius * _visual_scale_for_body(body) * SimConstants.SIM_TO_SCREEN
