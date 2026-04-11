@@ -46,10 +46,12 @@ fit_content = true
 scroll_active = false
 
 [node name="AnchorPanel" type="PanelContainer" parent="DebugOverlay" unique_id=148800001]
-offset_left = 16.0
-offset_top = 486.0
-offset_right = 376.0
-offset_bottom = 576.0
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -320.0
+offset_top = 528.0
+offset_bottom = 618.0
 
 [node name="VBox" type="VBoxContainer" parent="DebugOverlay/AnchorPanel" unique_id=148800002]
 layout_mode = 2
