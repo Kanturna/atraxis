@@ -4,7 +4,7 @@
 class_name BodyRenderer
 extends Node2D
 
-## Maps body id → visual Node2D child
+## Maps body id -> visual Node2D child
 var _visuals: Dictionary = {}
 
 const BODY_VISUAL_SCENE: String = "res://scenes/bodies/body_visual.tscn"
@@ -19,7 +19,7 @@ func add_body_visual(body: SimBody) -> void:
 	var node: Node2D = _body_visual_packed.instantiate()
 	node.position = sim_to_screen(body.position)
 	node.modulate = color_for_body(body)
-	node.scale = Vector2.ONE * _screen_radius(body)
+	node.scale = Vector2.ONE * screen_radius_for_body(body)
 	add_child(node)
 	_visuals[body.id] = node
 
@@ -39,10 +39,10 @@ func update_all(bodies: Array) -> void:
 		vis.visible = true
 		vis.position = sim_to_screen(body.position)
 		vis.modulate = color_for_body(body)
-		vis.scale = Vector2.ONE * _screen_radius(body)
+		vis.scale = Vector2.ONE * screen_radius_for_body(body)
 
 # -------------------------------------------------------------------------
-# Coordinate transform — centralized here, used by all other renderers
+# Coordinate transform - centralized here, used by all other renderers
 # -------------------------------------------------------------------------
 
 ## Convert a simulation position (sim-units) to screen pixels.
@@ -66,9 +66,12 @@ static func color_for_body(body: SimBody) -> Color:
 			return Color(1.0, 0.92, 0.4, 1.0)
 		SimBody.BodyType.PLANET:
 			match body.material_type:
-				SimBody.MaterialType.ROCKY:   return Color(0.62, 0.47, 0.33, 1.0)
-				SimBody.MaterialType.ICY:     return Color(0.72, 0.88, 1.0, 1.0)
-				_:                            return Color(0.55, 0.55, 0.65, 1.0)
+				SimBody.MaterialType.ROCKY:
+					return Color(0.62, 0.47, 0.33, 1.0)
+				SimBody.MaterialType.ICY:
+					return Color(0.72, 0.88, 1.0, 1.0)
+				_:
+					return Color(0.55, 0.55, 0.65, 1.0)
 		SimBody.BodyType.ASTEROID:
 			return Color(0.56, 0.53, 0.49, 1.0)
 		SimBody.BodyType.FRAGMENT:
@@ -76,6 +79,39 @@ static func color_for_body(body: SimBody) -> Color:
 		_:
 			return Color.WHITE
 
-static func _screen_radius(body: SimBody) -> float:
-	# Body radius in sim-units → screen pixels, minimum 2px so tiny bodies stay visible
-	return max(body.radius * SimConstants.SIM_TO_SCREEN, 2.0)
+static func screen_radius_for_body(body: SimBody) -> float:
+	var scaled_radius: float = body.radius * _visual_scale_for_body(body) * SimConstants.SIM_TO_SCREEN
+	return max(scaled_radius, _min_screen_radius_for_body(body))
+
+static func selection_radius_in_sim(body: SimBody) -> float:
+	return screen_radius_for_body(body) / max(SimConstants.SIM_TO_SCREEN, 0.001)
+
+static func _visual_scale_for_body(body: SimBody) -> float:
+	match body.body_type:
+		SimBody.BodyType.STAR:
+			return SimConstants.STAR_VISUAL_SCALE
+		SimBody.BodyType.BLACK_HOLE:
+			return SimConstants.BLACK_HOLE_VISUAL_SCALE
+		SimBody.BodyType.PLANET:
+			return SimConstants.PLANET_VISUAL_SCALE
+		SimBody.BodyType.ASTEROID:
+			return SimConstants.ASTEROID_VISUAL_SCALE
+		SimBody.BodyType.FRAGMENT:
+			return SimConstants.FRAGMENT_VISUAL_SCALE
+		_:
+			return 1.0
+
+static func _min_screen_radius_for_body(body: SimBody) -> float:
+	match body.body_type:
+		SimBody.BodyType.STAR:
+			return SimConstants.STAR_MIN_SCREEN_RADIUS
+		SimBody.BodyType.BLACK_HOLE:
+			return SimConstants.BLACK_HOLE_MIN_SCREEN_RADIUS
+		SimBody.BodyType.PLANET:
+			return SimConstants.PLANET_MIN_SCREEN_RADIUS
+		SimBody.BodyType.ASTEROID:
+			return SimConstants.ASTEROID_MIN_SCREEN_RADIUS
+		SimBody.BodyType.FRAGMENT:
+			return SimConstants.FRAGMENT_MIN_SCREEN_RADIUS
+		_:
+			return 2.0

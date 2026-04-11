@@ -102,7 +102,7 @@ func try_select_body_at_screen(screen_pos: Vector2, world: SimWorld) -> void:
 			continue
 		var d_sq: float = body.position.distance_squared_to(sim_pos)
 		# Click tolerance: 3× body radius in sim-units
-		var tol: float = body.radius * 3.0
+		var tol: float = max(body.radius * 3.0, BodyRenderer.selection_radius_in_sim(body) * 1.25)
 		if d_sq < tol * tol and d_sq < best_dist_sq:
 			best_dist_sq = d_sq
 			best = body

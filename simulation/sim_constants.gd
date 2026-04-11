@@ -80,6 +80,21 @@ const ASTEROID_RADIUS_MAX: float = 5.0
 const FRAGMENT_RADIUS_MIN: float = 1.0
 const FRAGMENT_RADIUS_MAX: float = 2.5
 
+# --- Render exaggeration ---
+# Keep simulation radii intact, but draw key bodies slightly larger so they stay
+# readable while zoomed out. This affects visuals and debug picking only.
+const STAR_VISUAL_SCALE: float = 2.0
+const BLACK_HOLE_VISUAL_SCALE: float = 1.0
+const PLANET_VISUAL_SCALE: float = 2.2
+const ASTEROID_VISUAL_SCALE: float = 3.0
+const FRAGMENT_VISUAL_SCALE: float = 2.0
+
+const STAR_MIN_SCREEN_RADIUS: float = 10.0
+const BLACK_HOLE_MIN_SCREEN_RADIUS: float = 5.0
+const PLANET_MIN_SCREEN_RADIUS: float = 6.0
+const ASTEROID_MIN_SCREEN_RADIUS: float = 3.5
+const FRAGMENT_MIN_SCREEN_RADIUS: float = 2.5
+
 # --- B-B gravity proximity cutoff ---
 # Asteroid-Asteroid gravity only computed within this distance (sim-units).
 # Prevents O(n²) cost across spread-out belts.
