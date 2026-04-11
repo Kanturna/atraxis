@@ -1,5 +1,6 @@
 ## Constructs the initial reference systems for Atraxis.
-## Stable Anchor is the calm macro test mode; Chaos Inflow remains the lab mode.
+## Dynamic Anchor is the mainline macro-simulation path.
+## Stable Anchor is the calm reference mode; Chaos Inflow remains the lab mode.
 class_name WorldBuilder
 extends RefCounted
 
@@ -23,6 +24,7 @@ static func build_from_config(world: SimWorld, start_config) -> void:
 		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
 			_build_chaos_inflow(world, safe_config)
 		_:
+			safe_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
 			_build_stable_anchor(world, safe_config)
 
 static func compute_zones(star: SimBody) -> ZoneBoundaries:
@@ -37,23 +39,38 @@ static func compute_zones(star: SimBody) -> ZoneBoundaries:
 static func _build_dynamic_anchor(world: SimWorld, config) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = config.seed
+	match config.anchor_topology:
+		START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
+			_build_dynamic_anchor_field_patch(world, config, rng)
+		_:
+			_build_dynamic_anchor_central_bh(world, config, rng)
 
-	var black_holes: Array = []
-	var central_black_hole: SimBody = null
-	if config.anchor_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
-		for spec in ANCHOR_FIELD_SCRIPT.build_field_patch_specs(config.field_spacing_au, config.black_hole_mass):
-			var black_hole := _make_black_hole(spec["mass"])
-			black_hole.position = spec["position"]
-			world.add_body(black_hole)
-			black_holes.append(black_hole)
-			if spec["is_central"]:
-				central_black_hole = black_hole
-	else:
-		central_black_hole = _make_black_hole(config.black_hole_mass)
-		world.add_body(central_black_hole)
-		black_holes.append(central_black_hole)
+static func _build_dynamic_anchor_central_bh(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
+	var central_black_hole := _make_black_hole(config.black_hole_mass)
+	world.add_body(central_black_hole)
 
 	var stars := _place_dynamic_stars(central_black_hole, config, rng)
+	for star in stars:
+		world.add_body(star)
+	for star in stars:
+		for i in range(config.planets_per_star):
+			world.add_body(_make_core_planet(star, i, config.planets_per_star))
+	for i in range(config.disturbance_body_count):
+		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
+
+static func _build_dynamic_anchor_field_patch(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
+	var central_spawn_black_hole: SimBody = null
+	for spec in ANCHOR_FIELD_SCRIPT.build_field_patch_specs(config.field_spacing_au, config.black_hole_mass):
+		var black_hole := _make_black_hole(spec["mass"])
+		black_hole.position = spec["position"]
+		world.add_body(black_hole)
+		if spec["is_central"]:
+			central_spawn_black_hole = black_hole
+
+	# First field-patch stage: multiple black holes shape the gravity field, but
+	# stars still start around the central BH instead of being distributed across
+	# the whole patch. This keeps the rollout honest and incremental.
+	var stars := _place_dynamic_stars(central_spawn_black_hole, config, rng)
 	for star in stars:
 		world.add_body(star)
 	for star in stars:

@@ -18,8 +18,8 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var speed_deviation_sum: float = 0.0
 	var total_star_mass: float = 0.0
 	var total_black_hole_mass: float = 0.0
-	var bound_stars: int = 0
-	var unbound_stars: int = 0
+	var energy_bound_stars: int = 0
+	var energy_free_stars: int = 0
 	var min_star_star_distance: float = INF
 	var min_star_bh_distance: float = INF
 	var star_anchor_states: Array = []
@@ -56,10 +56,10 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			total_star_mass += body.mass
 			var anchor_state: Dictionary = ANCHOR_FIELD_SCRIPT.build_star_anchor_state(body, black_holes)
 			star_anchor_states.append(anchor_state)
-			if anchor_state["bound"]:
-				bound_stars += 1
+			if anchor_state["energy_bound"]:
+				energy_bound_stars += 1
 			else:
-				unbound_stars += 1
+				energy_free_stars += 1
 			if anchor_state["dominant_distance"] > 0.0:
 				min_star_bh_distance = minf(min_star_bh_distance, anchor_state["dominant_distance"])
 
@@ -133,8 +133,8 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			"black_hole_mass": total_black_hole_mass,
 			"total_star_mass": total_star_mass,
 			"anchor_ratio": anchor_ratio,
-			"bound_stars": bound_stars,
-			"unbound_stars": unbound_stars,
+			"energy_bound_stars": energy_bound_stars,
+			"energy_free_stars": energy_free_stars,
 			"min_star_star_distance": min_star_star_distance,
 			"min_star_bh_distance": min_star_bh_distance,
 			"star_anchor_states": star_anchor_states,

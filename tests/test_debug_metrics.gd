@@ -94,8 +94,8 @@ func test_empty_world_metrics_are_stable() -> void:
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.0, 0.001, "empty worlds should not divide by zero for awake ratio")
 	assert_eq(chaos["score"], 0, "empty worlds should have a zero chaos score")
 	assert_almost_eq(anchor["black_hole_mass"], 0.0, 0.001, "empty worlds should report zero black-hole mass")
-	assert_eq(anchor["bound_stars"], 0, "empty worlds should report zero bound stars")
-	assert_eq(anchor["unbound_stars"], 0, "empty worlds should report zero unbound stars")
+	assert_eq(anchor["energy_bound_stars"], 0, "empty worlds should report zero energetically bound stars")
+	assert_eq(anchor["energy_free_stars"], 0, "empty worlds should report zero energetically free stars")
 
 func test_simulation_counts_include_sleeping_fragments_and_debris() -> void:
 	var world := SimWorld.new()
@@ -139,7 +139,7 @@ func test_simulation_counts_include_sleeping_fragments_and_debris() -> void:
 	assert_eq(sim_stats["debris_count"], 1, "debris count should ignore inactive debris fields")
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.5, 0.001, "awake ratio should use active dynamic bodies only")
 
-func test_anchor_metrics_report_bound_and_unbound_stars() -> void:
+func test_anchor_metrics_report_energy_bound_and_energy_free_stars() -> void:
 	var world := SimWorld.new()
 
 	var black_hole := SimBody.new()
@@ -172,8 +172,8 @@ func test_anchor_metrics_report_bound_and_unbound_stars() -> void:
 
 	assert_almost_eq(anchor["black_hole_mass"], black_hole.mass, 0.001, "anchor metrics should expose current black-hole mass")
 	assert_almost_eq(anchor["total_star_mass"], bound_star.mass + unbound_star.mass, 0.001, "anchor metrics should aggregate star mass")
-	assert_eq(anchor["bound_stars"], 1, "one star should remain bound to the black hole")
-	assert_eq(anchor["unbound_stars"], 1, "one star should be reported as unbound")
+	assert_eq(anchor["energy_bound_stars"], 1, "one star should remain energetically bound to the dominant black hole")
+	assert_eq(anchor["energy_free_stars"], 1, "one star should be reported as energetically free relative to the dominant black hole")
 	assert_almost_eq(anchor["anchor_ratio"], black_hole.mass / (bound_star.mass + unbound_star.mass), 0.001, "anchor ratio should compare BH mass to total star mass")
 
 func test_anchor_metrics_report_dominant_and_secondary_black_holes_per_star() -> void:

@@ -20,7 +20,7 @@ var _last_frame_delta: float = 0.0
 var _last_steps_this_frame: int = 0
 var _smoothed_frame_ms: float = 0.0
 var _last_dominant_bh_by_star: Dictionary = {}
-var _domain_switch_count: int = 0
+var _anchor_switch_count: int = 0
 
 @onready var _inspector: BodyInspector = $Inspector
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
@@ -42,6 +42,7 @@ var _domain_switch_count: int = 0
 @onready var _star_outer_orbit_spin: SpinBox = $StartPanel/VBox/SettingsGrid/StarOuterOrbitSpin
 @onready var _field_spacing_label: Label = $StartPanel/VBox/SettingsGrid/FieldSpacingLabel
 @onready var _field_spacing_spin: SpinBox = $StartPanel/VBox/SettingsGrid/FieldSpacingSpin
+@onready var _field_patch_hint_label: Label = $StartPanel/VBox/FieldPatchHintLabel
 @onready var _disturbance_count_label: Label = $StartPanel/VBox/SettingsGrid/DisturbanceCountLabel
 @onready var _disturbance_count_spin: SpinBox = $StartPanel/VBox/SettingsGrid/DisturbanceCountSpin
 @onready var _spawn_radius_spin: SpinBox = $StartPanel/VBox/SettingsGrid/SpawnRadiusSpin
@@ -58,9 +59,9 @@ var _domain_switch_count: int = 0
 
 func _ready() -> void:
 	_mode_option.clear()
-	_mode_option.add_item("Dynamic Anchor", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR)
-	_mode_option.add_item("Stable Anchor", START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR)
-	_mode_option.add_item("Chaos Inflow", START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW)
+	_mode_option.add_item("Dynamic Anchor (Main)", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR)
+	_mode_option.add_item("Stable Anchor (Reference)", START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR)
+	_mode_option.add_item("Chaos Inflow (Lab)", START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW)
 	_anchor_topology_option.clear()
 	_anchor_topology_option.add_item("Central BH", START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
@@ -86,7 +87,7 @@ func initialize(world: SimWorld, start_config = null) -> void:
 	_last_steps_this_frame = 0
 	_smoothed_frame_ms = 0.0
 	_last_dominant_bh_by_star.clear()
-	_domain_switch_count = 0
+	_anchor_switch_count = 0
 	_inspector.display_body(null)
 	_sync_start_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
 	_sync_live_anchor_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
@@ -161,7 +162,7 @@ func _update_stats_text() -> void:
 	var anchor_stats: Dictionary = snapshot["anchor"]
 	var fps: int = Engine.get_frames_per_second()
 	var frame_ms: float = _last_frame_delta * 1000.0
-	_update_domain_switch_tracking(anchor_stats["star_anchor_states"])
+	_update_anchor_switch_tracking(anchor_stats["star_anchor_states"])
 	var star_anchor_lines: String = _format_star_anchor_lines(anchor_stats["star_anchor_states"])
 
 	_stats_label.text = (
@@ -188,11 +189,11 @@ func _update_stats_text() -> void:
 		+ "BH mass total   %.0f\n" % anchor_stats["black_hole_mass"]
 		+ "Star mass       %.0f\n" % anchor_stats["total_star_mass"]
 		+ "Anchor ratio    %.2f\n" % anchor_stats["anchor_ratio"]
-		+ "Stars bound     %d\n" % anchor_stats["bound_stars"]
-		+ "Stars unbound   %d\n" % anchor_stats["unbound_stars"]
+		+ "Stars e-bound   %d\n" % anchor_stats["energy_bound_stars"]
+		+ "Stars e-free    %d\n" % anchor_stats["energy_free_stars"]
 		+ "Min star-star   %.0f\n" % anchor_stats["min_star_star_distance"]
 		+ "Min star-BH     %.0f\n" % anchor_stats["min_star_bh_distance"]
-		+ "Dom switches    %d\n" % _domain_switch_count
+		+ "BH switches     %d\n" % _anchor_switch_count
 		+ star_anchor_lines
 		+ "\n"
 		+ "Chaos / Unruhe\n"
@@ -309,6 +310,7 @@ func _update_mode_specific_inputs() -> void:
 		node.visible = field_patch_enabled
 	for node in chaos_nodes:
 		node.visible = chaos_enabled
+	_field_patch_hint_label.visible = field_patch_enabled
 
 func _on_mode_selected(_index: int) -> void:
 	_update_mode_specific_inputs()
@@ -323,7 +325,7 @@ func _on_live_bh_mass_changed(value: float) -> void:
 func _on_restart_button_pressed() -> void:
 	restart_requested.emit(_read_start_config())
 
-func _update_domain_switch_tracking(star_anchor_states: Array) -> void:
+func _update_anchor_switch_tracking(star_anchor_states: Array) -> void:
 	var active_star_ids: Dictionary = {}
 	for state in star_anchor_states:
 		var star_id: int = state["star_id"]
@@ -332,7 +334,7 @@ func _update_domain_switch_tracking(star_anchor_states: Array) -> void:
 		if _last_dominant_bh_by_star.has(star_id):
 			var previous_bh_id: int = _last_dominant_bh_by_star[star_id]
 			if previous_bh_id != dominant_bh_id and previous_bh_id >= 0 and dominant_bh_id >= 0:
-				_domain_switch_count += 1
+				_anchor_switch_count += 1
 		_last_dominant_bh_by_star[star_id] = dominant_bh_id
 
 	var known_ids: Array = _last_dominant_bh_by_star.keys()
@@ -347,9 +349,9 @@ func _format_star_anchor_lines(star_anchor_states: Array) -> String:
 	for state in star_anchor_states:
 		var dominant_text: String = "--" if state["dominant_bh_id"] < 0 else str(state["dominant_bh_id"])
 		var secondary_text: String = "--" if state["secondary_bh_id"] < 0 else str(state["secondary_bh_id"])
-		var status_text: String = "bound" if state["bound"] else "free"
+		var status_text: String = "e-bound" if state["energy_bound"] else "e-free"
 		lines.append(
-			"Star %d         %s>%s  r%.2f %s" % [
+			"Star %d         BH%s>%s  r%.2f %s" % [
 				state["star_id"],
 				dominant_text,
 				secondary_text,

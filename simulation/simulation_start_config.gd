@@ -1,5 +1,6 @@
 ## Small debug-facing start configuration for rebuilding the simulation.
-## Stable Anchor is the calm macro-reference mode; Chaos Inflow is a lab mode.
+## Dynamic Anchor is the main world-evolution mode.
+## Stable Anchor is the calm reference mode; Chaos Inflow stays the lab mode.
 class_name SimulationStartConfig
 extends RefCounted
 
@@ -65,6 +66,8 @@ func copy():
 
 func clamp_values() -> void:
 	seed = maxi(seed, 0)
+	# Anchor topologies belong to the Dynamic Anchor mainline only.
+	# Other modes intentionally fall back to the central single-BH setup.
 	anchor_topology = clampi(anchor_topology, AnchorTopology.CENTRAL_BH, AnchorTopology.FIELD_PATCH)
 	black_hole_mass = clampf(black_hole_mass, 2_000_000.0, 30_000_000.0)
 	disturbance_body_count = clampi(disturbance_body_count, 0, 8)

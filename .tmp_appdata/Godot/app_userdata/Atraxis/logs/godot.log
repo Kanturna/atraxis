@@ -20,7 +20,7 @@ res://tests/test_debug_metrics.gd
 * test_calm_but_awake_world_stays_near_zero_chaos
 * test_empty_world_metrics_are_stable
 * test_simulation_counts_include_sleeping_fragments_and_debris
-* test_anchor_metrics_report_bound_and_unbound_stars
+* test_anchor_metrics_report_energy_bound_and_energy_free_stars
 * test_anchor_metrics_report_dominant_and_secondary_black_holes_per_star
 7/7 passed.
 
@@ -70,7 +70,7 @@ Scripts               6
 Tests                26
 Passing Tests        26
 Asserts             153
-Time              0.377s
+Time              0.395s
 
 
 ---- All tests passed! ----

@@ -50,8 +50,8 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
-offset_top = 592.0
-offset_bottom = 682.0
+offset_top = 632.0
+offset_bottom = 722.0
 
 [node name="VBox" type="VBoxContainer" parent="DebugOverlay/AnchorPanel" unique_id=148800002]
 layout_mode = 2
@@ -66,7 +66,7 @@ columns = 2
 
 [node name="LiveBHMassLabel" type="Label" parent="DebugOverlay/AnchorPanel/VBox/SettingsGrid" unique_id=148800005]
 layout_mode = 2
-text = "Live BH Mass"
+text = "Live BH Mass (All)"
 
 [node name="LiveBHMassSpin" type="SpinBox" parent="DebugOverlay/AnchorPanel/VBox/SettingsGrid" unique_id=148800006]
 custom_minimum_size = Vector2(170, 0)
@@ -96,7 +96,7 @@ anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
 offset_top = 156.0
-offset_bottom = 576.0
+offset_bottom = 616.0
 
 [node name="VBox" type="VBoxContainer" parent="DebugOverlay/StartPanel" unique_id=1791068595]
 layout_mode = 2
@@ -137,7 +137,7 @@ rounded = true
 
 [node name="BHMassLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320001]
 layout_mode = 2
-text = "BH Mass"
+text = "BH Mass (All)"
 
 [node name="BHMassSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320002]
 custom_minimum_size = Vector2(170, 0)
@@ -206,6 +206,13 @@ min_value = 6.0
 max_value = 20.0
 step = 0.1
 value = 9.0
+
+[node name="FieldPatchHintLabel" type="Label" parent="DebugOverlay/StartPanel/VBox" unique_id=1100320015]
+visible = false
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+autowrap_mode = 3
+text = "Field Patch: multiple BHs shape the gravity field, but stars still start around the central BH in this first stage."
 
 [node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320011]
 layout_mode = 2

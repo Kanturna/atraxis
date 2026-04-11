@@ -139,6 +139,8 @@ func get_body_by_id(body_id: int) -> SimBody:
 	return _find_body_by_id(body_id)
 
 func get_black_hole() -> SimBody:
+	# Legacy helper for callers that still expect a single dominant BH.
+	# In field-patch setups this intentionally returns the first active BH only.
 	for body in bodies:
 		if body.active and body.body_type == SimBody.BodyType.BLACK_HOLE:
 			return body
