@@ -55,7 +55,25 @@ func test_chaos_score_uses_fixed_phase1_formula() -> void:
 	assert_almost_eq(chaos["fragment_pressure"], 0.5, 0.001, "fragment pressure should use the global fragment cap")
 	assert_almost_eq(chaos["debris_pressure"], 0.2, 0.001, "debris pressure should use the global debris cap")
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 18.0 / 19.0, 0.001, "awake dynamic ratio should only consider dynamic bodies")
-	assert_eq(chaos["score"], 53, "chaos score should follow the agreed Phase-1 weighting")
+	assert_almost_eq(chaos["awake_unrest"], (18.0 / 19.0) * 0.5, 0.001, "awake unrest should only amplify score while the sim is otherwise active")
+	assert_eq(chaos["score"], 43, "chaos score should stay calmer in otherwise stable scenes")
+
+func test_calm_but_awake_world_stays_near_zero_chaos() -> void:
+	var world := SimWorld.new()
+
+	for _i in range(3):
+		var body := SimBody.new()
+		body.active = true
+		body.body_type = SimBody.BodyType.ASTEROID
+		body.kinematic = false
+		world.add_body(body)
+
+	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
+	var chaos: Dictionary = snapshot["chaos"]
+
+	assert_almost_eq(chaos["awake_dynamic_ratio"], 1.0, 0.001, "awake ratio can still be 1.0 in a calm world")
+	assert_almost_eq(chaos["awake_unrest"], 0.0, 0.001, "awake bodies alone should not imply chaos")
+	assert_eq(chaos["score"], 0, "a calm startup state should not begin with built-in chaos")
 
 func test_empty_world_metrics_are_stable() -> void:
 	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(SimWorld.new(), 0)

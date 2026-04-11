@@ -53,13 +53,15 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var awake_dynamic_ratio: float = 0.0
 	if dynamic_bodies > 0:
 		awake_dynamic_ratio = float(awake_dynamic_bodies) / float(dynamic_bodies)
+	var activity_pressure: float = maxf(collision_pressure, maxf(fragment_pressure, debris_pressure))
+	var awake_unrest: float = awake_dynamic_ratio * activity_pressure
 
 	var chaos_score: int = int(round(
 		100.0 * (
 			0.35 * collision_pressure
 			+ 0.25 * fragment_pressure
 			+ 0.20 * debris_pressure
-			+ 0.20 * awake_dynamic_ratio
+			+ 0.20 * awake_unrest
 		)
 	))
 
@@ -84,6 +86,7 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			"fragment_pressure": fragment_pressure,
 			"debris_pressure": debris_pressure,
 			"awake_dynamic_ratio": awake_dynamic_ratio,
+			"awake_unrest": awake_unrest,
 			"score": chaos_score,
 		},
 	}

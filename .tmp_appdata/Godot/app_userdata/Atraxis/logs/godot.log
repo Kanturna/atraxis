@@ -17,9 +17,10 @@ res://tests/test_collision.gd
 res://tests/test_debug_metrics.gd
 * test_scripted_planet_metrics_report_orbit_deviation
 * test_chaos_score_uses_fixed_phase1_formula
+* test_calm_but_awake_world_stays_near_zero_chaos
 * test_empty_world_metrics_are_stable
 * test_simulation_counts_include_sleeping_fragments_and_debris
-4/4 passed.
+5/5 passed.
 
 
 res://tests/test_gravity.gd
@@ -43,9 +44,9 @@ res://tests/test_world_builder.gd
 Totals
 ------
 Scripts               4
-Tests                10
-Passing Tests        10
-Asserts              52
+Tests                11
+Passing Tests        11
+Asserts              56
 Time              0.374s
 
 
