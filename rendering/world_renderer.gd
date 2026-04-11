@@ -15,12 +15,13 @@ const GRAVITY_DEBUG_RENDERER_SCRIPT := preload("res://rendering/gravity_debug_re
 
 var _body_renderer: BodyRenderer
 var _trail_renderer: TrailRenderer
-var _zone_renderer: ZoneRenderer
+var _zone_renderers: Dictionary = {}
 var _gravity_debug_renderer: Node2D
 var _debris_renderer: DebrisRenderer
 
-func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
+func initialize(world: SimWorld, zones_by_star: Dictionary) -> void:
 	_clear_layer(_zone_layer)
+	_zone_renderers.clear()
 	_clear_layer(_gravity_debug_layer)
 	_clear_layer(_trail_layer)
 	_clear_layer(_body_layer)
@@ -28,17 +29,20 @@ func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
 
 	_body_renderer = BodyRenderer.new()
 	_trail_renderer = TrailRenderer.new()
-	_zone_renderer = ZoneRenderer.new()
 	_gravity_debug_renderer = GRAVITY_DEBUG_RENDERER_SCRIPT.new()
 	_debris_renderer = DebrisRenderer.new()
 
-	_zone_layer.add_child(_zone_renderer)
+	for star_id in zones_by_star:
+		var zr := ZoneRenderer.new()
+		_zone_layer.add_child(zr)
+		zr.setup(zones_by_star[star_id])
+		_zone_renderers[star_id] = zr
+
 	_gravity_debug_layer.add_child(_gravity_debug_renderer)
 	_trail_layer.add_child(_trail_renderer)
 	_body_layer.add_child(_body_renderer)
 	_debris_layer.add_child(_debris_renderer)
 
-	_zone_renderer.setup(zones)
 	set_gravity_debug_visible(false)
 
 	# Create visuals for bodies already in the world
@@ -46,8 +50,9 @@ func initialize(world: SimWorld, zones: WorldBuilder.ZoneBoundaries) -> void:
 		_on_body_added(body)
 
 func render_frame(world: SimWorld) -> void:
-	if _zone_renderer != null:
-		_zone_renderer.update_all(world)
+	for star_id in _zone_renderers:
+		var star: SimBody = world.get_body_by_id(star_id)
+		_zone_renderers[star_id].update_for_star(star)
 	if _gravity_debug_renderer != null:
 		_gravity_debug_renderer.update_all(world.bodies)
 	if _body_renderer != null:

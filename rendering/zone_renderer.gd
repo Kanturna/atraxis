@@ -10,11 +10,8 @@ func setup(zones: WorldBuilder.ZoneBoundaries) -> void:
 	_zones = zones
 	_rebuild_lines()
 
-func update_all(world: SimWorld) -> void:
-	if world == null:
-		return
-	var star: SimBody = world.get_star()
-	if star != null:
+func update_for_star(star: SimBody) -> void:
+	if star != null and star.active:
 		position = BodyRenderer.sim_to_screen(star.position)
 
 func _rebuild_lines() -> void:

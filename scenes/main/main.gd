@@ -18,7 +18,6 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 # -------------------------------------------------------------------------
 
 var sim_world: SimWorld
-var _zone_bounds: WorldBuilder.ZoneBoundaries
 var _current_start_config: RefCounted = START_CONFIG_SCRIPT.new()
 
 ## Fixed timestep accumulator. Accumulates real delta time and drains it
@@ -86,16 +85,14 @@ func restart_simulation(config) -> void:
 	sim_world = SimWorld.new()
 	WorldBuilder.build_from_config(sim_world, _current_start_config)
 
-	var star: SimBody = sim_world.get_star()
-	if star:
-		_zone_bounds = WorldBuilder.compute_zones(star)
-	else:
-		_zone_bounds = WorldBuilder.ZoneBoundaries.new()
+	var zones_by_star: Dictionary = {}
+	for star in sim_world.get_stars():
+		zones_by_star[star.id] = WorldBuilder.compute_zones(star)
 
 	sim_world.body_added.connect(_world_renderer._on_body_added)
 	sim_world.body_removed.connect(_world_renderer._on_body_removed)
 
-	_world_renderer.initialize(sim_world, _zone_bounds)
+	_world_renderer.initialize(sim_world, zones_by_star)
 	_debug_overlay.initialize(sim_world, _current_start_config)
 	_hud.initialize(sim_world, time_scale)
 	_debug_overlay.visible = debug_visible

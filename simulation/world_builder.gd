@@ -38,14 +38,24 @@ static func _build_stable_anchor(world: SimWorld, config) -> void:
 	var black_hole := _make_black_hole()
 	world.add_body(black_hole)
 
-	var star := _make_anchor_star(black_hole, config.sun_orbit_radius_au, config.sun_orbit_speed_scale)
-	world.add_body(star)
+	if config.star_count <= 1:
+		var star := _make_anchor_star(black_hole, config.sun_orbit_radius_au, config.sun_orbit_speed_scale)
+		world.add_body(star)
 
-	for i in range(config.core_planet_count):
-		world.add_body(_make_core_planet(star, i, config.core_planet_count))
+		for i in range(config.core_planet_count):
+			world.add_body(_make_core_planet(star, i, config.core_planet_count))
 
-	for i in range(config.disturbance_body_count):
-		world.add_body(_make_disturbance_body(star, rng, i))
+		for i in range(config.disturbance_body_count):
+			world.add_body(_make_disturbance_body(star, rng, i))
+	else:
+		var stars := _place_multi_stars(black_hole, config, rng)
+		for star in stars:
+			world.add_body(star)
+		for star in stars:
+			for i in range(config.planets_per_star):
+				world.add_body(_make_core_planet(star, i, config.planets_per_star))
+		for i in range(config.disturbance_body_count):
+			world.add_body(_make_disturbance_body(stars[0], rng, i))
 
 static func _build_chaos_inflow(world: SimWorld, config) -> void:
 	var star := _make_star()
@@ -93,6 +103,35 @@ static func _make_anchor_star(black_hole: SimBody, orbit_radius_au: float, speed
 	_place_in_orbit(star, black_hole, orbit_radius_au * SimConstants.AU, 0.0, 0.0)
 	star.velocity *= speed_scale
 	return star
+
+static func _place_multi_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
+	var stars: Array = []
+	var n: int = config.star_count
+	var inner: float = config.star_inner_orbit_au * SimConstants.AU
+	var outer: float = config.star_outer_orbit_au * SimConstants.AU
+	var band_width: float = (outer - inner) / float(n)
+
+	for i in range(n):
+		var band_center: float = inner + (float(i) + 0.5) * band_width
+		var offset: float = rng.randf_range(-0.2, 0.2) * band_width
+		var orbit_radius: float = band_center + offset
+		var phase: float = (float(i) / float(n)) * TAU + rng.randf_range(-0.25, 0.25)
+		var mass_scale: float = rng.randf_range(0.7, 1.3)
+
+		var star := SimBody.new()
+		star.body_type = SimBody.BodyType.STAR
+		star.influence_level = SimBody.InfluenceLevel.A
+		star.material_type = SimBody.MaterialType.STELLAR
+		star.mass = SimConstants.STAR_MASS * mass_scale
+		star.radius = SimConstants.STAR_RADIUS * sqrt(mass_scale)
+		star.temperature = 5778.0
+		star.kinematic = false
+		star.scripted_orbit_enabled = false
+		star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
+		_place_in_orbit(star, black_hole, orbit_radius, phase, 0.0)
+		stars.append(star)
+
+	return stars
 
 static func _make_core_planet(star: SimBody, index: int, total_count: int) -> SimBody:
 	var orbit_radii_au := [0.38, 1.0, 2.2, 3.0]

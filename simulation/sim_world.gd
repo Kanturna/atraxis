@@ -128,6 +128,16 @@ func get_star() -> SimBody:
 			return body
 	return null
 
+func get_stars() -> Array:
+	var result: Array = []
+	for body in bodies:
+		if body.active and body.body_type == SimBody.BodyType.STAR:
+			result.append(body)
+	return result
+
+func get_body_by_id(body_id: int) -> SimBody:
+	return _find_body_by_id(body_id)
+
 func get_black_hole() -> SimBody:
 	for body in bodies:
 		if body.active and body.body_type == SimBody.BodyType.BLACK_HOLE:
