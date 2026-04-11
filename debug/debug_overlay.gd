@@ -21,13 +21,19 @@ var _last_steps_this_frame: int = 0
 var _smoothed_frame_ms: float = 0.0
 var _last_dominant_bh_by_star: Dictionary = {}
 var _anchor_switch_count: int = 0
+var _left_panels_collapsed: bool = false
+var _right_panels_collapsed: bool = false
 
 @onready var _inspector: BodyInspector = $Inspector
 @onready var _stats_label: RichTextLabel = $StatsPanel/RichTextLabel
+@onready var _stats_panel: PanelContainer = $StatsPanel
+@onready var _start_panel: PanelContainer = $StartPanel
 @onready var _anchor_panel: PanelContainer = $AnchorPanel
 @onready var _live_bh_mass_spin: SpinBox = $AnchorPanel/VBox/SettingsGrid/LiveBHMassSpin
 @onready var _anchor_diagnostics_panel: PanelContainer = $AnchorDiagnosticsPanel
 @onready var _anchor_diagnostics_label: RichTextLabel = $AnchorDiagnosticsPanel/RichTextLabel
+@onready var _left_toggle_button: Button = $LeftPanelToggleButton
+@onready var _right_toggle_button: Button = $RightPanelToggleButton
 @onready var _mode_option: OptionButton = $StartPanel/VBox/SettingsGrid/ModeOption
 @onready var _anchor_topology_label: Label = $StartPanel/VBox/SettingsGrid/AnchorTopologyLabel
 @onready var _anchor_topology_option: OptionButton = $StartPanel/VBox/SettingsGrid/AnchorTopologyOption
@@ -77,7 +83,12 @@ func _ready() -> void:
 		_restart_button.pressed.connect(_on_restart_button_pressed)
 	if not _live_bh_mass_spin.value_changed.is_connected(_on_live_bh_mass_changed):
 		_live_bh_mass_spin.value_changed.connect(_on_live_bh_mass_changed)
+	if not _left_toggle_button.pressed.is_connected(_on_left_toggle_pressed):
+		_left_toggle_button.pressed.connect(_on_left_toggle_pressed)
+	if not _right_toggle_button.pressed.is_connected(_on_right_toggle_pressed):
+		_right_toggle_button.pressed.connect(_on_right_toggle_pressed)
 	_sync_start_controls(START_CONFIG_SCRIPT.new())
+	_update_panel_group_visibility()
 
 func initialize(world: SimWorld, start_config = null) -> void:
 	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
@@ -96,6 +107,7 @@ func initialize(world: SimWorld, start_config = null) -> void:
 	_sync_start_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
 	_sync_live_anchor_controls(start_config if start_config != null else START_CONFIG_SCRIPT.new())
 	_update_stats_text()
+	_update_panel_group_visibility()
 
 func toggle() -> void:
 	visible = not visible
@@ -205,11 +217,13 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 		"[code]"
 		+ "Anchor Diagnostics\n"
 		+ "BH count        %d\n" % anchor_stats["black_hole_count"]
+		+ "Field rings     %d\n" % anchor_stats["field_ring_count"]
 		+ "BH mass total   %.0f\n" % anchor_stats["black_hole_mass"]
 		+ "Star mass       %.0f\n" % anchor_stats["total_star_mass"]
 		+ "Anchor ratio    %.2f\n" % anchor_stats["anchor_ratio"]
 		+ "Stars e-bound   %d\n" % anchor_stats["energy_bound_stars"]
 		+ "Stars e-free    %d\n" % anchor_stats["energy_free_stars"]
+		+ "Min BH-BH       %.0f\n" % anchor_stats["min_black_hole_distance"]
 		+ "Min star-star   %.0f\n" % anchor_stats["min_star_star_distance"]
 		+ "Min star-BH     %.0f\n" % anchor_stats["min_star_bh_distance"]
 		+ "BH switches     %d\n" % _anchor_switch_count
@@ -253,9 +267,7 @@ func _sync_live_anchor_controls(config) -> void:
 	var safe_config = config.copy()
 	safe_config.clamp_values()
 	_live_bh_mass_spin.set_value_no_signal(safe_config.black_hole_mass)
-	var has_anchors: bool = _sim != null and not _sim.get_black_holes().is_empty()
-	_anchor_panel.visible = has_anchors
-	_anchor_diagnostics_panel.visible = has_anchors
+	_update_panel_group_visibility()
 
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
@@ -329,6 +341,7 @@ func _update_mode_specific_inputs() -> void:
 	for node in chaos_nodes:
 		node.visible = chaos_enabled
 	_field_patch_hint_label.visible = field_patch_enabled
+	_update_panel_group_visibility()
 
 func _on_mode_selected(_index: int) -> void:
 	if _mode_option.get_selected_id() != START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR:
@@ -344,6 +357,14 @@ func _on_live_bh_mass_changed(value: float) -> void:
 
 func _on_restart_button_pressed() -> void:
 	restart_requested.emit(_read_start_config())
+
+func _on_left_toggle_pressed() -> void:
+	_left_panels_collapsed = not _left_panels_collapsed
+	_update_panel_group_visibility()
+
+func _on_right_toggle_pressed() -> void:
+	_right_panels_collapsed = not _right_panels_collapsed
+	_update_panel_group_visibility()
 
 func _update_anchor_switch_tracking(star_anchor_states: Array) -> void:
 	var active_star_ids: Dictionary = {}
@@ -380,3 +401,20 @@ func _format_star_anchor_lines(star_anchor_states: Array) -> String:
 			]
 		)
 	return "\n".join(lines) + "\n"
+
+func _update_panel_group_visibility() -> void:
+	var has_anchors: bool = _sim != null and not _sim.get_black_holes().is_empty()
+	if _stats_panel != null:
+		_stats_panel.visible = not _left_panels_collapsed
+	if _inspector != null:
+		_inspector.visible = not _left_panels_collapsed
+	if _start_panel != null:
+		_start_panel.visible = not _right_panels_collapsed
+	if _anchor_panel != null:
+		_anchor_panel.visible = has_anchors and not _right_panels_collapsed
+	if _anchor_diagnostics_panel != null:
+		_anchor_diagnostics_panel.visible = has_anchors and not _right_panels_collapsed
+	if _left_toggle_button != null:
+		_left_toggle_button.text = ">" if _left_panels_collapsed else "<"
+	if _right_toggle_button != null:
+		_right_toggle_button.text = "<" if _right_panels_collapsed else ">"

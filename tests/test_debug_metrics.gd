@@ -209,7 +209,9 @@ func test_anchor_metrics_report_dominant_and_secondary_black_holes_per_star() ->
 	var star_states: Array = anchor["star_anchor_states"]
 
 	assert_eq(anchor["black_hole_count"], 2, "anchor metrics should count multiple black holes in a field patch")
+	assert_eq(anchor["field_ring_count"], 2, "one center plus one outer BH should span two logical field rings")
 	assert_almost_eq(anchor["black_hole_mass"], central_bh.mass + outer_bh.mass, 0.001, "anchor metrics should sum the mass of all black holes")
+	assert_almost_eq(anchor["min_black_hole_distance"], 9000.0, 0.001, "anchor metrics should report the smallest BH-BH spacing")
 	assert_eq(star_states.size(), 1, "one star should yield one anchor-state entry")
 	assert_eq(star_states[0]["dominant_bh_id"], central_bh.id, "the closer central BH should dominate the star")
 	assert_eq(star_states[0]["secondary_bh_id"], outer_bh.id, "the next strongest BH should be reported as the secondary anchor")

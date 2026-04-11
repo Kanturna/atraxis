@@ -20,12 +20,16 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var total_black_hole_mass: float = 0.0
 	var energy_bound_stars: int = 0
 	var energy_free_stars: int = 0
+	var field_ring_count: int = 0
+	var min_black_hole_distance: float = 0.0
 	var min_star_star_distance: float = INF
 	var min_star_bh_distance: float = INF
 	var star_anchor_states: Array = []
 	var black_holes: Array = world.get_black_holes()
 	for black_hole in black_holes:
 		total_black_hole_mass += black_hole.mass
+	field_ring_count = ANCHOR_FIELD_SCRIPT.field_ring_count_for_total(black_holes.size())
+	min_black_hole_distance = ANCHOR_FIELD_SCRIPT.min_black_hole_distance(black_holes)
 
 	for body in world.bodies:
 		if not body.active:
@@ -130,11 +134,13 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 		},
 		"anchor": {
 			"black_hole_count": black_holes.size(),
+			"field_ring_count": field_ring_count,
 			"black_hole_mass": total_black_hole_mass,
 			"total_star_mass": total_star_mass,
 			"anchor_ratio": anchor_ratio,
 			"energy_bound_stars": energy_bound_stars,
 			"energy_free_stars": energy_free_stars,
+			"min_black_hole_distance": min_black_hole_distance,
 			"min_star_star_distance": min_star_star_distance,
 			"min_star_bh_distance": min_star_bh_distance,
 			"star_anchor_states": star_anchor_states,

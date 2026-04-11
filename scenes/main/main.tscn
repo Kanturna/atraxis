@@ -38,6 +38,13 @@ offset_top = 16.0
 offset_right = 376.0
 offset_bottom = 430.0
 
+[node name="LeftPanelToggleButton" type="Button" parent="DebugOverlay" unique_id=1760491035]
+offset_left = 384.0
+offset_top = 16.0
+offset_right = 408.0
+offset_bottom = 40.0
+text = "<"
+
 [node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/StatsPanel" unique_id=499680202]
 custom_minimum_size = Vector2(340, 280)
 layout_mode = 2
@@ -154,8 +161,8 @@ text = "Black Holes"
 [node name="BlackHoleCountSpin" type="SpinBox" parent="DebugOverlay/StartPanel/VBox/SettingsGrid" unique_id=1100320017]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
-min_value = 3.0
-max_value = 9.0
+min_value = 1.0
+max_value = 61.0
 value = 5.0
 rounded = true
 
@@ -292,7 +299,7 @@ rounded = true
 visible = false
 custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
-text = "Field Patch: multiple BHs shape the gravity field, but stars still start around the central BH in this first stage. Black Holes sets the total count, including the center."
+text = "Field Patch: multiple BHs form concentric rings around the center. Black Holes sets the total count, including the central BH. Stars still start around the center in this first stage."
 autowrap_mode = 3
 
 [node name="RestartButton" type="Button" parent="DebugOverlay/StartPanel/VBox" unique_id=1453386492]
@@ -305,14 +312,24 @@ anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
 offset_top = 738.0
-offset_bottom = 1046.0
+offset_bottom = 1088.0
 
 [node name="RichTextLabel" type="RichTextLabel" parent="DebugOverlay/AnchorDiagnosticsPanel" unique_id=148800011]
-custom_minimum_size = Vector2(300, 290)
+custom_minimum_size = Vector2(300, 330)
 layout_mode = 2
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
+
+[node name="RightPanelToggleButton" type="Button" parent="DebugOverlay" unique_id=148800012]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -352.0
+offset_top = 156.0
+offset_right = -328.0
+offset_bottom = 180.0
+text = ">"
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1701775918]
 script = ExtResource("5")

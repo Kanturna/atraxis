@@ -5,6 +5,8 @@
 class_name SimWorld
 extends RefCounted
 
+const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
+
 signal body_added(body: SimBody)
 signal body_removed(body_id: int)
 signal debris_field_changed(field: DebrisField)
@@ -27,19 +29,22 @@ func _init() -> void:
 
 func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
+	var integration_substeps: int = _determine_black_hole_nearfield_substeps()
+	var sub_dt: float = sim_dt / float(integration_substeps)
 
-	for body in bodies:
-		if body.active:
-			body.acceleration = Vector2.ZERO
+	for _substep in range(integration_substeps):
+		for body in bodies:
+			if body.active:
+				body.acceleration = Vector2.ZERO
 
-	_gravity.apply_gravity(bodies)
+		_gravity.apply_gravity(bodies)
 
-	for body in bodies:
-		if not body.active or body.sleeping or body.kinematic:
-			continue
-		body.velocity += body.acceleration * sim_dt
-		body.position += body.velocity * sim_dt
-		body.age += sim_dt
+		for body in bodies:
+			if not body.active or body.sleeping or body.kinematic:
+				continue
+			body.velocity += body.acceleration * sub_dt
+			body.position += body.velocity * sub_dt
+			body.age += sub_dt
 
 	_update_scripted_orbiters(sim_dt)
 
@@ -168,6 +173,32 @@ func set_black_hole_mass(new_mass: float) -> void:
 			var parent_black_hole: SimBody = get_body_by_id(body.orbit_parent_id)
 			var orbit_speed: float = sqrt(SimConstants.G * parent_black_hole.mass / body.orbit_radius)
 			body.orbit_angular_speed = orbit_speed / body.orbit_radius
+
+func _determine_black_hole_nearfield_substeps() -> int:
+	var black_holes: Array = get_black_holes()
+	if black_holes.is_empty():
+		return 1
+	for body in bodies:
+		if not _requires_black_hole_nearfield_substeps(body):
+			continue
+		var ranked: Array = ANCHOR_FIELD_SCRIPT.rank_black_holes_for_body(body, black_holes)
+		if ranked.is_empty():
+			continue
+		var dominant_black_hole: SimBody = ranked[0]["black_hole"]
+		var dominant_distance: float = ranked[0]["distance"]
+		var nearfield_radius: float = ANCHOR_FIELD_SCRIPT.nearfield_radius_for_mass(dominant_black_hole.mass)
+		if nearfield_radius > 0.0 and dominant_distance <= nearfield_radius:
+			return SimConstants.BH_NEARFIELD_SUBSTEPS
+	return 1
+
+func _requires_black_hole_nearfield_substeps(body: SimBody) -> bool:
+	if not body.active or body.sleeping or body.kinematic:
+		return false
+	return body.body_type in [
+		SimBody.BodyType.STAR,
+		SimBody.BodyType.PLANET,
+		SimBody.BodyType.ASTEROID,
+	]
 
 func _update_scripted_orbiters(sim_dt: float) -> void:
 	for body in bodies:

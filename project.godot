@@ -23,8 +23,9 @@ Signal_Debugger="*uid://c6hdiw0dpoolg"
 
 [display]
 
-window/size/viewport_width=1920
-window/size/viewport_height=1080
+window/size/viewport_width=2550
+window/size/viewport_height=1440
+window/size/mode=2
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 

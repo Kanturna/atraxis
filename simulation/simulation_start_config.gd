@@ -84,5 +84,5 @@ func clamp_values() -> void:
 	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
 	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
 	star_outer_orbit_au = maxf(star_outer_orbit_au, star_inner_orbit_au + 0.5)
-	black_hole_count = clampi(black_hole_count, 3, 9)
+	black_hole_count = clampi(black_hole_count, 1, SimConstants.MAX_FIELD_PATCH_BLACK_HOLES)
 	field_spacing_au = clampf(field_spacing_au, 6.0, 20.0)

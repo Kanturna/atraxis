@@ -84,18 +84,29 @@ func test_field_patch_layout_keeps_central_bh_at_origin_and_outer_ring_spaced() 
 	assert_eq(black_holes.size(), 7, "field patch should create the configured total BH count")
 
 	var central_count: int = 0
-	var outer_distances: Array = []
+	var ring_one_count: int = 0
 	for black_hole in black_holes:
 		var distance: float = black_hole.position.length()
 		if is_zero_approx(distance):
 			central_count += 1
 		else:
-			outer_distances.append(distance)
+			if is_equal_approx(distance, config.field_spacing_au * SimConstants.AU):
+				ring_one_count += 1
 
 	assert_eq(central_count, 1, "field patch should keep exactly one black hole at the center")
-	assert_eq(outer_distances.size(), 6, "field patch should place the remaining black holes on the outer ring")
-	for distance in outer_distances:
-		assert_almost_eq(distance, config.field_spacing_au * SimConstants.AU, 0.01, "outer BHs should follow the configured field spacing")
+	assert_eq(ring_one_count, 6, "with 7 total black holes the first outer ring should fill all 6 slots")
+
+func test_field_patch_accepts_single_black_hole_count_as_center_only() -> void:
+	var world := SimWorld.new()
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	config.black_hole_count = 1
+
+	WorldBuilder.build_from_config(world, config)
+
+	assert_eq(world.get_black_holes().size(), 1, "field patch with one BH should remain a valid center-only layout")
+	assert_true(is_zero_approx(world.get_black_hole().position.length()), "the single field-patch BH should stay at the center")
 
 func test_live_black_hole_mass_updates_every_field_patch_anchor() -> void:
 	var world := SimWorld.new()

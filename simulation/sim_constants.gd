@@ -73,7 +73,15 @@ const GRAVITY_DEBUG_MIN_SCREEN_RADIUS: float = 8.0
 # Practical dominance threshold used for BH field layout and diagnostics.
 # This is a read-only helper value, not a hard gravity cutoff.
 const ANCHOR_DOMINANCE_THRESHOLD: float = 10.0
-const ANCHOR_FIELD_OUTER_COUNT: int = 4
+const MAX_FIELD_PATCH_BLACK_HOLES: int = 61
+const ANCHOR_FIELD_RING_SLOT_SCALE: int = 6
+
+# --- Dominant BH nearfield integration ---
+# Phase A is intentionally numerical only: bodies very close to a dominant BH
+# are integrated with smaller local timesteps so high speed resolves as
+# stronger curvature/orbital steering, not as a coarse-timestep escape spike.
+const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.22
+const BH_NEARFIELD_SUBSTEPS: int = 8
 
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
