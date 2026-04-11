@@ -38,24 +38,14 @@ static func _build_stable_anchor(world: SimWorld, config) -> void:
 	var black_hole := _make_black_hole()
 	world.add_body(black_hole)
 
-	if config.star_count <= 1:
-		var star := _make_anchor_star(black_hole, config.sun_orbit_radius_au, config.sun_orbit_speed_scale)
+	var stars := _place_stars(black_hole, config, rng)
+	for star in stars:
 		world.add_body(star)
-
-		for i in range(config.core_planet_count):
-			world.add_body(_make_core_planet(star, i, config.core_planet_count))
-
-		for i in range(config.disturbance_body_count):
-			world.add_body(_make_disturbance_body(star, rng, i))
-	else:
-		var stars := _place_multi_stars(black_hole, config, rng)
-		for star in stars:
-			world.add_body(star)
-		for star in stars:
-			for i in range(config.planets_per_star):
-				world.add_body(_make_core_planet(star, i, config.planets_per_star))
-		for i in range(config.disturbance_body_count):
-			world.add_body(_make_disturbance_body(stars[0], rng, i))
+	for star in stars:
+		for i in range(config.planets_per_star):
+			world.add_body(_make_core_planet(star, i, config.planets_per_star))
+	for i in range(config.disturbance_body_count):
+		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
 
 static func _build_chaos_inflow(world: SimWorld, config) -> void:
 	var star := _make_star()
@@ -95,16 +85,7 @@ static func _make_star() -> SimBody:
 	body.active = true
 	return body
 
-static func _make_anchor_star(black_hole: SimBody, orbit_radius_au: float, speed_scale: float) -> SimBody:
-	var star := _make_star()
-	star.kinematic = false
-	star.scripted_orbit_enabled = false
-	star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
-	_place_in_orbit(star, black_hole, orbit_radius_au * SimConstants.AU, 0.0, 0.0)
-	star.velocity *= speed_scale
-	return star
-
-static func _place_multi_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
+static func _place_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []
 	var n: int = config.star_count
 	var inner: float = config.star_inner_orbit_au * SimConstants.AU
@@ -129,6 +110,7 @@ static func _place_multi_stars(black_hole: SimBody, config, rng: RandomNumberGen
 		star.scripted_orbit_enabled = false
 		star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
 		_place_in_orbit(star, black_hole, orbit_radius, phase, 0.0)
+		star.velocity *= config.sun_orbit_speed_scale
 		stars.append(star)
 
 	return stars
