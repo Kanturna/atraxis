@@ -46,6 +46,9 @@ func update_all(bodies: Array) -> void:
 static func sim_to_screen(sim_pos: Vector2) -> Vector2:
 	return sim_pos * SimConstants.SIM_TO_SCREEN
 
+static func snap_screen_point(screen_pos: Vector2) -> Vector2:
+	return Vector2(round(screen_pos.x), round(screen_pos.y))
+
 ## Convert a sim-unit distance (e.g. a radius or zone boundary) to pixels.
 static func sim_dist_to_screen(sim_dist: float) -> float:
 	return sim_dist * SimConstants.SIM_TO_SCREEN

@@ -20,7 +20,7 @@ func build_ring_specs(bodies: Array) -> Array:
 
 			specs.append({
 				"body_id": body.id,
-				"center": BodyRenderer.sim_to_screen(body.position),
+				"center": BodyRenderer.snap_screen_point(BodyRenderer.sim_to_screen(body.position)),
 				"sim_radius": sim_radius,
 				"screen_radius": screen_radius,
 				"threshold": threshold,

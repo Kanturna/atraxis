@@ -68,6 +68,8 @@ const GRAVITY_DEBUG_COLORS := [
 ]
 const GRAVITY_DEBUG_LINE_WIDTH: float = 1.0
 const GRAVITY_DEBUG_MIN_SCREEN_RADIUS: float = 8.0
+const GRAVITY_DEBUG_RENDER_LINE_WIDTH: float = 1.5
+const ZONE_RENDER_LINE_WIDTH: float = 1.5
 
 # --- Anchor field debug/layout ---
 # Practical dominance threshold used for BH field layout and diagnostics.

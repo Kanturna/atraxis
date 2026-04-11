@@ -12,7 +12,7 @@ func setup(zones: WorldBuilder.ZoneBoundaries) -> void:
 
 func update_for_star(star: SimBody) -> void:
 	if star != null and star.active:
-		position = BodyRenderer.sim_to_screen(star.position)
+		position = BodyRenderer.snap_screen_point(BodyRenderer.sim_to_screen(star.position))
 
 func _rebuild_lines() -> void:
 	# Remove any existing children
@@ -39,7 +39,7 @@ func _add_ring(sim_radius: float, color: Color) -> void:
 		points.append(Vector2(cos(angle), sin(angle)) * screen_r)
 
 	var line := AntialiasedLine2D.new()
-	line.width = 1.0
+	line.width = SimConstants.ZONE_RENDER_LINE_WIDTH
 	line.default_color = color
 	line.points = points
 	add_child(line)

@@ -21,7 +21,7 @@ func update_all(bodies: Array) -> void:
 		var spec: Dictionary = specs[i]
 		var line: AntialiasedLine2D = _ring_nodes[i]
 		line.visible = true
-		line.width = SimConstants.GRAVITY_DEBUG_LINE_WIDTH
+		line.width = SimConstants.GRAVITY_DEBUG_RENDER_LINE_WIDTH
 		line.default_color = spec["color"]
 		line.points = _build_ring_points(spec["center"], spec["screen_radius"])
 
