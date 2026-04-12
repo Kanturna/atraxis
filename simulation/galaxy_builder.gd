@@ -76,6 +76,12 @@ static func _build_worldgen_main_universe(
 		var fallback_candidate = worldgen.build_starter_fallback_candidate(galaxy_state.galaxy_seed)
 		galaxy_state.add_cluster(_build_cluster_state_from_candidate(worldgen_config, fallback_candidate))
 	var primary_cluster: ClusterState = _find_preferred_spawn_cluster(galaxy_state)
+	if primary_cluster == null:
+		var fallback_candidate = worldgen.build_starter_fallback_candidate(galaxy_state.galaxy_seed)
+		var fallback_cluster: ClusterState = _build_cluster_state_from_candidate(worldgen_config, fallback_candidate)
+		if not galaxy_state.has_cluster(fallback_cluster.cluster_id):
+			galaxy_state.add_cluster(fallback_cluster)
+		primary_cluster = galaxy_state.get_cluster(fallback_cluster.cluster_id)
 	if primary_cluster != null:
 		galaxy_state.primary_cluster_id = primary_cluster.cluster_id
 
@@ -283,9 +289,25 @@ static func _build_cluster_state_from_candidate(
 		candidate_descriptor.bh_spacing_au,
 		worldgen_config.black_hole_mass
 	)
-	var content_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(
+	var stored_descriptor: Dictionary = candidate_descriptor.descriptor if candidate_descriptor != null else {}
+	var content_profile_variant = stored_descriptor.get("content_profile", null)
+	var content_profile: Dictionary = content_profile_variant.duplicate(true) \
+		if content_profile_variant is Dictionary \
+		else WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(worldgen_config, candidate_descriptor)
+	var layout_targets_variant = stored_descriptor.get("layout_targets", null)
+	var layout_targets: Dictionary = layout_targets_variant.duplicate(true) \
+		if layout_targets_variant is Dictionary \
+		else WORLDGEN_MAPPING_SCRIPT.build_candidate_layout_targets(
+			worldgen_config,
+			candidate_descriptor,
+			content_profile
+		)
+	var layout_diagnostics: Dictionary = _build_cluster_layout_diagnostics(
 		worldgen_config,
-		candidate_descriptor
+		candidate_descriptor.radius,
+		local_black_hole_specs,
+		content_profile,
+		layout_targets
 	)
 	var content_markers: Array = WORLDGEN_MAPPING_SCRIPT.build_scrap_markers(
 		candidate_descriptor,
@@ -320,6 +342,8 @@ static func _build_cluster_state_from_candidate(
 		"life_potential": candidate_descriptor.life_potential,
 		"worldgen_radius": candidate_descriptor.radius,
 		"content_profile": content_profile.duplicate(true),
+		"layout_targets": layout_targets.duplicate(true),
+		"layout_diagnostics": layout_diagnostics.duplicate(true),
 		"content_markers": content_markers.duplicate(true),
 		"descriptor": candidate_descriptor.descriptor.duplicate(true),
 	}
@@ -327,7 +351,8 @@ static func _build_cluster_state_from_candidate(
 		worldgen_config,
 		candidate_descriptor,
 		local_black_hole_specs.size(),
-		content_profile
+		content_profile,
+		layout_diagnostics
 	)
 	cluster_state.radius = candidate_descriptor.radius
 	cluster_state.runtime_extent_radius = cluster_state.radius
@@ -354,7 +379,8 @@ static func _build_worldgen_simulation_profile(
 		worldgen_config,
 		candidate_descriptor,
 		local_black_hole_count: int,
-		content_profile: Dictionary) -> Dictionary:
+		content_profile: Dictionary,
+		layout_diagnostics: Dictionary = {}) -> Dictionary:
 	var profile := {
 		"content_archetype": str(content_profile.get("content_archetype", candidate_descriptor.region_archetype)),
 		"analytic_star_carriers": false,
@@ -402,6 +428,8 @@ static func _build_worldgen_simulation_profile(
 		"star_richness": worldgen_config.star_richness,
 		"rare_zone_frequency": worldgen_config.rare_zone_frequency,
 	}
+	for key in layout_diagnostics.keys():
+		profile[key] = layout_diagnostics[key]
 	return profile
 
 static func _build_simulation_profile(
@@ -462,6 +490,87 @@ static func _estimate_cluster_radius(local_black_hole_specs: Array, simulation_p
 
 	return max_black_hole_offset + radius_padding
 
+static func _build_cluster_layout_diagnostics(
+		worldgen_config,
+		cluster_radius: float,
+		local_black_hole_specs: Array,
+		content_profile: Dictionary,
+		layout_targets: Dictionary) -> Dictionary:
+	var dominance_radius_au: float = float(layout_targets.get(
+		"dominance_radius_au",
+		WORLDGEN_MAPPING_SCRIPT.dominance_radius_au_for_config(worldgen_config)
+	))
+	var reserved_start_band_au: float = float(layout_targets.get(
+		"reserved_start_band_au",
+		maxf(
+			worldgen_config.spawn_radius_au + worldgen_config.spawn_spread_au,
+			float(content_profile.get("star_inner_orbit_au", worldgen_config.star_inner_orbit_au))
+		)
+	))
+	var spacing_floor_au: float = float(layout_targets.get("spacing_floor_au", dominance_radius_au))
+	var cluster_radius_floor_au: float = float(layout_targets.get(
+		"cluster_radius_floor_au",
+		float(content_profile.get("star_outer_orbit_au", worldgen_config.star_outer_orbit_au)) + 2.0
+	))
+	var min_bh_distance_au: float = _minimum_local_black_hole_distance_au(local_black_hole_specs)
+	var primary_clearance_au: float = _primary_black_hole_clearance_au(local_black_hole_specs)
+	var required_primary_clearance_au: float = reserved_start_band_au + dominance_radius_au
+	var cluster_radius_au: float = cluster_radius / SimConstants.AU
+	var has_primary_clearance_issue: bool = primary_clearance_au >= 0.0 \
+		and primary_clearance_au + 0.001 < required_primary_clearance_au
+	var has_cluster_radius_issue: bool = cluster_radius_au + 0.001 < cluster_radius_floor_au
+	var spawn_viable: bool = not has_primary_clearance_issue and not has_cluster_radius_issue
+	var spawn_viability_reason: String = "ok"
+	if has_primary_clearance_issue:
+		spawn_viability_reason = "primary_clearance_below_start_band"
+	elif has_cluster_radius_issue:
+		spawn_viability_reason = "cluster_radius_below_orbit_band"
+	return {
+		"layout_dominance_radius_au": dominance_radius_au,
+		"layout_reserved_start_band_au": reserved_start_band_au,
+		"layout_spacing_floor_au": spacing_floor_au,
+		"layout_cluster_radius_floor_au": cluster_radius_floor_au,
+		"layout_min_bh_distance_au": min_bh_distance_au,
+		"layout_primary_clearance_au": primary_clearance_au,
+		"layout_required_primary_clearance_au": required_primary_clearance_au,
+		"spawn_viable": spawn_viable,
+		"spawn_viability_reason": spawn_viability_reason,
+	}
+
+static func _minimum_local_black_hole_distance_au(local_black_hole_specs: Array) -> float:
+	if local_black_hole_specs.size() < 2:
+		return -1.0
+	var min_distance: float = INF
+	for left_index in range(local_black_hole_specs.size()):
+		for right_index in range(left_index + 1, local_black_hole_specs.size()):
+			min_distance = minf(
+				min_distance,
+				Vector2(local_black_hole_specs[left_index]["local_position"]).distance_to(
+					Vector2(local_black_hole_specs[right_index]["local_position"])
+				)
+			)
+	return min_distance / SimConstants.AU if min_distance < INF else -1.0
+
+static func _primary_black_hole_clearance_au(local_black_hole_specs: Array) -> float:
+	if local_black_hole_specs.size() < 2:
+		return -1.0
+	var primary_spec: Dictionary = local_black_hole_specs[0]
+	for spec in local_black_hole_specs:
+		if bool(spec.get("is_primary", false)):
+			primary_spec = spec
+			break
+	var primary_position: Vector2 = Vector2(primary_spec.get("local_position", Vector2.ZERO))
+	var primary_id: int = int(primary_spec.get("id", -1))
+	var min_distance: float = INF
+	for spec in local_black_hole_specs:
+		if int(spec.get("id", -2)) == primary_id:
+			continue
+		min_distance = minf(
+			min_distance,
+			primary_position.distance_to(Vector2(spec.get("local_position", Vector2.ZERO)))
+		)
+	return min_distance / SimConstants.AU if min_distance < INF else -1.0
+
 static func _derive_cluster_seed(galaxy_seed: int, cluster_id: int) -> int:
 	var derived: int = (galaxy_seed + 1) * 92_821 + (cluster_id + 1) * 68_911
 	return absi(derived)
@@ -477,6 +586,8 @@ static func _find_preferred_spawn_cluster(galaxy_state: GalaxyState) -> ClusterS
 	var best_spawn_priority: int = -9_999
 	var best_distance: float = INF
 	for cluster_state in galaxy_state.get_clusters():
+		if not bool(cluster_state.simulation_profile.get("spawn_viable", false)):
+			continue
 		var spawn_priority: int = int(cluster_state.simulation_profile.get("spawn_priority", 0))
 		var distance: float = cluster_state.global_center.length()
 		if matched_cluster == null \

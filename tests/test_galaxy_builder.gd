@@ -225,6 +225,8 @@ func test_registered_worldgen_clusters_keep_candidate_radius_as_authoritative_ex
 		if not (sector_coord_variant is Vector2i):
 			continue
 		var candidate_index: int = int(cluster_state.simulation_profile.get("candidate_index", -1))
+		if bool(cluster_state.cluster_blueprint.get("descriptor", {}).get("starter_fallback", false)):
+			continue
 		var matched_candidate = null
 		for candidate_descriptor in galaxy_state.get_sector_candidate_descriptors(sector_coord_variant):
 			if candidate_descriptor.candidate_index == candidate_index:
@@ -272,17 +274,60 @@ func test_same_sector_candidates_keep_a_small_clearance_margin_in_v1() -> void:
 				for right_index in range(left_index + 1, candidates.size()):
 					var left_candidate = candidates[left_index]
 					var right_candidate = candidates[right_index]
-					var required_clearance: float = (left_candidate.radius + right_candidate.radius) * 0.55
+					var required_clearance: float = (left_candidate.radius + right_candidate.radius) * 0.85
 					assert_gte(
 						left_candidate.global_center.distance_to(right_candidate.global_center),
 						required_clearance - 0.001,
-						"same-sector cluster candidates should keep the small V1 clearance margin instead of heavily overlapping"
+						"same-sector cluster candidates should keep the stronger readability clearance instead of reading like one merged center"
 					)
 			if found_multi_candidate_sector:
 				break
 		if found_multi_candidate_sector:
 			break
 	assert_true(found_multi_candidate_sector, "dense worldgen settings should expose at least one multi-candidate sector for the clearance test")
+
+func test_worldgen_candidate_spacing_floors_protect_friendly_and_hostile_cluster_layouts() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 2025
+	config.cluster_density = 0.98
+	config.void_strength = 0.08
+	config.bh_richness = 0.82
+	config.star_richness = 0.70
+	config.rare_zone_frequency = 1.0
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidates_by_archetype: Dictionary = _find_candidate_descriptors_for_all_archetypes(worldgen, config.seed, 40)
+
+	for archetype in ["star_nursery", "scrap_rich_remnant", "sparse_relic_cluster", "dense_bh_knot"]:
+		var candidate_descriptor = candidates_by_archetype[archetype]
+		assert_not_null(candidate_descriptor, "the spacing-floor scan should find a %s candidate" % archetype)
+		var layout_targets: Dictionary = candidate_descriptor.descriptor.get("layout_targets", {})
+		var spacing_floor_au: float = float(layout_targets.get("spacing_floor_au", 0.0))
+		assert_gte(
+			candidate_descriptor.bh_spacing_au + 0.001,
+			spacing_floor_au,
+			"%s candidates should never drop below their calibrated spacing floor" % archetype
+		)
+		var cluster_state: ClusterState = GalaxyBuilder._build_cluster_state_from_candidate(
+			worldgen_config,
+			candidate_descriptor
+		)
+		var min_bh_distance_au: float = float(cluster_state.simulation_profile.get("layout_min_bh_distance_au", -1.0))
+		if min_bh_distance_au >= 0.0:
+			assert_gte(
+				min_bh_distance_au + 0.001,
+				spacing_floor_au,
+				"%s cluster layouts should keep their realized BH spacing above the floor as well" % archetype
+			)
+
+	var dense_candidate = candidates_by_archetype["dense_bh_knot"]
+	var dense_spacing_floor_au: float = float(dense_candidate.descriptor.get("layout_targets", {}).get("spacing_floor_au", 0.0))
+	assert_gte(
+		dense_spacing_floor_au + 0.001,
+		WORLDGEN_MAPPING_SCRIPT.dominance_radius_au_for_config(worldgen_config),
+		"dense BH knots should still respect at least the local dominance-radius floor"
+	)
 
 func test_cluster_black_holes_start_resident_and_expose_lifecycle_scaffold() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -443,6 +488,16 @@ func test_worldgen_bootstrap_discovers_origin_neighborhood_and_materializes_only
 	assert_gt(galaxy_state.get_cluster_count(), 1, "dense bootstrap settings should produce multiple registered clusters")
 	assert_eq(visible_black_holes, active_cluster_black_holes, "the live sim should materialize exactly the active cluster BH share")
 	assert_gt(total_black_holes, visible_black_holes, "registered galaxy truth should contain more BHs than the active local projection")
+	assert_eq(
+		galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.ACTIVE),
+		1,
+		"the debug-facing state split should expose exactly one active materialized cluster"
+	)
+	assert_gt(
+		galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED),
+		0,
+		"the debug-facing state split should keep other registered clusters unloaded until activated"
+	)
 
 func test_worldgen_archetypes_produce_distinct_region_characteristics() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -628,10 +683,46 @@ func test_primary_cluster_prefers_friendly_spawn_archetypes_over_hostile_candida
 		primary_archetype in ["void", "dense_bh_knot"],
 		"the bootstrap spawn should avoid hostile start archetypes when friendlier candidates are present"
 	)
+	assert_true(
+		bool(primary_cluster.simulation_profile.get("spawn_viable", false)),
+		"the chosen primary cluster should now pass the hard local spawn-viability gate"
+	)
 	assert_eq(
 		int(primary_cluster.simulation_profile.get("spawn_priority", -1)),
 		max_spawn_priority,
 		"the primary cluster should be chosen from the highest-priority spawnable archetype tier first"
+	)
+
+func test_starter_fallback_candidate_is_explicitly_spawn_safe() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 911
+	config.cluster_density = 0.0
+	config.void_strength = 1.0
+	config.bh_richness = 0.15
+	config.star_richness = 0.20
+	config.rare_zone_frequency = 0.0
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var fallback_candidate = worldgen.build_starter_fallback_candidate(config.seed)
+	var fallback_cluster: ClusterState = GalaxyBuilder._build_cluster_state_from_candidate(
+		worldgen_config,
+		fallback_candidate
+	)
+
+	assert_eq(
+		fallback_cluster.get_objects_by_kind("black_hole").size(),
+		1,
+		"the explicit starter fallback should collapse to one local BH so the start geometry stays readable"
+	)
+	assert_true(
+		bool(fallback_cluster.simulation_profile.get("spawn_viable", false)),
+		"the explicit starter fallback should pass the same hard spawn-viability gate as normal clusters"
+	)
+	assert_eq(
+		str(fallback_cluster.simulation_profile.get("spawn_viability_reason", "")),
+		"ok",
+		"the explicit starter fallback should advertise a clean spawn-viability reason"
 	)
 
 func test_active_cluster_session_switch_marks_previous_cluster_simplified() -> void:

@@ -85,7 +85,7 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_debug"):
 		_debug_overlay.toggle()
-		_world_renderer.set_gravity_debug_visible(_debug_overlay.visible)
+		_world_renderer.set_debug_overlays_visible(_debug_overlay.visible)
 
 	# Body selection by click: convert viewport pixel → 2D world position
 	if event is InputEventMouseButton and event.pressed \
@@ -181,11 +181,11 @@ func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_vis
 	sim_world.body_added.connect(_world_renderer._on_body_added)
 	sim_world.body_removed.connect(_world_renderer._on_body_removed)
 
-	_world_renderer.initialize(sim_world, zones_by_star)
+	_world_renderer.initialize(sim_world, zones_by_star, galaxy_state, active_cluster_session)
 	_debug_overlay.initialize(sim_world, _current_start_config, galaxy_state, active_cluster_session)
 	_hud.initialize(sim_world, time_scale)
 	_debug_overlay.visible = debug_visible
-	_world_renderer.set_gravity_debug_visible(debug_visible)
+	_world_renderer.set_debug_overlays_visible(debug_visible)
 	_world_renderer.render_frame(sim_world)
 	_hud.update_display(sim_world)
 	if previous_world != null and previous_world != sim_world:

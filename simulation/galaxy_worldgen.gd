@@ -132,6 +132,16 @@ func build_cluster_candidates(
 	return candidates
 
 func build_starter_fallback_candidate(galaxy_seed: int):
+	var fallback_region = _describe_fallback_region(galaxy_seed)
+	var fallback_content_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_minimal_region_content_profile(
+		config,
+		fallback_region
+	)
+	var layout_targets: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_candidate_layout_targets(
+		config,
+		fallback_region,
+		fallback_content_profile
+	)
 	var descriptor := CANDIDATE_DESCRIPTOR_SCRIPT.new()
 	descriptor.sector_coord = Vector2i.ZERO
 	descriptor.candidate_index = STARTER_FALLBACK_CANDIDATE_INDEX
@@ -145,27 +155,31 @@ func build_starter_fallback_candidate(galaxy_seed: int):
 	descriptor.rare_zone_weight = config.rare_zone_frequency
 	descriptor.scrap_potential = 0.15
 	descriptor.life_potential = 0.45
-	descriptor.bh_count = max(1, WORLDGEN_MAPPING_SCRIPT.candidate_bh_count(
-		config,
-		_describe_fallback_region(galaxy_seed),
-		0.0
-	))
+	descriptor.bh_count = 1
 	descriptor.bh_spacing_au = maxf(
-		6.0,
-		WORLDGEN_MAPPING_SCRIPT.candidate_bh_spacing_au(config, _describe_fallback_region(galaxy_seed), 0.5)
+		float(layout_targets.get("spacing_floor_au", 0.0)),
+		WORLDGEN_MAPPING_SCRIPT.candidate_bh_spacing_au(
+			config,
+			fallback_region,
+			0.5,
+			fallback_content_profile
+		)
 	)
 	descriptor.radius = maxf(
-		(config.star_outer_orbit_au + 4.0) * SimConstants.AU,
+		(float(fallback_content_profile.get("star_outer_orbit_au", config.star_outer_orbit_au)) + 4.0) * SimConstants.AU,
 		WORLDGEN_MAPPING_SCRIPT.candidate_cluster_radius_au(
 			config,
-			_describe_fallback_region(galaxy_seed),
+			fallback_region,
 			descriptor.bh_count,
 			descriptor.bh_spacing_au,
-			0.5
+			0.5,
+			fallback_content_profile
 		) * SimConstants.AU
 	)
 	descriptor.descriptor = {
 		"starter_fallback": true,
+		"content_profile": fallback_content_profile.duplicate(true),
+		"layout_targets": layout_targets.duplicate(true),
 	}
 	return descriptor
 
@@ -189,6 +203,15 @@ func _build_cluster_candidate(
 	var bh_noise: float = candidate_rng.randf()
 	var spacing_noise: float = candidate_rng.randf()
 	var radius_noise: float = candidate_rng.randf()
+	var content_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_minimal_region_content_profile(
+		config,
+		region_descriptor
+	)
+	var layout_targets: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_candidate_layout_targets(
+		config,
+		region_descriptor,
+		content_profile
+	)
 
 	descriptor.sector_coord = region_descriptor.sector_coord
 	descriptor.candidate_index = candidate_index
@@ -201,18 +224,25 @@ func _build_cluster_candidate(
 	descriptor.rare_zone_weight = region_descriptor.rare_zone_weight
 	descriptor.scrap_potential = region_descriptor.scrap_potential
 	descriptor.life_potential = region_descriptor.life_potential
-	descriptor.bh_count = WORLDGEN_MAPPING_SCRIPT.candidate_bh_count(config, region_descriptor, bh_noise)
+	descriptor.bh_count = WORLDGEN_MAPPING_SCRIPT.candidate_bh_count(
+		config,
+		region_descriptor,
+		bh_noise,
+		content_profile
+	)
 	descriptor.bh_spacing_au = WORLDGEN_MAPPING_SCRIPT.candidate_bh_spacing_au(
 		config,
 		region_descriptor,
-		spacing_noise
+		spacing_noise,
+		content_profile
 	)
 	descriptor.radius = WORLDGEN_MAPPING_SCRIPT.candidate_cluster_radius_au(
 		config,
 		region_descriptor,
 		descriptor.bh_count,
 		descriptor.bh_spacing_au,
-		radius_noise
+		radius_noise,
+		content_profile
 	) * SimConstants.AU
 	var resolved_global_center: Vector2 = _resolve_candidate_global_center(
 		sector_origin_world,
@@ -224,6 +254,8 @@ func _build_cluster_candidate(
 	descriptor.descriptor = {
 		"sector_key": sector_key(region_descriptor.sector_coord),
 		"sector_padding": _sector_candidate_padding(descriptor.radius),
+		"content_profile": content_profile.duplicate(true),
+		"layout_targets": layout_targets.duplicate(true),
 	}
 	return descriptor
 
@@ -268,9 +300,9 @@ func _candidate_clearance_margin(local_position: Vector2, candidate_radius: floa
 	return best_margin
 
 func _candidate_clearance_distance(candidate_radius: float, other_radius: float) -> float:
-	# Small V1 soft-clearance only: reduce heavily overlapping cluster claims
-	# inside one sector without turning candidate placement into a bigger solver.
-	return (candidate_radius + other_radius) * 0.55
+	# Keep same-sector clusters visually distinct enough that they do not read as
+	# one merged local formation during ordinary camera movement.
+	return (candidate_radius + other_radius) * 0.85
 
 func _describe_fallback_region(galaxy_seed: int):
 	var descriptor := REGION_DESCRIPTOR_SCRIPT.new()

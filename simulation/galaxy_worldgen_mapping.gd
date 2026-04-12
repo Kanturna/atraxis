@@ -4,7 +4,13 @@
 class_name GalaxyWorldgenMapping
 extends RefCounted
 
+const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
 const MATERIAL_PROFILE_KEYS := ["rocky", "icy", "metallic", "mixed"]
+const FRIENDLY_SPAWN_ARCHETYPES := [
+	"star_nursery",
+	"scrap_rich_remnant",
+	"sparse_relic_cluster",
+]
 
 static func archetype_weights(config) -> Dictionary:
 	var density: float = clampf(config.cluster_density, 0.0, 1.0)
@@ -102,41 +108,71 @@ static func candidate_slot_threshold(region_descriptor, candidate_index: int) ->
 static func candidate_bh_count(
 		config,
 		region_descriptor,
-		noise: float) -> int:
+		noise: float,
+		content_profile: Dictionary = {}) -> int:
 	var richness: float = clampf(region_descriptor.bh_richness, 0.0, 1.0)
-	var count_from_richness: float = lerpf(1.0, 12.0, richness)
+	var max_count: int = candidate_bh_count_cap_for_archetype(region_descriptor.region_archetype)
+	var count_from_richness: float = lerpf(1.0, float(max_count), richness)
 	if config.legacy_generation_hints_enabled and config.legacy_black_hole_count_hint > 0:
 		count_from_richness = lerpf(
 			count_from_richness,
 			minf(float(config.legacy_black_hole_count_hint), 18.0),
 			0.55
 		)
-	return clampi(int(round(count_from_richness + noise * 2.0)), 1, 18)
+	return clampi(int(round(count_from_richness + noise * 1.5)), 1, max_count)
 
 static func candidate_bh_spacing_au(
 		config,
 		region_descriptor,
-		noise: float) -> float:
+		noise: float,
+		content_profile: Dictionary = {}) -> float:
 	var richness: float = clampf(region_descriptor.bh_richness, 0.0, 1.0)
-	var base_spacing: float = lerpf(10.5, 4.5, richness)
-	base_spacing += lerpf(-1.5, 1.5, noise)
+	var resolved_content_profile: Dictionary = content_profile \
+		if not content_profile.is_empty() \
+		else build_minimal_region_content_profile(config, region_descriptor)
+	var layout_targets: Dictionary = build_candidate_layout_targets(
+		config,
+		region_descriptor,
+		resolved_content_profile
+	)
+	var base_spacing: float = lerpf(
+		14.0,
+		8.0,
+		richness
+	) if is_spawn_friendly_archetype(region_descriptor.region_archetype) else lerpf(11.5, 5.0, richness)
+	base_spacing += lerpf(-1.0, 1.2, noise)
 	if config.legacy_generation_hints_enabled and config.legacy_field_spacing_au_hint >= 0.0:
-		base_spacing = lerpf(base_spacing, config.legacy_field_spacing_au_hint, 0.45)
-	return clampf(base_spacing, 3.5, SimConstants.MAX_FIELD_PATCH_SPACING_AU)
+		base_spacing = lerpf(base_spacing, config.legacy_field_spacing_au_hint, 0.35)
+	base_spacing = clampf(base_spacing, 3.5, SimConstants.MAX_FIELD_PATCH_SPACING_AU)
+	return maxf(base_spacing, float(layout_targets.get("spacing_floor_au", 0.0)))
 
 static func candidate_cluster_radius_au(
 		config,
 		region_descriptor,
 		bh_count: int,
 		bh_spacing_au: float,
-		noise: float) -> float:
+		noise: float,
+		content_profile: Dictionary = {}) -> float:
 	var density: float = clampf(region_descriptor.density, 0.0, 1.0)
-	var local_radius: float = bh_spacing_au * (0.8 + float(maxi(bh_count - 1, 0)) * 0.25)
-	local_radius += lerpf(4.0, 14.0, density)
-	local_radius += lerpf(-2.0, 3.0, noise)
+	var resolved_content_profile: Dictionary = content_profile \
+		if not content_profile.is_empty() \
+		else build_minimal_region_content_profile(config, region_descriptor)
+	var layout_targets: Dictionary = build_candidate_layout_targets(
+		config,
+		region_descriptor,
+		resolved_content_profile
+	)
+	var star_outer_au: float = float(resolved_content_profile.get("star_outer_orbit_au", config.star_outer_orbit_au))
+	var local_radius: float = bh_spacing_au * (0.9 + float(maxi(bh_count - 1, 0)) * 0.30)
+	local_radius += maxf(star_outer_au + 2.0, float(layout_targets.get("reserved_start_band_au", 0.0)) + 1.0)
+	local_radius += lerpf(3.0, 9.0, density)
+	local_radius += lerpf(-1.5, 2.0, noise)
 	if config.legacy_generation_hints_enabled and config.legacy_galaxy_cluster_radius_au_hint >= 0.0:
 		local_radius = lerpf(local_radius, config.legacy_galaxy_cluster_radius_au_hint * 4.0, 0.40)
-	return maxf(local_radius, config.star_outer_orbit_au + 3.0)
+	return maxf(
+		local_radius,
+		float(layout_targets.get("cluster_radius_floor_au", config.star_outer_orbit_au + 3.0))
+	)
 
 static func candidate_star_count(config, candidate_descriptor) -> int:
 	return int(build_cluster_content_profile(config, candidate_descriptor).get("star_count", 0))
@@ -148,11 +184,79 @@ static func candidate_disturbance_count(config, candidate_descriptor) -> int:
 	return int(build_cluster_content_profile(config, candidate_descriptor).get("disturbance_body_count", 0))
 
 static func build_cluster_content_profile(config, candidate_descriptor) -> Dictionary:
-	var archetype: String = str(candidate_descriptor.region_archetype)
-	var star_signal: float = clampf(candidate_descriptor.star_richness, 0.0, 1.0)
-	var bh_signal: float = clampf(candidate_descriptor.bh_richness, 0.0, 1.0)
-	var scrap_signal: float = clampf(candidate_descriptor.scrap_potential, 0.0, 1.0)
-	var life_signal: float = clampf(candidate_descriptor.life_potential, 0.0, 1.0)
+	return _build_content_profile(
+		config,
+		str(candidate_descriptor.region_archetype),
+		clampf(candidate_descriptor.star_richness, 0.0, 1.0),
+		clampf(candidate_descriptor.bh_richness, 0.0, 1.0),
+		clampf(candidate_descriptor.scrap_potential, 0.0, 1.0),
+		clampf(candidate_descriptor.life_potential, 0.0, 1.0)
+	)
+
+static func build_minimal_region_content_profile(config, region_descriptor) -> Dictionary:
+	return _build_content_profile(
+		config,
+		str(region_descriptor.region_archetype),
+		clampf(region_descriptor.star_richness, 0.0, 1.0),
+		clampf(region_descriptor.bh_richness, 0.0, 1.0),
+		clampf(region_descriptor.scrap_potential, 0.0, 1.0),
+		clampf(region_descriptor.life_potential, 0.0, 1.0)
+	)
+
+static func build_candidate_layout_targets(
+		config,
+		region_descriptor,
+		content_profile: Dictionary) -> Dictionary:
+	var archetype: String = str(region_descriptor.region_archetype)
+	var dominance_radius_au: float = dominance_radius_au_for_config(config)
+	var reserved_start_band_au: float = maxf(
+		float(content_profile.get("star_inner_orbit_au", config.star_inner_orbit_au)),
+		float(config.spawn_radius_au) + float(config.spawn_spread_au)
+	)
+	var spacing_floor_au: float = dominance_radius_au
+	if is_spawn_friendly_archetype(archetype):
+		spacing_floor_au = maxf(spacing_floor_au, reserved_start_band_au)
+	var cluster_radius_floor_au: float = maxf(
+		float(content_profile.get("star_outer_orbit_au", config.star_outer_orbit_au)) + 2.0,
+		reserved_start_band_au + 1.0
+	)
+	return {
+		"dominance_radius_au": dominance_radius_au,
+		"reserved_start_band_au": reserved_start_band_au,
+		"spacing_floor_au": spacing_floor_au,
+		"cluster_radius_floor_au": cluster_radius_floor_au,
+	}
+
+static func dominance_radius_au_for_config(config) -> float:
+	if config == null:
+		return 0.0
+	return ANCHOR_FIELD_SCRIPT.dominance_radius_for_mass(float(config.black_hole_mass)) / SimConstants.AU
+
+static func is_spawn_friendly_archetype(archetype: String) -> bool:
+	return FRIENDLY_SPAWN_ARCHETYPES.has(archetype)
+
+static func candidate_bh_count_cap_for_archetype(archetype: String) -> int:
+	match archetype:
+		"star_nursery":
+			return 4
+		"scrap_rich_remnant":
+			return 5
+		"sparse_relic_cluster":
+			return 4
+		"void":
+			return 3
+		"dense_bh_knot":
+			return 12
+		_:
+			return 8
+
+static func _build_content_profile(
+		config,
+		archetype: String,
+		star_signal: float,
+		bh_signal: float,
+		scrap_signal: float,
+		life_signal: float) -> Dictionary:
 	var base_inner: float = clampf(config.star_inner_orbit_au, 3.5, SimConstants.MAX_STAR_INNER_ORBIT_AU)
 	var base_outer: float = maxf(
 		base_inner + 0.5,

@@ -119,9 +119,18 @@ func test_worldgen_active_cluster_keeps_sector_metadata_for_runtime_and_debug() 
 	assert_true(str(profile.get("region_archetype", "")) != "", "active worldgen clusters should keep their source archetype")
 	assert_true(str(profile.get("content_archetype", "")) != "", "active worldgen clusters should keep their resolved content archetype")
 	assert_true(profile.get("content_profile", null) is Dictionary, "active worldgen clusters should keep their resolved content profile")
+	assert_true(profile.has("layout_min_bh_distance_au"), "active worldgen clusters should expose their local BH spacing diagnostics")
+	assert_true(profile.has("layout_primary_clearance_au"), "active worldgen clusters should expose their primary-clearance diagnostics")
+	assert_true(profile.has("layout_reserved_start_band_au"), "active worldgen clusters should expose their reserved start band for debug")
+	assert_true(profile.has("spawn_viable"), "active worldgen clusters should expose their hard spawn-viability result")
+	assert_true(str(profile.get("spawn_viability_reason", "")) != "", "active worldgen clusters should expose a readable spawn-viability reason")
 	assert_true(
 		session.active_cluster_state.cluster_blueprint.get("content_markers", null) is Array,
 		"active worldgen clusters should keep their passive content markers in the blueprint"
+	)
+	assert_true(
+		session.active_cluster_state.cluster_blueprint.get("layout_diagnostics", null) is Dictionary,
+		"active worldgen clusters should keep their layout diagnostics in the blueprint for debug rendering"
 	)
 	assert_eq(
 		profile.get("topology_role", ""),

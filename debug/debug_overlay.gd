@@ -327,6 +327,7 @@ func _build_cluster_diagnostics_lines() -> String:
 	var sector_coord: Vector2i = sector_coord_variant if sector_coord_variant is Vector2i else Vector2i.ZERO
 	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
+	var materialized_bodies: int = _sim.get_active_body_count() if _sim != null else 0
 	var content_markers: Array = active_cluster.cluster_blueprint.get("content_markers", []) if active_cluster != null else []
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
@@ -334,15 +335,22 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Archetype      %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else ""))
 		+ "Content        %s\n" % str(profile.get("content_archetype", ""))
 		+ "Spawn priority %d\n" % int(profile.get("spawn_priority", 0))
+		+ "Spawn viable   %s\n" % ("yes" if bool(profile.get("spawn_viable", false)) else "no")
+		+ "Spawn reason   %s\n" % str(profile.get("spawn_viability_reason", "unknown"))
 		+ "Markers        %d\n" % content_markers.size()
-		+ "Sectors seen   %d\n" % _galaxy_state.get_discovered_sector_count()
-		+ "Clusters total %d\n" % _galaxy_state.get_cluster_count()
+		+ "Sectors disc.  %d\n" % _galaxy_state.get_discovered_sector_count()
+		+ "Clusters reg.  %d\n" % _galaxy_state.get_cluster_count()
 		+ "Galaxy BHs     %d\n" % _count_total_galaxy_black_holes()
 		+ "Cluster BHs    %d\n" % active_cluster_black_holes
-		+ "Materialized   %d\n" % materialized_black_holes
-		+ "Clusters simp   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
-		+ "Clusters idle   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED)
+		+ "Mat. BHs       %d\n" % materialized_black_holes
+		+ "Mat. bodies    %d\n" % materialized_bodies
+		+ "Clusters actv  %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.ACTIVE)
+		+ "Clusters simp  %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
+		+ "Clusters unl.  %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED)
 		+ "Transit objs    %d\n" % _galaxy_state.get_transit_object_count()
+		+ "Min BH dist    %s\n" % _format_layout_metric_au(float(profile.get("layout_min_bh_distance_au", -1.0)))
+		+ "Primary clear  %s\n" % _format_layout_metric_au(float(profile.get("layout_primary_clearance_au", -1.0)))
+		+ "Start band     %s\n" % _format_layout_metric_au(float(profile.get("layout_reserved_start_band_au", -1.0)))
 		+ "Cluster active  %d\n" % _active_cluster_session.cluster_id
 		+ "Cluster global  %.0f, %.0f\n" % [
 			_active_cluster_session.cluster_global_origin.x,
@@ -490,7 +498,7 @@ func _update_start_inputs() -> void:
 		]:
 			node.visible = false
 	if _galaxy_hint_label != null:
-		_galaxy_hint_label.visible = false
+		_galaxy_hint_label.visible = true
 	_update_panel_group_visibility()
 
 func _on_anchor_topology_selected(_index: int) -> void:
@@ -575,7 +583,7 @@ func _set_topology_hint_texts() -> void:
 		+ "Discovery only reveals nearby sectors; cluster state and transit keep the wider universe alive."
 	)
 	if _galaxy_hint_label != null:
-		_galaxy_hint_label.text = ""
+		_galaxy_hint_label.text = _build_worldgen_help_text()
 
 func _effective_public_anchor_topology(anchor_topology: int) -> int:
 	if anchor_topology == START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH:
@@ -650,3 +658,17 @@ func _count_active_cluster_black_holes() -> int:
 
 func _format_sector_coord(sector_coord: Vector2i) -> String:
 	return "%d:%d" % [sector_coord.x, sector_coord.y]
+
+func _format_layout_metric_au(value_au: float) -> String:
+	if value_au < 0.0:
+		return "--"
+	return "%.1f AU" % value_au
+
+func _build_worldgen_help_text() -> String:
+	return (
+		"Cluster Density: global cluster chance.\n"
+		+ "Void Strength: global empty-sector pressure.\n"
+		+ "BH Richness: local BH count and spacing.\n"
+		+ "Star Richness: local star count and orbit band.\n"
+		+ "discovered = sector cache, registered = cluster registry, materialized = active SimWorld."
+	)
