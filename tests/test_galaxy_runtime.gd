@@ -338,6 +338,31 @@ func test_focus_promotion_within_macro_sector_preserves_member_set() -> void:
 		"the previous focus cluster should demote to simplified instead of dropping out of the macro sector"
 	)
 
+func test_focus_promotion_within_macro_sector_preserves_far_tick_progress() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(5)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var promoted_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
+		runtime,
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT
+	)
+	var far_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
+		runtime,
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR
+	)
+
+	for _i in range(3):
+		runtime.step(SimConstants.FIXED_DT)
+
+	runtime.activate_cluster(promoted_cluster_id)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		galaxy_state.get_cluster(far_cluster_id).simulated_time,
+		SimConstants.FIXED_DT * 4.0,
+		0.0001,
+		"in-sector focus promotion should not restart the far-zone cadence and starve far updates"
+	)
+
 func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_frozen() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(5, 2_000.0, true)
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
@@ -386,6 +411,46 @@ func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_froz
 		far_cluster.get_objects_by_kind("fragment").size(),
 		0,
 		"far simplified stepping should also avoid any fragment generation"
+	)
+
+func test_never_visited_ambient_cluster_seeds_full_simplified_snapshot_from_blueprint() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 1
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var ambient_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, active_cluster_id)
+	var ambient_cluster: ClusterState = runtime.galaxy_state.get_cluster(ambient_cluster_id)
+
+	assert_eq(
+		ambient_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"macro-sector ambient neighbors should already be promoted into simplified state"
+	)
+	assert_true(
+		bool(ambient_cluster.simulation_profile.get("has_runtime_snapshot", false)),
+		"ambient neighbors should be seeded with a coherent runtime snapshot before first activation"
+	)
+	assert_eq(
+		ambient_cluster.get_objects_by_kind("star").size(),
+		config.star_count,
+		"ambient snapshot seeding should persist the remote cluster's star content"
+	)
+	assert_eq(
+		ambient_cluster.get_objects_by_kind("planet").size(),
+		config.star_count * config.planets_per_star,
+		"ambient snapshot seeding should persist the remote cluster's planet content"
+	)
+	assert_eq(
+		ambient_cluster.get_objects_by_kind("asteroid").size(),
+		config.disturbance_body_count,
+		"ambient snapshot seeding should keep deterministic disturbance bodies instead of leaving a BH-only remote registry"
 	)
 
 func test_focus_relevance_does_not_switch_active_cluster_without_explicit_request() -> void:

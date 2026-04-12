@@ -45,7 +45,8 @@ func initialize(
 		zones_by_star: Dictionary,
 		galaxy_state: GalaxyState = null,
 		active_cluster_session: ActiveClusterSession = null,
-		active_macro_sector_session = null) -> void:
+		active_macro_sector_session = null,
+		preserve_remote_layers: bool = false) -> void:
 	_ensure_overlay_layers()
 	_clear_layer(_zone_layer)
 	_zone_renderers.clear()
@@ -53,8 +54,9 @@ func initialize(
 	_clear_layer(_trail_layer)
 	_clear_layer(_body_layer)
 	_clear_layer(_debris_layer)
-	_clear_layer(_preview_layer)
-	_clear_layer(_marker_layer)
+	if not preserve_remote_layers:
+		_clear_layer(_preview_layer)
+		_clear_layer(_marker_layer)
 	_galaxy_state = galaxy_state
 	_active_cluster_session = active_cluster_session
 	_active_macro_sector_session = active_macro_sector_session
@@ -67,8 +69,10 @@ func initialize(
 	_trail_renderer = TrailRenderer.new()
 	_gravity_debug_renderer = GRAVITY_DEBUG_RENDERER_SCRIPT.new()
 	_debris_renderer = DebrisRenderer.new()
-	_preview_renderer = CLUSTER_PREVIEW_RENDERER_SCRIPT.new()
-	_cluster_marker_renderer = CLUSTER_MARKER_RENDERER_SCRIPT.new()
+	if not preserve_remote_layers or _preview_renderer == null or not is_instance_valid(_preview_renderer):
+		_preview_renderer = CLUSTER_PREVIEW_RENDERER_SCRIPT.new()
+	if not preserve_remote_layers or _cluster_marker_renderer == null or not is_instance_valid(_cluster_marker_renderer):
+		_cluster_marker_renderer = CLUSTER_MARKER_RENDERER_SCRIPT.new()
 
 	for star_id in zones_by_star:
 		var zr := ZoneRenderer.new()
@@ -78,10 +82,12 @@ func initialize(
 
 	_gravity_debug_layer.add_child(_gravity_debug_renderer)
 	_trail_layer.add_child(_trail_renderer)
-	_preview_layer.add_child(_preview_renderer)
 	_body_layer.add_child(_body_renderer)
 	_debris_layer.add_child(_debris_renderer)
-	_marker_layer.add_child(_cluster_marker_renderer)
+	if _preview_renderer.get_parent() != _preview_layer:
+		_preview_layer.add_child(_preview_renderer)
+	if _cluster_marker_renderer.get_parent() != _marker_layer:
+		_marker_layer.add_child(_cluster_marker_renderer)
 
 	set_debug_overlays_visible(false)
 

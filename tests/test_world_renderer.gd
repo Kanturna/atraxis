@@ -2,6 +2,7 @@ extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const ACTIVE_MACRO_SECTOR_SESSION_SCRIPT := preload("res://simulation/active_macro_sector_session.gd")
+const CLUSTER_PREVIEW_RENDERER_SCRIPT := preload("res://rendering/cluster_preview_renderer.gd")
 const MACRO_SECTOR_DESCRIPTOR_SCRIPT := preload("res://simulation/macro_sector_descriptor.gd")
 const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const WORLD_RENDERER_SCRIPT := preload("res://rendering/world_renderer.gd")
@@ -331,6 +332,31 @@ func test_macro_sector_preview_rules_keep_ambient_planets_and_strip_far_planets_
 		str(far_specs[0].get("macro_sector_zone", "")),
 		"far",
 		"far preview payloads should expose their macro sector zone for debugging"
+	)
+
+func test_far_star_preview_style_is_dimmer_tighter_and_without_halo() -> void:
+	var ambient_style: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.preview_visual_profile({
+		"body_type": SimBody.BodyType.STAR,
+		"macro_sector_zone": "ambient",
+	})
+	var far_style: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.preview_visual_profile({
+		"body_type": SimBody.BodyType.STAR,
+		"macro_sector_zone": "far",
+	})
+
+	assert_lt(
+		float(far_style.get("radius_scale", 1.0)),
+		float(ambient_style.get("radius_scale", 1.0)),
+		"far stars should render as tighter points than ambient stars"
+	)
+	assert_lt(
+		float(far_style.get("alpha_scale", 1.0)),
+		float(ambient_style.get("alpha_scale", 1.0)),
+		"far stars should render dimmer than ambient stars"
+	)
+	assert_false(
+		bool(far_style.get("draw_star_halo", true)),
+		"far stars should drop the ambient halo treatment so the layer reads as macro-structure"
 	)
 
 func _make_manual_preview_cluster(

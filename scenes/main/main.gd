@@ -69,6 +69,7 @@ func _process(delta: float) -> void:
 		return
 	_update_pending_cluster_transition()
 	var preserved_focus_global_position: Vector2 = _camera_focus_global_position()
+	var previous_macro_sector = galaxy_runtime.get_active_macro_sector() if galaxy_runtime != null else null
 	_update_runtime_focus_context()
 	_accumulated_dt += delta
 	var steps: int = 0
@@ -83,7 +84,12 @@ func _process(delta: float) -> void:
 			_rebase_pending_cluster_transition_after_world_switch(preserved_focus_global_position)
 		else:
 			_restore_camera_focus_global_position(preserved_focus_global_position)
-		_rebind_active_world(previous_world, _hud.get_current_time_scale(), _debug_overlay.visible)
+		_rebind_active_world(
+			previous_world,
+			_hud.get_current_time_scale(),
+			_debug_overlay.visible,
+			_should_preserve_remote_layers_on_world_switch(previous_macro_sector)
+		)
 		if active_cluster_session != null and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
 			_clear_pending_cluster_transition(false)
 		elif _pending_click_activation_requested:
@@ -131,7 +137,7 @@ func restart_simulation(config) -> void:
 	if sim_world == null:
 		return
 
-	_rebind_active_world(previous_world, time_scale, debug_visible)
+	_rebind_active_world(previous_world, time_scale, debug_visible, false)
 	_debug_overlay.update_runtime_metrics(0.0, 0)
 
 func _disconnect_world_signals(world: SimWorld = null) -> void:
@@ -192,7 +198,11 @@ func _sync_runtime_aliases() -> bool:
 	sim_world = galaxy_runtime.get_active_sim_world()
 	return previous_world != sim_world
 
-func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_visible: bool) -> void:
+func _rebind_active_world(
+		previous_world: SimWorld,
+		time_scale: float,
+		debug_visible: bool,
+		preserve_remote_layers: bool = false) -> void:
 	_disconnect_world_signals(previous_world)
 	if sim_world == null:
 		return
@@ -209,7 +219,8 @@ func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_vis
 		zones_by_star,
 		galaxy_state,
 		active_cluster_session,
-		active_macro_sector_session
+		active_macro_sector_session,
+		preserve_remote_layers
 	)
 	_debug_overlay.initialize(sim_world, _current_start_config, galaxy_state, active_cluster_session)
 	_hud.initialize(sim_world, time_scale)
@@ -219,6 +230,18 @@ func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_vis
 	_hud.update_display(sim_world)
 	if previous_world != null and previous_world != sim_world:
 		previous_world.dispose()
+
+func _should_preserve_remote_layers_on_world_switch(previous_macro_sector) -> bool:
+	if previous_macro_sector == null or active_macro_sector_session == null or active_macro_sector_session.descriptor == null:
+		return false
+	var current_descriptor = active_macro_sector_session.descriptor
+	if int(previous_macro_sector.anchor_cluster_id) != current_descriptor.anchor_cluster_id:
+		return false
+	var previous_member_ids: Array = previous_macro_sector.member_cluster_ids.duplicate()
+	var current_member_ids: Array = current_descriptor.member_cluster_ids.duplicate()
+	previous_member_ids.sort()
+	current_member_ids.sort()
+	return previous_member_ids == current_member_ids
 
 func _update_runtime_focus_context() -> void:
 	if galaxy_runtime == null or _sim_camera == null or active_cluster_session == null:

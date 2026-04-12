@@ -80,7 +80,27 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 	if _can_materialize_from_runtime_snapshot(cluster_state):
 		_materialize_runtime_snapshot(world, cluster_state)
 		return
+	_materialize_cluster_blueprint_into_world(world, cluster_state)
 
+static func ensure_coherent_simplified_snapshot(cluster_state: ClusterState) -> bool:
+	if cluster_state == null:
+		return false
+	if _runtime_snapshot_has_non_black_hole_content(cluster_state):
+		return false
+	var seeded_world := SimWorld.new()
+	_materialize_cluster_blueprint_into_world(seeded_world, cluster_state)
+	writeback_world_into_cluster(
+		seeded_world,
+		cluster_state,
+		ObjectResidencyState.State.SIMPLIFIED
+	)
+	seeded_world.dispose()
+	return true
+
+static func has_coherent_runtime_snapshot(cluster_state: ClusterState) -> bool:
+	return _runtime_snapshot_has_non_black_hole_content(cluster_state)
+
+static func _materialize_cluster_blueprint_into_world(world: SimWorld, cluster_state: ClusterState) -> void:
 	var spawned_black_holes: Array = _spawn_black_holes_from_cluster(world, cluster_state)
 	var profile: Dictionary = cluster_state.simulation_profile
 	var content_archetype: String = str(profile.get("content_archetype", "anchor_orbital"))

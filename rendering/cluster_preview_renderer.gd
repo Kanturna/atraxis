@@ -24,6 +24,7 @@ func _draw() -> void:
 	for spec in _preview_specs:
 		var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
 		var body_radius: float = float(spec.get("radius", 1.0))
+		var visual_profile: Dictionary = preview_visual_profile(spec)
 		var screen_position: Vector2 = BodyRenderer.sim_to_screen(
 			Vector2(spec.get("local_position", Vector2.ZERO))
 		)
@@ -31,24 +32,34 @@ func _draw() -> void:
 		var screen_radius: float = maxf(
 			BodyRenderer.screen_radius_for_body_traits(body_type, body_radius),
 			min_px
-		)
+		) * float(visual_profile.get("radius_scale", 1.0))
 		if not _is_preview_body_visible(screen_position, screen_radius):
 			continue
 		var color: Color = _preview_color(spec)
+		color.a *= float(visual_profile.get("alpha_scale", 1.0))
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
 				_draw_black_hole_preview(screen_position, screen_radius, color)
 			SimBody.BodyType.STAR:
 				draw_circle(screen_position, screen_radius, color)
-				draw_arc(
-					screen_position,
-					screen_radius * 1.12,
-					0.0,
-					TAU,
-					48,
-					Color(color.r, color.g, color.b, minf(color.a + 0.08, 0.5)),
-					1.5
-				)
+				if bool(visual_profile.get("draw_star_halo", true)):
+					draw_arc(
+						screen_position,
+						screen_radius * 1.12,
+						0.0,
+						TAU,
+						48,
+						Color(
+							color.r,
+							color.g,
+							color.b,
+							minf(
+								(color.a + 0.08) * float(visual_profile.get("halo_alpha_scale", 1.0)),
+								0.5
+							)
+						),
+						1.5
+					)
 			_:
 				draw_circle(screen_position, screen_radius, color)
 
@@ -73,10 +84,15 @@ func _draw_black_hole_preview(screen_position: Vector2, screen_radius: float, co
 func _preview_color(spec: Dictionary) -> Color:
 	var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
 	var material_type: int = int(spec.get("material_type", SimBody.MaterialType.MIXED))
+	var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
 	match body_type:
 		SimBody.BodyType.BLACK_HOLE:
+			if macro_sector_zone == "far":
+				return Color(0.84, 0.90, 1.0, 0.44)
 			return Color(0.88, 0.94, 1.0, 0.50)
 		SimBody.BodyType.STAR:
+			if macro_sector_zone == "far":
+				return Color(0.84, 0.90, 1.0, 0.46)
 			return Color(1.0, 0.92, 0.50, 0.60)
 		SimBody.BodyType.PLANET:
 			match material_type:
@@ -90,6 +106,29 @@ func _preview_color(spec: Dictionary) -> Color:
 					return Color(0.68, 0.68, 0.78, 0.45)
 		_:
 			return Color(0.70, 0.72, 0.78, 0.35)
+
+static func preview_visual_profile(spec: Dictionary) -> Dictionary:
+	var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
+	var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
+	var profile := {
+		"radius_scale": 1.0,
+		"alpha_scale": 1.0,
+		"draw_star_halo": body_type == SimBody.BodyType.STAR,
+		"halo_alpha_scale": 1.0,
+	}
+	if macro_sector_zone == "far":
+		match body_type:
+			SimBody.BodyType.BLACK_HOLE:
+				profile["alpha_scale"] = 0.95
+			SimBody.BodyType.STAR:
+				profile["radius_scale"] = 0.78
+				profile["alpha_scale"] = 0.62
+				profile["draw_star_halo"] = false
+				profile["halo_alpha_scale"] = 0.0
+	elif macro_sector_zone == "ambient":
+		if body_type == SimBody.BodyType.PLANET:
+			profile["alpha_scale"] = 1.06
+	return profile
 
 static func _min_preview_screen_px(body_type: int) -> float:
 	match body_type:

@@ -94,6 +94,7 @@ func activate_cluster(target_cluster_id: int) -> void:
 		return
 
 	var is_focus_promotion_within_macro_sector: bool = is_cluster_in_active_macro_sector(target_cluster_id)
+	_ensure_cluster_has_coherent_snapshot_for_activation(target_cluster)
 	_demote_active_cluster_to_simplified()
 	_activate_cluster_internal(target_cluster_id)
 	_rebuild_active_macro_sector(target_cluster_id, is_focus_promotion_within_macro_sector)
@@ -375,6 +376,8 @@ func _rebuild_active_macro_sector(focus_cluster_id: int, preserve_existing_membe
 	if galaxy_state == null or active_cluster_session == null:
 		active_macro_sector_session = null
 		return
+	var previous_descriptor = active_macro_sector_session.descriptor \
+		if active_macro_sector_session != null else null
 	var descriptor = null
 	if preserve_existing_members and active_macro_sector_session != null and active_macro_sector_session.descriptor != null:
 		descriptor = _build_macro_sector_descriptor_from_existing_members(
@@ -388,7 +391,12 @@ func _rebuild_active_macro_sector(focus_cluster_id: int, preserve_existing_membe
 		return
 	active_macro_sector_session = ACTIVE_MACRO_SECTOR_SESSION_SCRIPT.new()
 	active_macro_sector_session.bind(galaxy_state, descriptor, active_cluster_session)
-	far_zone_tick_counter = 0
+	_prime_macro_sector_ambient_snapshots(descriptor)
+	if not _macro_sector_member_ids_match(
+			descriptor.member_cluster_ids,
+			previous_descriptor.member_cluster_ids if previous_descriptor != null else []
+	):
+		far_zone_tick_counter = 0
 	_apply_focus_relevance_policy()
 
 func _build_macro_sector_descriptor(focus_cluster_id: int):
@@ -567,3 +575,31 @@ func _clear_pending_activation_target(target_cluster_id: int) -> void:
 		pending_manual_activation_cluster_id = -1
 	if pending_auto_activation_cluster_id == target_cluster_id:
 		pending_auto_activation_cluster_id = -1
+
+func _ensure_cluster_has_coherent_snapshot_for_activation(cluster_state: ClusterState) -> void:
+	if cluster_state == null:
+		return
+	if cluster_state.last_activated_runtime_time >= 0.0:
+		return
+	WorldBuilder.ensure_coherent_simplified_snapshot(cluster_state)
+
+func _prime_macro_sector_ambient_snapshots(descriptor) -> void:
+	if descriptor == null or galaxy_state == null:
+		return
+	for cluster_id in descriptor.get_cluster_ids_for_zone(MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT):
+		var cluster_state: ClusterState = galaxy_state.get_cluster(int(cluster_id))
+		if cluster_state == null:
+			continue
+		if cluster_state.last_activated_runtime_time >= 0.0 \
+				or WorldBuilder.has_coherent_runtime_snapshot(cluster_state):
+			continue
+		WorldBuilder.ensure_coherent_simplified_snapshot(cluster_state)
+
+func _macro_sector_member_ids_match(left_member_cluster_ids: Array, right_member_cluster_ids: Array) -> bool:
+	if left_member_cluster_ids.size() != right_member_cluster_ids.size():
+		return false
+	var left_sorted: Array = left_member_cluster_ids.duplicate()
+	var right_sorted: Array = right_member_cluster_ids.duplicate()
+	left_sorted.sort()
+	right_sorted.sort()
+	return left_sorted == right_sorted
