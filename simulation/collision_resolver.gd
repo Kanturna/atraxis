@@ -13,11 +13,15 @@ extends RefCounted
 const STAR_IMPACT_DEBRIS_FRACTION: float = 0.10
 
 ## Reference to SimWorld for spawning new bodies and debris.
-## Assigned in _init(); not a circular class_name import.
-var _world  # SimWorld (typed at runtime, not at parse time)
+## Stored as WeakRef so the resolver does not keep SimWorld alive through
+## a RefCounted cycle during shutdown.
+var _world_ref: WeakRef = null
 
 func _init(world) -> void:
-	_world = world
+	_world_ref = weakref(world)
+
+func _get_world():
+	return _world_ref.get_ref() if _world_ref != null else null
 
 func resolve(result: CollisionDetector.CollisionResult) -> void:
 	var a: SimBody = result.body_a
@@ -70,7 +74,8 @@ func _determine_outcome(a: SimBody, b: SimBody,
 		if mass_ratio > (1.0 - SimConstants.MERGE_MASS_RATIO):
 			return "merge"
 		if _collision_ke_fraction(a, b, result) > SimConstants.FRAGMENT_KE_THRESHOLD:
-			var frag_count: int = _world.count_bodies_by_type(SimBody.BodyType.FRAGMENT)
+			var world = _get_world()
+			var frag_count: int = world.count_bodies_by_type(SimBody.BodyType.FRAGMENT) if world != null else 0
 			if frag_count < SimConstants.MAX_ACTIVE_FRAGMENTS - 2:
 				return "fragment"
 
@@ -126,7 +131,9 @@ func _impact(a: SimBody, b: SimBody,
 		planet.velocity += (asteroid.velocity * asteroid.mass * 0.05) / planet.mass
 	planet.temperature += asteroid.get_kinetic_energy() / planet.mass * 0.0001
 
-	_world.add_debris_at(asteroid.position, debris_mass)
+	var world = _get_world()
+	if world != null:
+		world.add_debris_at(asteroid.position, debris_mass)
 	asteroid.marked_for_removal = true
 
 func _fragment(a: SimBody, b: SimBody,
@@ -144,8 +151,10 @@ func _fragment(a: SimBody, b: SimBody,
 	a.radius = _radius_for_mass(a.mass, a.body_type)
 	b.radius = _radius_for_mass(b.mass, b.body_type)
 
+	var world = _get_world()
 	if per_frag_mass < SimConstants.MIN_FRAGMENT_MASS:
-		_world.add_debris_at(a.position, frag_pool)
+		if world != null:
+			world.add_debris_at(a.position, frag_pool)
 		_bounce(a, b, result)
 		return
 
@@ -153,12 +162,15 @@ func _fragment(a: SimBody, b: SimBody,
 
 	for i in range(frag_count):
 		var frag := _make_fragment(per_frag_mass, a, result, i, frag_count)
-		_world.add_body(frag)
+		if world != null:
+			world.add_body(frag)
 
 func _star_impact(a: SimBody, b: SimBody) -> void:
 	var impactor: SimBody = b if a.body_type == SimBody.BodyType.STAR else a
 	var debris_mass: float = impactor.mass * STAR_IMPACT_DEBRIS_FRACTION
-	_world.add_debris_at(impactor.position, debris_mass)
+	var world = _get_world()
+	if world != null:
+		world.add_debris_at(impactor.position, debris_mass)
 	impactor.marked_for_removal = true
 
 func _black_hole_impact(a: SimBody, b: SimBody) -> void:

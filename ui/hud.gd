@@ -37,3 +37,6 @@ func _on_scale_changed(value: float) -> void:
 
 func get_current_time_scale() -> float:
 	return _scale_slider.value if _scale_slider != null else 1.0
+
+func clear_world_reference() -> void:
+	_sim = null

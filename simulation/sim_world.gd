@@ -158,6 +158,14 @@ func set_black_hole_mass(new_mass: float) -> void:
 			var orbit_speed: float = sqrt(SimConstants.G * parent_black_hole.mass / body.orbit_radius)
 			body.orbit_angular_speed = orbit_speed / body.orbit_radius
 
+func dispose() -> void:
+	bodies.clear()
+	debris_fields.clear()
+	_dominant_bh_cache.clear()
+	_resolver = null
+	_detector = null
+	_gravity = null
+
 func flush_marked_removals() -> void:
 	_flush_removals()
 

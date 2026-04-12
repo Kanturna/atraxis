@@ -49,6 +49,9 @@ func _ready() -> void:
 		_debug_overlay.cluster_activation_override_cleared.connect(_on_cluster_activation_override_cleared)
 	restart_simulation(_current_start_config)
 
+func _exit_tree() -> void:
+	_release_runtime_references()
+
 # -------------------------------------------------------------------------
 # Main loop
 # -------------------------------------------------------------------------
@@ -185,6 +188,8 @@ func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_vis
 	_world_renderer.set_gravity_debug_visible(debug_visible)
 	_world_renderer.render_frame(sim_world)
 	_hud.update_display(sim_world)
+	if previous_world != null and previous_world != sim_world:
+		previous_world.dispose()
 
 func _update_runtime_focus_context() -> void:
 	if galaxy_runtime == null or _sim_camera == null or active_cluster_session == null:
@@ -203,3 +208,16 @@ func _restore_camera_focus_global_position(global_focus_position: Vector2) -> vo
 	if _sim_camera == null or active_cluster_session == null:
 		return
 	_sim_camera.set_focus_world_position(active_cluster_session.to_local(global_focus_position))
+
+func _release_runtime_references() -> void:
+	_disconnect_world_signals(sim_world)
+	if _debug_overlay != null:
+		_debug_overlay.clear_world_reference()
+	if _hud != null:
+		_hud.clear_world_reference()
+	if sim_world != null:
+		sim_world.dispose()
+	galaxy_runtime = null
+	galaxy_state = null
+	active_cluster_session = null
+	sim_world = null

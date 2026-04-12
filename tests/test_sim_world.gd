@@ -106,6 +106,14 @@ func test_segment_black_hole_impact_catches_tunneling_star() -> void:
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 0, "segment-based BH impacts should remove tunneled stars")
 	assert_eq(world.get_active_body_count(), 1, "only the black hole should remain active after the impact")
 
+func test_sim_world_releases_when_last_reference_goes_away() -> void:
+	var world := SimWorld.new()
+	var world_ref: WeakRef = weakref(world)
+
+	world = null
+
+	assert_eq(world_ref.get_ref(), null, "SimWorld should not stay alive through an internal RefCounted cycle.")
+
 func _make_black_hole() -> SimBody:
 	var black_hole := SimBody.new()
 	black_hole.active = true

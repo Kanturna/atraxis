@@ -175,6 +175,17 @@ func initialize(
 	_update_stats_text()
 	_update_panel_group_visibility()
 
+func clear_world_reference() -> void:
+	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
+		_sim.collision_occurred.disconnect(_on_collision_occurred)
+	_sim = null
+	_galaxy_state = null
+	_active_cluster_session = null
+	_selected_id = -1
+	_collision_timestamps.clear()
+	_last_dominant_bh_by_star.clear()
+	_inspector.display_body(null)
+
 func toggle() -> void:
 	visible = not visible
 
