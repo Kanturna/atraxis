@@ -1,6 +1,6 @@
 ## main.gd
-## Root scene script. Owns the SimWorld instance, drives the fixed-timestep
-## loop, and wires simulation signals to the renderer.
+## Root scene script. Owns the currently active cluster session, drives the
+## fixed-timestep loop, and wires the local SimWorld projection to the renderer.
 extends Node2D
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
@@ -17,7 +17,9 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 # Simulation state
 # -------------------------------------------------------------------------
 
-var sim_world: SimWorld
+var galaxy_state: GalaxyState = null
+var active_cluster_session: ActiveClusterSession = null
+var sim_world: SimWorld = null
 var _current_start_config: RefCounted = START_CONFIG_SCRIPT.new()
 
 ## Fixed timestep accumulator. Accumulates real delta time and drains it
@@ -84,8 +86,11 @@ func restart_simulation(config) -> void:
 	_disconnect_world_signals()
 	_accumulated_dt = 0.0
 
-	sim_world = SimWorld.new()
-	WorldBuilder.build_from_config(sim_world, _current_start_config)
+	active_cluster_session = WorldBuilder.build_active_session_from_config(_current_start_config)
+	galaxy_state = active_cluster_session.galaxy_state
+	sim_world = active_cluster_session.sim_world
+	if sim_world == null:
+		return
 
 	var zones_by_star: Dictionary = {}
 	for star in sim_world.get_stars():
@@ -95,7 +100,7 @@ func restart_simulation(config) -> void:
 	sim_world.body_removed.connect(_world_renderer._on_body_removed)
 
 	_world_renderer.initialize(sim_world, zones_by_star)
-	_debug_overlay.initialize(sim_world, _current_start_config)
+	_debug_overlay.initialize(sim_world, _current_start_config, galaxy_state, active_cluster_session)
 	_hud.initialize(sim_world, time_scale)
 	_debug_overlay.visible = debug_visible
 	_world_renderer.set_gravity_debug_visible(debug_visible)
@@ -117,5 +122,5 @@ func _on_restart_requested(config) -> void:
 func _on_black_hole_mass_changed(new_mass: float) -> void:
 	_current_start_config.black_hole_mass = new_mass
 	_current_start_config.clamp_values()
-	if sim_world != null:
-		sim_world.set_black_hole_mass(_current_start_config.black_hole_mass)
+	if active_cluster_session != null:
+		active_cluster_session.set_black_hole_mass(_current_start_config.black_hole_mass)

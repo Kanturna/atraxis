@@ -37,6 +37,67 @@ static func build_field_patch_specs(total_count: int, field_spacing_au: float, m
 		ring_index += 1
 	return specs
 
+static func build_cluster_center_specs(total_count: int, cluster_spacing_au: float) -> Array:
+	var specs: Array = []
+	for spec in build_field_patch_specs(total_count, cluster_spacing_au, 0.0):
+		specs.append({
+			"cluster_id": spec["id"],
+			"is_primary": spec["is_central"],
+			"ring_index": spec["ring_index"],
+			"global_center": spec["position"],
+		})
+	return specs
+
+static func build_local_black_hole_specs(total_count: int, cluster_spacing_au: float, mass: float) -> Array:
+	var specs: Array = []
+	for spec in build_field_patch_specs(total_count, cluster_spacing_au, mass):
+		specs.append({
+			"id": spec["id"],
+			"is_primary": spec["is_central"],
+			"ring_index": spec["ring_index"],
+			"local_position": spec["position"],
+			"mass": spec["mass"],
+		})
+	return specs
+
+static func distribute_black_holes_across_clusters(total_count: int, cluster_count: int) -> Array:
+	var safe_total: int = maxi(total_count, 1)
+	var safe_clusters: int = clampi(cluster_count, 1, safe_total)
+	var base_per_cluster: int = safe_total / safe_clusters
+	var remainder: int = safe_total % safe_clusters
+
+	var counts: Array = []
+	for cluster_idx in range(safe_clusters):
+		counts.append(base_per_cluster + (1 if cluster_idx < remainder else 0))
+	return counts
+
+static func build_galaxy_cluster_cluster_specs(
+		total_count: int,
+		cluster_count: int,
+		cluster_radius_au: float,
+		void_scale: float,
+		mass: float) -> Array:
+	var safe_total: int = maxi(total_count, 1)
+	var safe_clusters: int = clampi(cluster_count, 1, safe_total)
+	var cluster_spacing_au: float = cluster_radius_au * void_scale
+	var center_specs: Array = build_cluster_center_specs(safe_clusters, cluster_spacing_au)
+	var counts: Array = distribute_black_holes_across_clusters(safe_total, safe_clusters)
+
+	var cluster_specs: Array = []
+	for cluster_idx in range(center_specs.size()):
+		var cluster_bh_count: int = counts[cluster_idx]
+		if cluster_bh_count <= 0:
+			continue
+		cluster_specs.append({
+			"cluster_id": center_specs[cluster_idx]["cluster_id"],
+			"is_primary": center_specs[cluster_idx]["is_primary"],
+			"ring_index": center_specs[cluster_idx]["ring_index"],
+			"global_center": center_specs[cluster_idx]["global_center"],
+			"black_hole_count": cluster_bh_count,
+			"local_black_hole_specs": build_local_black_hole_specs(cluster_bh_count, cluster_radius_au, mass),
+		})
+	return cluster_specs
+
 static func field_ring_count_for_total(total_count: int) -> int:
 	var safe_total: int = maxi(total_count, 1)
 	var remaining: int = safe_total - 1
@@ -139,39 +200,24 @@ static func build_galaxy_cluster_specs(
 		cluster_radius_au: float,
 		void_scale: float,
 		mass: float) -> Array:
-	var safe_total: int = maxi(total_count, 1)
-	var safe_clusters: int = clampi(cluster_count, 1, safe_total)
-
-	# Macro-level: place cluster centres using the same ring layout.
-	# The inter-cluster spacing is void_scale × cluster_radius_au so voids
-	# between clusters are clearly larger than the clusters themselves.
-	var cluster_spacing_au: float = cluster_radius_au * void_scale
-	var cluster_centre_specs: Array = build_field_patch_specs(safe_clusters, cluster_spacing_au, mass)
-
-	# Distribute BHs as evenly as possible across clusters.
-	var base_per_cluster: int = safe_total / safe_clusters
-	var remainder: int = safe_total % safe_clusters
-
 	var all_specs: Array = []
 	var next_id: int = 0
-
-	for cluster_idx in range(cluster_centre_specs.size()):
-		var centre_spec: Dictionary = cluster_centre_specs[cluster_idx]
-		var centre_pos: Vector2 = centre_spec["position"]
-		var bh_in_cluster: int = base_per_cluster + (1 if cluster_idx < remainder else 0)
-		if bh_in_cluster <= 0:
-			continue
-
-		# Micro-level: ring layout within the cluster.
-		var inner_specs: Array = build_field_patch_specs(bh_in_cluster, cluster_radius_au, mass)
-
-		for inner_spec in inner_specs:
-			var spec: Dictionary = inner_spec.duplicate()
+	for cluster_spec in build_galaxy_cluster_cluster_specs(
+			total_count,
+			cluster_count,
+			cluster_radius_au,
+			void_scale,
+			mass):
+		for inner_spec in cluster_spec["local_black_hole_specs"]:
+			var spec: Dictionary = {
+				"id": next_id,
+				"position": cluster_spec["global_center"] + inner_spec["local_position"],
+				"is_central": cluster_spec["is_primary"] and inner_spec["is_primary"],
+				"ring_index": inner_spec["ring_index"],
+				"mass": inner_spec["mass"],
+				"cluster_index": cluster_spec["cluster_id"],
+			}
 			spec["id"] = next_id
-			spec["position"] = centre_pos + inner_spec["position"]
-			# Global is_central: only the central BH of cluster 0 (nearest origin).
-			spec["is_central"] = cluster_idx == 0 and inner_spec["is_central"]
-			spec["cluster_index"] = cluster_idx
 			all_specs.append(spec)
 			next_id += 1
 

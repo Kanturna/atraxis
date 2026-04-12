@@ -32,6 +32,31 @@ func test_galaxy_cluster_specs_return_correct_total_count() -> void:
 	var specs: Array = FIELD_SCRIPT.build_galaxy_cluster_specs(total, 3, 5.0, 4.0, 12_000_000.0)
 	assert_eq(specs.size(), total, "galaxy cluster specs must contain exactly the requested BH count")
 
+func test_cluster_center_specs_keep_primary_cluster_at_origin() -> void:
+	var specs: Array = FIELD_SCRIPT.build_cluster_center_specs(4, 20.0)
+
+	assert_eq(specs.size(), 4, "cluster center specs should preserve the requested cluster count")
+	assert_true(specs[0]["is_primary"], "the first cluster center should be the primary cluster")
+	assert_eq(specs[0]["global_center"], Vector2.ZERO, "the primary cluster should stay at the global origin")
+
+func test_black_hole_distribution_across_clusters_preserves_total() -> void:
+	var counts: Array = FIELD_SCRIPT.distribute_black_holes_across_clusters(11, 3)
+	var total: int = 0
+	for count in counts:
+		total += count
+
+	assert_eq(counts.size(), 3, "distribution should return one entry per cluster")
+	assert_eq(total, 11, "cluster distribution must preserve the total BH count exactly")
+
+func test_galaxy_cluster_cluster_specs_keep_local_black_hole_totals() -> void:
+	var cluster_specs: Array = FIELD_SCRIPT.build_galaxy_cluster_cluster_specs(10, 3, 5.0, 4.0, 12_000_000.0)
+	var total_black_holes: int = 0
+	for cluster_spec in cluster_specs:
+		total_black_holes += cluster_spec["local_black_hole_specs"].size()
+
+	assert_eq(cluster_specs.size(), 3, "cluster specs should preserve the requested cluster count when enough BHs exist")
+	assert_eq(total_black_holes, 10, "local BH specs across all clusters must sum back to the requested total")
+
 func test_galaxy_cluster_specs_have_exactly_one_is_central() -> void:
 	var specs: Array = FIELD_SCRIPT.build_galaxy_cluster_specs(14, 2, 5.0, 4.0, 12_000_000.0)
 	var central_count: int = 0

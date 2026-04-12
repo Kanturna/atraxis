@@ -1,11 +1,11 @@
-## Constructs the initial reference systems for Atraxis.
-## Dynamic Anchor is the mainline macro-simulation path.
-## Stable Anchor is the calm reference mode; Chaos Inflow remains the lab mode.
+## Materializes local cluster simulations from the galaxy data model.
+## GalaxyState / ClusterState are the durable source of truth; SimWorld is only
+## the active local projection used for rendering and physics.
 class_name WorldBuilder
 extends RefCounted
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
-const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
+const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
 
 class ZoneBoundaries:
 	var inner_max: float
@@ -13,19 +13,64 @@ class ZoneBoundaries:
 	var middle_max: float
 	var outer_min: float
 
-static func build_from_config(world: SimWorld, start_config) -> void:
-	var config = start_config if start_config != null else START_CONFIG_SCRIPT.new()
-	var safe_config = config.copy()
-	safe_config.clamp_values()
+static func build_galaxy_state_from_config(start_config) -> GalaxyState:
+	return GALAXY_BUILDER_SCRIPT.build_from_config(start_config)
 
-	match safe_config.mode:
-		START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR:
-			_build_dynamic_anchor(world, safe_config)
+static func build_active_session_from_config(start_config) -> ActiveClusterSession:
+	var galaxy_state: GalaxyState = build_galaxy_state_from_config(start_config)
+	return build_active_session_from_galaxy_state(galaxy_state, galaxy_state.primary_cluster_id)
+
+static func build_active_session_from_config_into_world(
+		start_config,
+		target_world: SimWorld) -> ActiveClusterSession:
+	var galaxy_state: GalaxyState = build_galaxy_state_from_config(start_config)
+	return build_active_session_from_galaxy_state_into_world(
+		galaxy_state,
+		galaxy_state.primary_cluster_id,
+		target_world
+	)
+
+static func build_active_session_from_galaxy_state(
+		galaxy_state: GalaxyState,
+		target_cluster_id: int = -1) -> ActiveClusterSession:
+	return build_active_session_from_galaxy_state_into_world(galaxy_state, target_cluster_id, null)
+
+static func build_active_session_from_galaxy_state_into_world(
+		galaxy_state: GalaxyState,
+		target_cluster_id: int = -1,
+		target_world: SimWorld = null) -> ActiveClusterSession:
+	var session := ActiveClusterSession.new()
+	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
+		return session
+
+	var resolved_cluster_id: int = target_cluster_id if target_cluster_id >= 0 else galaxy_state.primary_cluster_id
+	var cluster_state: ClusterState = galaxy_state.get_cluster(resolved_cluster_id)
+	if cluster_state == null:
+		return session
+
+	var sim_world := target_world if target_world != null else SimWorld.new()
+	materialize_cluster_into_world(sim_world, cluster_state)
+	session.bind(galaxy_state, cluster_state, sim_world)
+	return session
+
+static func build_from_config(world: SimWorld, start_config) -> void:
+	build_active_session_from_config_into_world(start_config, world)
+
+static func materialize_cluster_into_world(world: SimWorld, cluster_state: ClusterState) -> void:
+	if world == null or cluster_state == null:
+		return
+
+	var spawned_black_holes: Array = _spawn_black_holes_from_cluster(world, cluster_state)
+	var profile: Dictionary = cluster_state.simulation_profile
+	var start_mode: int = int(profile.get("start_mode", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR))
+
+	match start_mode:
 		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
-			_build_chaos_inflow(world, safe_config)
+			_materialize_chaos_cluster(world, profile, cluster_state.cluster_seed)
+		START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR:
+			_materialize_anchor_cluster(world, spawned_black_holes, profile, cluster_state.cluster_seed, true)
 		_:
-			safe_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
-			_build_stable_anchor(world, safe_config)
+			_materialize_anchor_cluster(world, spawned_black_holes, profile, cluster_state.cluster_seed, false)
 
 static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	var mass_factor: float = star.mass / SimConstants.STAR_MASS
@@ -36,107 +81,64 @@ static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	bounds.outer_min = SimConstants.OUTER_ZONE_MIN * mass_factor
 	return bounds
 
-static func _build_dynamic_anchor(world: SimWorld, config) -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = config.seed
-	match config.anchor_topology:
-		START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
-			_build_dynamic_anchor_field_patch(world, config, rng)
-		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER:
-			_build_dynamic_anchor_galaxy_cluster(world, config, rng)
-		_:
-			_build_dynamic_anchor_central_bh(world, config, rng)
-
-static func _build_dynamic_anchor_central_bh(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
-	var central_black_hole := _make_black_hole(config.black_hole_mass)
-	world.add_body(central_black_hole)
-
-	var stars := _place_dynamic_stars(central_black_hole, config, rng)
-	for star in stars:
-		world.add_body(star)
-	for star in stars:
-		for i in range(config.planets_per_star):
-			world.add_body(_make_core_planet(star, i, config.planets_per_star))
-	for i in range(config.disturbance_body_count):
-		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
-
-static func _build_dynamic_anchor_field_patch(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
-	var central_spawn_black_hole: SimBody = null
-	for spec in ANCHOR_FIELD_SCRIPT.build_field_patch_specs(
-			config.black_hole_count,
-			config.field_spacing_au,
-			config.black_hole_mass):
-		var black_hole := _make_black_hole(spec["mass"])
-		black_hole.position = spec["position"]
+static func _spawn_black_holes_from_cluster(world: SimWorld, cluster_state: ClusterState) -> Array:
+	var spawned: Array = []
+	for object_state in cluster_state.get_objects_by_kind("black_hole"):
+		var mass: float = object_state.descriptor.get(
+			"mass",
+			cluster_state.simulation_profile.get("black_hole_mass", SimConstants.BLACK_HOLE_MASS)
+		)
+		var black_hole := _make_black_hole(mass)
+		black_hole.position = object_state.local_position
 		world.add_body(black_hole)
-		if spec["is_central"]:
-			central_spawn_black_hole = black_hole
+		spawned.append({
+			"object_id": object_state.object_id,
+			"is_primary": bool(object_state.descriptor.get("is_primary", false)),
+			"body": black_hole,
+		})
 
-	# First field-patch stage: multiple black holes shape the gravity field, but
-	# stars still start around the central BH instead of being distributed across
-	# all black holes in the patch. This keeps the rollout honest and incremental:
-	# field patch currently means "multi-BH gravity field", not yet "one star
-	# system per BH".
-	var stars := _place_dynamic_stars(central_spawn_black_hole, config, rng)
-	for star in stars:
-		world.add_body(star)
-	for star in stars:
-		for i in range(config.planets_per_star):
-			world.add_body(_make_core_planet(star, i, config.planets_per_star))
-	for i in range(config.disturbance_body_count):
-		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
+	spawned.sort_custom(func(a, b): return a["object_id"] < b["object_id"])
+	return spawned
 
-static func _build_dynamic_anchor_galaxy_cluster(world: SimWorld, config, rng: RandomNumberGenerator) -> void:
-	var central_spawn_black_hole: SimBody = null
-	for spec in ANCHOR_FIELD_SCRIPT.build_galaxy_cluster_specs(
-			config.black_hole_count,
-			config.galaxy_cluster_count,
-			config.galaxy_cluster_radius_au,
-			config.galaxy_void_scale,
-			config.black_hole_mass):
-		var black_hole := _make_black_hole(spec["mass"])
-		black_hole.position = spec["position"]
-		world.add_body(black_hole)
-		if spec["is_central"]:
-			central_spawn_black_hole = black_hole
+static func _materialize_anchor_cluster(
+		world: SimWorld,
+		spawned_black_holes: Array,
+		profile: Dictionary,
+		cluster_seed: int,
+		stable_mode: bool) -> void:
+	var spawn_anchor: SimBody = _resolve_primary_black_hole_body(spawned_black_holes)
+	if spawn_anchor == null or not profile.get("spawn_anchor_content", true):
+		return
 
-	# Stars and planets orbit the central cluster's central BH, consistent with
-	# the field-patch approach: multi-BH gravity field shapes the dynamics,
-	# but initial star placement is anchored to a single reference point.
-	var stars := _place_dynamic_stars(central_spawn_black_hole, config, rng)
-	for star in stars:
-		world.add_body(star)
-	for star in stars:
-		for i in range(config.planets_per_star):
-			world.add_body(_make_core_planet(star, i, config.planets_per_star))
-	for i in range(config.disturbance_body_count):
-		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
-
-static func _build_stable_anchor(world: SimWorld, config) -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = config.seed
+	rng.seed = cluster_seed
+	var stars: Array = _place_analytic_stars(spawn_anchor, profile, rng) \
+		if stable_mode else _place_dynamic_stars(spawn_anchor, profile, rng)
 
-	var black_hole := _make_black_hole(config.black_hole_mass)
-	world.add_body(black_hole)
-
-	var stars := _place_analytic_stars(black_hole, config, rng)
 	for star in stars:
 		world.add_body(star)
 	for star in stars:
-		for i in range(config.planets_per_star):
-			world.add_body(_make_core_planet(star, i, config.planets_per_star))
-	for i in range(config.disturbance_body_count):
+		for i in range(int(profile.get("planets_per_star", 0))):
+			world.add_body(_make_core_planet(star, i, int(profile.get("planets_per_star", 0))))
+	for i in range(int(profile.get("disturbance_body_count", 0))):
 		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
 
-static func _build_chaos_inflow(world: SimWorld, config) -> void:
+static func _materialize_chaos_cluster(world: SimWorld, profile: Dictionary, cluster_seed: int) -> void:
 	var star := _make_star()
 	world.add_body(star)
 
 	var rng := RandomNumberGenerator.new()
-	rng.seed = config.seed
+	rng.seed = cluster_seed
+	for i in range(int(profile.get("chaos_body_count", 0))):
+		world.add_body(_make_inflow_body(star, profile, rng, i))
 
-	for i in range(config.chaos_body_count):
-		world.add_body(_make_inflow_body(star, config, rng, i))
+static func _resolve_primary_black_hole_body(spawned_black_holes: Array) -> SimBody:
+	for entry in spawned_black_holes:
+		if entry["is_primary"]:
+			return entry["body"]
+	if spawned_black_holes.is_empty():
+		return null
+	return spawned_black_holes[0]["body"]
 
 static func _make_black_hole(mass: float) -> SimBody:
 	var body := SimBody.new()
@@ -166,18 +168,15 @@ static func _make_star() -> SimBody:
 	body.active = true
 	return body
 
-static func _build_star_specs(config, rng: RandomNumberGenerator) -> Array:
+static func _build_star_specs(profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var specs: Array = []
-	var n: int = config.star_count
-	var inner: float = config.star_inner_orbit_au * SimConstants.AU
-	var outer: float = config.star_outer_orbit_au * SimConstants.AU
+	var n: int = int(profile.get("star_count", 0))
+	if n <= 0:
+		return specs
 
-	# Geometric (log-uniform) spacing keeps the d/R stability ratio constant across
-	# all adjacent pairs, regardless of star count. For M_star/M_BH = 1/4 the
-	# critical ratio is d/R ≈ 0.5; at inner=4 AU, outer=20 AU, N=4 this yields
-	# d/R ≈ 0.49 which sits right at the stability margin.
-	# Arithmetic spacing would cluster all stars near the same radius and destroy
-	# that margin immediately.
+	var inner: float = float(profile.get("star_inner_orbit_au", 0.0)) * SimConstants.AU
+	var outer: float = float(profile.get("star_outer_orbit_au", 0.0)) * SimConstants.AU
+
 	var log_inner: float = log(inner)
 	var log_outer: float = log(outer)
 	var log_band: float = (log_outer - log_inner) / float(n)
@@ -196,9 +195,9 @@ static func _build_star_specs(config, rng: RandomNumberGenerator) -> Array:
 
 	return specs
 
-static func _place_dynamic_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
+static func _place_dynamic_stars(black_hole: SimBody, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []
-	for spec in _build_star_specs(config, rng):
+	for spec in _build_star_specs(profile, rng):
 		var star := _make_star()
 		star.mass = SimConstants.STAR_MASS * spec["mass_scale"]
 		star.radius = SimConstants.STAR_RADIUS * sqrt(spec["mass_scale"])
@@ -209,9 +208,9 @@ static func _place_dynamic_stars(black_hole: SimBody, config, rng: RandomNumberG
 		stars.append(star)
 	return stars
 
-static func _place_analytic_stars(black_hole: SimBody, config, rng: RandomNumberGenerator) -> Array:
+static func _place_analytic_stars(black_hole: SimBody, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []
-	for spec in _build_star_specs(config, rng):
+	for spec in _build_star_specs(profile, rng):
 		var star := _make_star()
 		star.mass = SimConstants.STAR_MASS * spec["mass_scale"]
 		star.radius = SimConstants.STAR_RADIUS * sqrt(spec["mass_scale"])
@@ -266,7 +265,8 @@ static func _make_planet(parent: SimBody, orbital_radius: float, mass: float,
 	return body
 
 static func _make_asteroid(parent: SimBody, orbital_radius: float, angle: float,
-		eccentricity: float, mass: float, material: int) -> SimBody:
+		eccentricity: float, mass: float, material: int,
+		rng: RandomNumberGenerator) -> SimBody:
 	var body := SimBody.new()
 	body.body_type = SimBody.BodyType.ASTEROID
 	body.influence_level = SimBody.InfluenceLevel.B
@@ -277,7 +277,7 @@ static func _make_asteroid(parent: SimBody, orbital_radius: float, angle: float,
 		SimConstants.ASTEROID_RADIUS_MIN,
 		SimConstants.ASTEROID_RADIUS_MAX
 	)
-	body.temperature = 200.0 + randf_range(-30.0, 30.0)
+	body.temperature = 200.0 + rng.randf_range(-30.0, 30.0)
 	body.kinematic = false
 	body.scripted_orbit_enabled = false
 	body.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
@@ -291,7 +291,7 @@ static func _make_disturbance_body(star: SimBody, rng: RandomNumberGenerator, in
 	var mass: float = rng.randf_range(SimConstants.ASTEROID_MASS_MIN, SimConstants.ASTEROID_MASS_MAX)
 	var material: int = SimBody.MaterialType.ROCKY if (index + rng.randi_range(0, 1)) % 2 == 0 \
 		else SimBody.MaterialType.METALLIC
-	return _make_asteroid(star, orbital_radius, angle, eccentricity, mass, material)
+	return _make_asteroid(star, orbital_radius, angle, eccentricity, mass, material, rng)
 
 static func _place_in_orbit(body: SimBody, parent: SimBody,
 		orbital_radius: float, angle: float, eccentricity: float) -> void:
@@ -310,7 +310,7 @@ static func _place_in_orbit(body: SimBody, parent: SimBody,
 	body.orbit_angle = angle
 	body.orbit_angular_speed = speed / orbital_radius if orbital_radius > 0.0 else 0.0
 
-static func _make_inflow_body(star: SimBody, config,
+static func _make_inflow_body(star: SimBody, profile: Dictionary,
 		rng: RandomNumberGenerator, index: int) -> SimBody:
 	var body := SimBody.new()
 	body.body_type = SimBody.BodyType.PLANET
@@ -328,7 +328,8 @@ static func _make_inflow_body(star: SimBody, config,
 	body.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
 
 	var spawn_radius: float = (
-		config.spawn_radius_au + rng.randf_range(-config.spawn_spread_au, config.spawn_spread_au)
+		float(profile.get("spawn_radius_au", 0.0))
+		+ rng.randf_range(-float(profile.get("spawn_spread_au", 0.0)), float(profile.get("spawn_spread_au", 0.0)))
 	) * SimConstants.AU
 	spawn_radius = max(spawn_radius, 0.75 * SimConstants.AU)
 	var angle: float = rng.randf_range(0.0, TAU)
@@ -338,9 +339,9 @@ static func _make_inflow_body(star: SimBody, config,
 	var tangent: Vector2 = Vector2(-inward.y, inward.x)
 	if rng.randf() > 0.5:
 		tangent = -tangent
-	var travel_dir: Vector2 = inward.lerp(tangent, config.tangential_bias).normalized()
+	var travel_dir: Vector2 = inward.lerp(tangent, float(profile.get("tangential_bias", 0.0))).normalized()
 	var reference_speed: float = sqrt(SimConstants.G * star.mass / spawn_radius)
-	body.velocity = travel_dir * (reference_speed * config.inflow_speed_scale)
+	body.velocity = travel_dir * (reference_speed * float(profile.get("inflow_speed_scale", 1.0)))
 	return body
 
 static func _pick_inflow_material(rng: RandomNumberGenerator, index: int) -> int:

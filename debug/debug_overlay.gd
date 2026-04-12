@@ -13,6 +13,8 @@ signal restart_requested(start_config)
 signal black_hole_mass_changed(new_mass: float)
 
 var _sim: SimWorld = null
+var _galaxy_state: GalaxyState = null
+var _active_cluster_session: ActiveClusterSession = null
 var _selected_id: int = -1
 var _metrics: RefCounted = DEBUG_METRICS_SCRIPT.new()
 var _collision_timestamps: Array[float] = []
@@ -114,10 +116,16 @@ func _ready() -> void:
 	_sync_start_controls(START_CONFIG_SCRIPT.new())
 	_update_panel_group_visibility()
 
-func initialize(world: SimWorld, start_config = null) -> void:
+func initialize(
+		world: SimWorld,
+		start_config = null,
+		galaxy_state: GalaxyState = null,
+		active_cluster_session: ActiveClusterSession = null) -> void:
 	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
 		_sim.collision_occurred.disconnect(_on_collision_occurred)
 	_sim = world
+	_galaxy_state = galaxy_state
+	_active_cluster_session = active_cluster_session
 	if _sim != null:
 		_sim.collision_occurred.connect(_on_collision_occurred)
 	_selected_id = -1
@@ -240,6 +248,7 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 	_anchor_diagnostics_label.text = (
 		"[code]"
 		+ "Anchor Diagnostics\n"
+		+ _build_cluster_diagnostics_lines()
 		+ "BH count        %d\n" % anchor_stats["black_hole_count"]
 		+ "Field rings     %d\n" % anchor_stats["field_ring_count"]
 		+ "BH mass total   %.0f\n" % anchor_stats["black_hole_mass"]
@@ -253,6 +262,19 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 		+ "BH switches     %d\n" % _anchor_switch_count
 		+ star_anchor_lines
 		+ "[/code]"
+	)
+
+func _build_cluster_diagnostics_lines() -> String:
+	if _galaxy_state == null or _active_cluster_session == null:
+		return ""
+	return (
+		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
+		+ "Clusters total  %d\n" % _galaxy_state.get_cluster_count()
+		+ "Cluster active  %d\n" % _active_cluster_session.cluster_id
+		+ "Cluster global  %.0f, %.0f\n" % [
+			_active_cluster_session.cluster_global_origin.x,
+			_active_cluster_session.cluster_global_origin.y,
+		]
 	)
 
 func _on_collision_occurred(_pos: Vector2) -> void:
