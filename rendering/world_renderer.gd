@@ -398,6 +398,23 @@ static func _remote_cluster_preview_source_specs(cluster_state: ClusterState) ->
 				"seed": int(object_state.seed),
 				"descriptor": object_state.descriptor.duplicate(true),
 			})
+		# step_simplified_cluster() sets has_runtime_snapshot=true after the first BH-only
+		# step, before the cluster has ever been ACTIVE. In that case the registry only
+		# holds BHs; supplement with blueprint preview specs for stars/planets so distant
+		# clusters show their full content even before they have been visited.
+		var registry_has_stars_or_planets: bool = false
+		for spec in preview_specs:
+			if int(spec.get("body_type", -1)) != SimBody.BodyType.BLACK_HOLE:
+				registry_has_stars_or_planets = true
+				break
+		if not registry_has_stars_or_planets:
+			for source_spec in cluster_state.cluster_blueprint.get("preview_object_specs", []):
+				var bt: int = int(source_spec.get("body_type", -1))
+				if bt == SimBody.BodyType.BLACK_HOLE:
+					continue  # BH already present from registry with live positions
+				if bt not in [SimBody.BodyType.STAR, SimBody.BodyType.PLANET]:
+					continue
+				preview_specs.append(source_spec.duplicate(true))
 		return preview_specs
 	for source_spec in cluster_state.cluster_blueprint.get("preview_object_specs", []):
 		if int(source_spec.get("body_type", -1)) not in [
