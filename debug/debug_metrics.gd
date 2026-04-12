@@ -1,6 +1,7 @@
 ## debug_metrics.gd
 ## Pure debug-side metrics aggregator for the current simulation snapshot.
 ## Reads SimWorld state without mutating it so values can be tested in isolation.
+## Anchor energy metrics are diagnostic only; they do not drive capture logic.
 class_name DebugMetrics
 extends RefCounted
 
@@ -18,8 +19,8 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var speed_deviation_sum: float = 0.0
 	var total_star_mass: float = 0.0
 	var total_black_hole_mass: float = 0.0
-	var energy_bound_stars: int = 0
-	var energy_free_stars: int = 0
+	var negative_specific_energy_stars: int = 0
+	var non_negative_specific_energy_stars: int = 0
 	var field_ring_count: int = 0
 	var min_black_hole_distance: float = 0.0
 	var min_star_star_distance: float = INF
@@ -60,10 +61,10 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			total_star_mass += body.mass
 			var anchor_state: Dictionary = ANCHOR_FIELD_SCRIPT.build_star_anchor_state(body, black_holes)
 			star_anchor_states.append(anchor_state)
-			if anchor_state["energy_bound"]:
-				energy_bound_stars += 1
+			if anchor_state["negative_specific_energy"]:
+				negative_specific_energy_stars += 1
 			else:
-				energy_free_stars += 1
+				non_negative_specific_energy_stars += 1
 			if anchor_state["dominant_distance"] > 0.0:
 				min_star_bh_distance = minf(min_star_bh_distance, anchor_state["dominant_distance"])
 
@@ -138,8 +139,8 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			"black_hole_mass": total_black_hole_mass,
 			"total_star_mass": total_star_mass,
 			"anchor_ratio": anchor_ratio,
-			"energy_bound_stars": energy_bound_stars,
-			"energy_free_stars": energy_free_stars,
+			"negative_specific_energy_stars": negative_specific_energy_stars,
+			"non_negative_specific_energy_stars": non_negative_specific_energy_stars,
 			"min_black_hole_distance": min_black_hole_distance,
 			"min_star_star_distance": min_star_star_distance,
 			"min_star_bh_distance": min_star_bh_distance,

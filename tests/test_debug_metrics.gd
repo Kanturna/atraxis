@@ -94,8 +94,8 @@ func test_empty_world_metrics_are_stable() -> void:
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.0, 0.001, "empty worlds should not divide by zero for awake ratio")
 	assert_eq(chaos["score"], 0, "empty worlds should have a zero chaos score")
 	assert_almost_eq(anchor["black_hole_mass"], 0.0, 0.001, "empty worlds should report zero black-hole mass")
-	assert_eq(anchor["energy_bound_stars"], 0, "empty worlds should report zero energetically bound stars")
-	assert_eq(anchor["energy_free_stars"], 0, "empty worlds should report zero energetically free stars")
+	assert_eq(anchor["negative_specific_energy_stars"], 0, "empty worlds should report zero E<0 diagnostic stars")
+	assert_eq(anchor["non_negative_specific_energy_stars"], 0, "empty worlds should report zero E>=0 diagnostic stars")
 
 func test_simulation_counts_include_sleeping_fragments_and_debris() -> void:
 	var world := SimWorld.new()
@@ -139,7 +139,7 @@ func test_simulation_counts_include_sleeping_fragments_and_debris() -> void:
 	assert_eq(sim_stats["debris_count"], 1, "debris count should ignore inactive debris fields")
 	assert_almost_eq(chaos["awake_dynamic_ratio"], 0.5, 0.001, "awake ratio should use active dynamic bodies only")
 
-func test_anchor_metrics_report_energy_bound_and_energy_free_stars() -> void:
+func test_anchor_metrics_report_negative_and_non_negative_specific_energy_stars() -> void:
 	var world := SimWorld.new()
 
 	var black_hole := SimBody.new()
@@ -172,9 +172,42 @@ func test_anchor_metrics_report_energy_bound_and_energy_free_stars() -> void:
 
 	assert_almost_eq(anchor["black_hole_mass"], black_hole.mass, 0.001, "anchor metrics should expose current black-hole mass")
 	assert_almost_eq(anchor["total_star_mass"], bound_star.mass + unbound_star.mass, 0.001, "anchor metrics should aggregate star mass")
-	assert_eq(anchor["energy_bound_stars"], 1, "one star should remain energetically bound to the dominant black hole")
-	assert_eq(anchor["energy_free_stars"], 1, "one star should be reported as energetically free relative to the dominant black hole")
+	assert_eq(anchor["negative_specific_energy_stars"], 1, "one star should report E<0 relative to the dominant black hole")
+	assert_eq(anchor["non_negative_specific_energy_stars"], 1, "one star should report E>=0 relative to the dominant black hole")
 	assert_almost_eq(anchor["anchor_ratio"], black_hole.mass / (bound_star.mass + unbound_star.mass), 0.001, "anchor ratio should compare BH mass to total star mass")
+
+func test_anchor_energy_diagnostics_do_not_capture_or_rebind_stars() -> void:
+	var world := SimWorld.new()
+
+	var black_hole := SimBody.new()
+	black_hole.active = true
+	black_hole.body_type = SimBody.BodyType.BLACK_HOLE
+	black_hole.kinematic = true
+	black_hole.mass = 10_000_000.0
+	world.add_body(black_hole)
+
+	var star := SimBody.new()
+	star.active = true
+	star.body_type = SimBody.BodyType.STAR
+	star.kinematic = false
+	star.mass = SimConstants.STAR_MASS
+	star.position = Vector2(4000.0, 0.0)
+	star.velocity = Vector2(0.0, 300.0)
+	world.add_body(star)
+
+	var original_position: Vector2 = star.position
+	var original_velocity: Vector2 = star.velocity
+
+	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
+	var anchor: Dictionary = snapshot["anchor"]
+	var star_state: Dictionary = anchor["star_anchor_states"][0]
+
+	assert_true(star.active, "energy diagnostics should not deactivate the star")
+	assert_false(star.scripted_orbit_enabled, "energy diagnostics should not convert dynamic stars into scripted orbiters")
+	assert_eq(star.orbit_binding_state, SimBody.OrbitBindingState.FREE_DYNAMIC, "energy diagnostics should not rebind stars")
+	assert_eq(star.position, original_position, "energy diagnostics should not move the star")
+	assert_eq(star.velocity, original_velocity, "energy diagnostics should not alter the star velocity")
+	assert_true(star_state["negative_specific_energy"], "the diagnostic should still expose the instantaneous E<0 classification")
 
 func test_anchor_metrics_report_dominant_and_secondary_black_holes_per_star() -> void:
 	var world := SimWorld.new()

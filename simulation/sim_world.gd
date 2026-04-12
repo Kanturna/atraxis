@@ -268,6 +268,8 @@ func _requires_black_hole_adaptive_integration(body: SimBody) -> bool:
 func _handle_black_hole_segment_impacts(body: SimBody, previous_position: Vector2, black_holes: Array) -> void:
 	if black_holes.is_empty():
 		return
+	# BH runtime hard rule: only true geometric impacts remove bodies.
+	# Near-passes are left to raw gravity plus adaptive substeps.
 	var hit: Dictionary = _find_black_hole_segment_hit(body, previous_position, body.position, black_holes)
 	if hit.is_empty():
 		return

@@ -84,6 +84,7 @@ func test_close_flyby_stays_dynamic_without_periapsis_snap() -> void:
 	var impact_radius: float = black_hole.radius + star.radius
 
 	assert_true(star.active, "a close flyby outside the collision radius should remain active")
+	assert_false(star.is_analytic_orbit_bound(), "close flybys should stay dynamic instead of being re-bound into an analytic capture state")
 	assert_gt(distance, impact_radius, "the flyby should not be treated as a collision")
 	assert_lt(distance, 426.0, "close passes should evolve naturally instead of snapping back to an artificial periapsis floor")
 	assert_gt(star.velocity.length(), 500.0, "flyby velocity should remain dynamic instead of being clamped away")

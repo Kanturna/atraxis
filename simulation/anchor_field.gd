@@ -149,7 +149,7 @@ static func build_star_anchor_state(star: SimBody, black_holes: Array) -> Dictio
 			"dominant_bh_id": -1,
 			"secondary_bh_id": -1,
 			"dominance_ratio": 0.0,
-			"energy_bound": false,
+			"negative_specific_energy": false,
 			"dominant_distance": 0.0,
 		}
 
@@ -176,9 +176,9 @@ static func build_star_anchor_state(star: SimBody, black_holes: Array) -> Dictio
 		"dominant_bh_id": dominant.id,
 		"secondary_bh_id": secondary_id,
 		"dominance_ratio": dominance_ratio,
-		# This is only the instantaneous energetic binding status relative to the
-		# currently dominant BH. It does not imply any reparenting or capture API.
-		"energy_bound": specific_energy < 0.0,
+		# This is only an instantaneous E<0 diagnostic relative to the currently
+		# dominant BH. It does not imply any reparenting, capture, or guardrail.
+		"negative_specific_energy": specific_energy < 0.0,
 		"dominant_distance": ranked[0]["distance"],
 	}
 

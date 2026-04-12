@@ -254,8 +254,8 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 		+ "BH mass total   %.0f\n" % anchor_stats["black_hole_mass"]
 		+ "Star mass       %.0f\n" % anchor_stats["total_star_mass"]
 		+ "Anchor ratio    %.2f\n" % anchor_stats["anchor_ratio"]
-		+ "Stars e-bound   %d\n" % anchor_stats["energy_bound_stars"]
-		+ "Stars e-free    %d\n" % anchor_stats["energy_free_stars"]
+		+ "Stars E<0       %d\n" % anchor_stats["negative_specific_energy_stars"]
+		+ "Stars E>=0      %d\n" % anchor_stats["non_negative_specific_energy_stars"]
 		+ "Min BH-BH       %.0f\n" % anchor_stats["min_black_hole_distance"]
 		+ "Min star-star   %.0f\n" % anchor_stats["min_star_star_distance"]
 		+ "Min star-BH     %.0f\n" % anchor_stats["min_star_bh_distance"]
@@ -502,7 +502,7 @@ func _format_star_anchor_lines(star_anchor_states: Array) -> String:
 	for state in star_anchor_states:
 		var dominant_text: String = "--" if state["dominant_bh_id"] < 0 else str(state["dominant_bh_id"])
 		var secondary_text: String = "--" if state["secondary_bh_id"] < 0 else str(state["secondary_bh_id"])
-		var status_text: String = "e-bound" if state["energy_bound"] else "e-free"
+		var status_text: String = "E<0" if state["negative_specific_energy"] else "E>=0"
 		lines.append(
 			"Star %d         BH%s>%s  r%.2f %s" % [
 				state["star_id"],
