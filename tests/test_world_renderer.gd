@@ -101,6 +101,14 @@ func test_remote_cluster_pick_prefers_preview_bodies() -> void:
 		int(preview_spec.get("cluster_id", -1)),
 		"clicking a remote preview body should resolve to that preview's cluster"
 	)
+	var expected_clicked_global_focus: Vector2 = session.to_global(
+		canvas_position / max(SimConstants.SIM_TO_SCREEN, 0.001)
+	)
+	assert_eq(
+		Vector2(pick.get("clicked_global_focus_position", Vector2.ZERO)),
+		expected_clicked_global_focus,
+		"preview picking should preserve the actual clicked focus point in global space"
+	)
 
 func test_remote_cluster_pick_uses_markers_when_no_preview_body_is_hit() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -151,6 +159,14 @@ func test_remote_cluster_pick_uses_markers_when_no_preview_body_is_hit() -> void
 		int(remote_pick.get("cluster_id", -1)),
 		int(remote_marker.get("cluster_id", -1)),
 		"marker picking should still resolve the remote cluster when no preview body was hit"
+	)
+	var expected_marker_click_focus: Vector2 = session.to_global(
+		remote_canvas_position / max(SimConstants.SIM_TO_SCREEN, 0.001)
+	)
+	assert_eq(
+		Vector2(remote_pick.get("clicked_global_focus_position", Vector2.ZERO)),
+		expected_marker_click_focus,
+		"marker picking should expose the clicked global focus point for the camera flight"
 	)
 	assert_true(
 		active_pick.is_empty(),

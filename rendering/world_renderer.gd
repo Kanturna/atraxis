@@ -307,7 +307,8 @@ static func _pick_remote_cluster_from_preview_specs(
 	return _remote_cluster_pick_result(
 		galaxy_state,
 		active_cluster_session,
-		int(best_spec.get("cluster_id", -1))
+		int(best_spec.get("cluster_id", -1)),
+		canvas_position
 	)
 
 static func _pick_remote_cluster_from_marker_payload(
@@ -346,21 +347,25 @@ static func _pick_remote_cluster_from_marker_payload(
 	return _remote_cluster_pick_result(
 		galaxy_state,
 		active_cluster_session,
-		int(best_marker.get("cluster_id", -1))
+		int(best_marker.get("cluster_id", -1)),
+		canvas_position
 	)
 
 static func _remote_cluster_pick_result(
 		galaxy_state: GalaxyState,
 		active_cluster_session: ActiveClusterSession,
-		cluster_id: int) -> Dictionary:
+		cluster_id: int,
+		canvas_position: Vector2 = Vector2.ZERO) -> Dictionary:
 	if galaxy_state == null or active_cluster_session == null or cluster_id < 0:
 		return {}
 	var cluster_state: ClusterState = galaxy_state.get_cluster(cluster_id)
 	if cluster_state == null or cluster_id == active_cluster_session.cluster_id:
 		return {}
+	var clicked_local_focus_position: Vector2 = canvas_position / max(SimConstants.SIM_TO_SCREEN, 0.001)
 	return {
 		"cluster_id": cluster_id,
 		"global_center": cluster_state.global_center,
+		"clicked_global_focus_position": active_cluster_session.to_global(clicked_local_focus_position),
 		"local_center": active_cluster_session.to_local(cluster_state.global_center),
 		"authoritative_radius": cluster_state.get_authoritative_radius(),
 		"state": activation_state_debug_name(cluster_state.activation_state),

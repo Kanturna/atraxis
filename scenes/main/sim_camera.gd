@@ -101,6 +101,16 @@ func has_focus_transition_arrived() -> bool:
 func get_focus_transition_target_world_position() -> Vector2:
 	return _focus_transition_target_position
 
+func rebase_focus_transition(
+		current_world_position: Vector2,
+		target_world_position: Vector2) -> void:
+	position = current_world_position
+	_focus_transition_target_position = target_world_position
+	if _focus_transition_active:
+		_target_zoom = _focus_transition_target_zoom
+	elif _focus_transition_arrived:
+		_target_zoom = zoom.x
+
 func _update_smooth_zoom(delta: float) -> void:
 	var current_zoom: float = zoom.x
 	if is_equal_approx(current_zoom, _target_zoom):

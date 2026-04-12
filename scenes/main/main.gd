@@ -4,6 +4,7 @@
 extends Node2D
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const CLICK_CLUSTER_ACTIVATION_PROGRESS_THRESHOLD: float = 0.55
 
 # -------------------------------------------------------------------------
 # References
@@ -26,6 +27,9 @@ var _current_start_config: RefCounted = START_CONFIG_SCRIPT.new()
 var _pending_click_activation_cluster_id: int = -1
 var _pending_click_activation_focus_global_position: Vector2 = Vector2.ZERO
 var _pending_click_activation_requested: bool = false
+var _pending_click_activation_initial_focus_global_position: Vector2 = Vector2.ZERO
+var _pending_click_activation_initial_visible_radius_sim: float = 0.0
+var _pending_click_activation_target_visible_radius_sim: float = 0.0
 
 ## Fixed timestep accumulator. Accumulates real delta time and drains it
 ## in FIXED_DT chunks so the simulation always advances in equal steps.
@@ -74,12 +78,10 @@ func _process(delta: float) -> void:
 	var previous_world: SimWorld = sim_world
 	var world_switched: bool = _sync_runtime_aliases()
 	if world_switched:
-		var focus_to_restore: Vector2 = preserved_focus_global_position
-		if _pending_click_activation_requested \
-				and active_cluster_session != null \
-				and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
-			focus_to_restore = _pending_click_activation_focus_global_position
-		_restore_camera_focus_global_position(focus_to_restore)
+		if _should_rebase_pending_cluster_transition():
+			_rebase_pending_cluster_transition_after_world_switch(preserved_focus_global_position)
+		else:
+			_restore_camera_focus_global_position(preserved_focus_global_position)
 		_rebind_active_world(previous_world, _hud.get_current_time_scale(), _debug_overlay.visible)
 		if active_cluster_session != null and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
 			_clear_pending_cluster_transition(false)
@@ -251,7 +253,12 @@ func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
 	var cluster_id: int = int(cluster_pick.get("cluster_id", -1))
 	if cluster_id < 0 or cluster_id == active_cluster_session.cluster_id:
 		return
-	var target_global_position: Vector2 = Vector2(cluster_pick.get("global_center", Vector2.ZERO))
+	var target_global_position: Vector2 = Vector2(
+		cluster_pick.get(
+			"clicked_global_focus_position",
+			cluster_pick.get("global_center", Vector2.ZERO)
+		)
+	)
 	var target_local_position: Vector2 = active_cluster_session.to_local(target_global_position)
 	var current_visible_radius_sim: float = _sim_camera.get_visible_world_radius() / max(SimConstants.SIM_TO_SCREEN, 0.001)
 	var target_visible_radius_sim: float = current_visible_radius_sim
@@ -260,6 +267,9 @@ func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
 		target_visible_radius_sim = minf(current_visible_radius_sim, authoritative_radius * 1.1)
 	_pending_click_activation_cluster_id = cluster_id
 	_pending_click_activation_focus_global_position = target_global_position
+	_pending_click_activation_initial_focus_global_position = _camera_focus_global_position()
+	_pending_click_activation_initial_visible_radius_sim = current_visible_radius_sim
+	_pending_click_activation_target_visible_radius_sim = target_visible_radius_sim
 	_pending_click_activation_requested = false
 	_sim_camera.start_focus_transition(
 		target_local_position * SimConstants.SIM_TO_SCREEN,
@@ -271,7 +281,7 @@ func _update_pending_cluster_transition() -> void:
 		return
 	if _pending_click_activation_requested:
 		return
-	if _sim_camera.has_focus_transition_arrived():
+	if _should_request_pending_cluster_activation():
 		if galaxy_runtime != null and galaxy_runtime.request_cluster_activation(_pending_click_activation_cluster_id):
 			_pending_click_activation_requested = true
 		else:
@@ -283,6 +293,59 @@ func _update_pending_cluster_transition() -> void:
 func _clear_pending_cluster_transition(cancel_camera: bool) -> void:
 	_pending_click_activation_cluster_id = -1
 	_pending_click_activation_focus_global_position = Vector2.ZERO
+	_pending_click_activation_initial_focus_global_position = Vector2.ZERO
+	_pending_click_activation_initial_visible_radius_sim = 0.0
+	_pending_click_activation_target_visible_radius_sim = 0.0
 	_pending_click_activation_requested = false
 	if cancel_camera and _sim_camera != null:
 		_sim_camera.cancel_focus_transition()
+
+func _should_request_pending_cluster_activation() -> bool:
+	if _pending_click_activation_cluster_id < 0 or _sim_camera == null:
+		return false
+	if not _sim_camera.is_focus_transition_active():
+		return false
+	var position_progress: float = _transition_position_progress()
+	var zoom_progress: float = _transition_zoom_progress()
+	return minf(position_progress, zoom_progress) >= CLICK_CLUSTER_ACTIVATION_PROGRESS_THRESHOLD
+
+func _transition_position_progress() -> float:
+	var initial_distance: float = _pending_click_activation_initial_focus_global_position.distance_to(
+		_pending_click_activation_focus_global_position
+	)
+	if initial_distance <= 0.001:
+		return 1.0
+	var current_distance: float = _camera_focus_global_position().distance_to(
+		_pending_click_activation_focus_global_position
+	)
+	return clampf(1.0 - (current_distance / initial_distance), 0.0, 1.0)
+
+func _transition_zoom_progress() -> float:
+	var initial_zoom_delta: float = absf(
+		_pending_click_activation_initial_visible_radius_sim - _pending_click_activation_target_visible_radius_sim
+	)
+	if initial_zoom_delta <= 0.001:
+		return 1.0
+	var current_visible_radius_sim: float = _sim_camera.get_visible_world_radius() / max(SimConstants.SIM_TO_SCREEN, 0.001)
+	var current_zoom_delta: float = absf(
+		current_visible_radius_sim - _pending_click_activation_target_visible_radius_sim
+	)
+	return clampf(1.0 - (current_zoom_delta / initial_zoom_delta), 0.0, 1.0)
+
+func _should_rebase_pending_cluster_transition() -> bool:
+	return _pending_click_activation_requested \
+		and _sim_camera != null \
+		and active_cluster_session != null \
+		and active_cluster_session.cluster_id == _pending_click_activation_cluster_id
+
+func _rebase_pending_cluster_transition_after_world_switch(
+		current_focus_global_position: Vector2) -> void:
+	if _sim_camera == null or active_cluster_session == null:
+		return
+	var rebased_current_focus: Vector2 = active_cluster_session.to_local(
+		current_focus_global_position
+	) * SimConstants.SIM_TO_SCREEN
+	var rebased_target_focus: Vector2 = active_cluster_session.to_local(
+		_pending_click_activation_focus_global_position
+	) * SimConstants.SIM_TO_SCREEN
+	_sim_camera.rebase_focus_transition(rebased_current_focus, rebased_target_focus)
