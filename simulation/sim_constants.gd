@@ -90,6 +90,19 @@ const MAX_GALAXY_CLUSTER_RADIUS_AU: float = 12.0
 const MAX_GALAXY_VOID_SCALE: float = 10.0
 const MAX_GALAXY_BLACK_HOLES: int = 1200            # separate cap for galaxy topology
 
+# --- Sector worldgen ---
+# Worldgen V1 describes the galaxy as deterministic square sectors. `sector_scale`
+# is the edge length of one sector in global sim/world coordinates.
+const DEFAULT_WORLDGEN_SECTOR_SCALE: float = 180.0 * AU
+const MIN_WORLDGEN_SECTOR_SCALE: float = 60.0 * AU
+const MAX_WORLDGEN_SECTOR_SCALE: float = 720.0 * AU
+const DEFAULT_WORLDGEN_CLUSTER_DENSITY: float = 0.58
+const DEFAULT_WORLDGEN_VOID_STRENGTH: float = 0.55
+const DEFAULT_WORLDGEN_BH_RICHNESS: float = 0.60
+const DEFAULT_WORLDGEN_STAR_RICHNESS: float = 0.52
+const DEFAULT_WORLDGEN_RARE_ZONE_FREQUENCY: float = 0.24
+const MAX_WORLDGEN_NORMALIZED_PARAM: float = 1.0
+
 # --- Public generation ranges ---
 const MAX_START_STAR_COUNT: int = 12
 const MAX_PLANETS_PER_STAR: int = 8

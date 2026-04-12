@@ -6,6 +6,7 @@ extends RefCounted
 
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
+const WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
 
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
@@ -18,6 +19,7 @@ var manual_activation_hold_until_runtime_time: float = -1.0
 var focus_global_position: Vector2 = Vector2.ZERO
 var focus_visible_world_radius: float = 0.0
 var has_focus_context: bool = false
+var worldgen = null
 
 func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) -> void:
 	galaxy_state = next_galaxy_state
@@ -31,6 +33,8 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 	has_focus_context = false
 	focus_global_position = Vector2.ZERO
 	focus_visible_world_radius = 0.0
+	worldgen = WORLDGEN_SCRIPT.new(galaxy_state.worldgen_config) \
+		if galaxy_state != null and galaxy_state.worldgen_config != null else null
 	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
 		return
 
@@ -41,6 +45,7 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
+	_discover_focus_sector_neighborhood()
 	_apply_focus_relevance_policy()
 	_flush_pending_activation_request()
 	_apply_focus_relevance_policy()
@@ -160,6 +165,11 @@ func get_world_entities_in_transit() -> Array:
 	if galaxy_state == null:
 		return []
 	return galaxy_state.get_world_entities_in_transit()
+
+func get_discovered_sector_count() -> int:
+	if galaxy_state == null:
+		return 0
+	return galaxy_state.get_discovered_sector_count()
 
 func _activate_cluster_internal(target_cluster_id: int) -> void:
 	active_cluster_session = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state, target_cluster_id)
@@ -281,6 +291,13 @@ func _apply_focus_relevance_policy() -> void:
 			cluster_state.mark_simplified(runtime_time_elapsed)
 		elif cluster_state.activation_state == ClusterActivationState.State.SIMPLIFIED:
 			cluster_state.mark_relevant(runtime_time_elapsed)
+
+func _discover_focus_sector_neighborhood() -> void:
+	if galaxy_state == null or worldgen == null:
+		return
+	var context: Dictionary = _resolve_focus_context()
+	var focus_sector: Vector2i = worldgen.sector_coord_for_global_position(context["focus_global_position"])
+	GalaxyBuilder.discover_sector_neighborhood(galaxy_state, worldgen, focus_sector, 1)
 
 func _resolve_focus_context() -> Dictionary:
 	if has_focus_context:

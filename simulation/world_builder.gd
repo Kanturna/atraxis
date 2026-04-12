@@ -7,6 +7,7 @@ extends RefCounted
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
+const WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
 
 class ZoneBoundaries:
 	var inner_max: float
@@ -964,6 +965,7 @@ static func _build_cluster_object_state_from_transit(
 static func refresh_transit_target_assignment(galaxy_state: GalaxyState, transit_state) -> void:
 	if galaxy_state == null or transit_state == null:
 		return
+	_discover_worldgen_clusters_around_position(galaxy_state, transit_state.global_position)
 	var source_cluster: ClusterState = galaxy_state.get_cluster(transit_state.source_cluster_id)
 	if source_cluster != null \
 			and OBJECT_RESIDENCY_POLICY_SCRIPT.can_import_transit_object_into_cluster(
@@ -1001,6 +1003,7 @@ static func refresh_transit_target_assignment(galaxy_state: GalaxyState, transit
 static func _refresh_transit_group_target_assignment(galaxy_state: GalaxyState, transit_group) -> void:
 	if galaxy_state == null or transit_group == null:
 		return
+	_discover_worldgen_clusters_around_position(galaxy_state, transit_group.global_position)
 	var source_cluster: ClusterState = galaxy_state.get_cluster(transit_group.source_cluster_id)
 	if source_cluster != null \
 			and OBJECT_RESIDENCY_POLICY_SCRIPT.is_position_within_cluster_import_radius(
@@ -1090,3 +1093,12 @@ static func _estimate_runtime_cluster_radius(object_registry: Dictionary) -> flo
 		var object_radius: float = float(object_state.descriptor.get("radius", 0.0))
 		max_extent = maxf(max_extent, object_state.local_position.length() + object_radius)
 	return max_extent
+
+static func _discover_worldgen_clusters_around_position(
+		galaxy_state: GalaxyState,
+		global_position: Vector2) -> void:
+	if galaxy_state == null or galaxy_state.worldgen_config == null:
+		return
+	var worldgen := WORLDGEN_SCRIPT.new(galaxy_state.worldgen_config)
+	var sector_coord: Vector2i = worldgen.sector_coord_for_global_position(global_position)
+	GalaxyBuilder.discover_sector_neighborhood(galaxy_state, worldgen, sector_coord, 1)

@@ -89,15 +89,15 @@ func _ready() -> void:
 	_start_title_label.text = "Universe Builder"
 	_mode_label.visible = false
 	_mode_option.visible = false
-	_anchor_topology_label.text = "Universe layout"
-	_bh_mass_label.text = "Black hole mass"
-	_black_hole_count_label.text = "Total black holes"
-	_star_count_label.text = "Spawn stars in active cluster"
-	_planets_per_star_label.text = "Planets / spawn star"
-	_disturbance_count_label.text = "Spawn disturbances"
-	_star_inner_orbit_label.text = "Star inner orbit (AU)"
-	_star_outer_orbit_label.text = "Star outer orbit (AU)"
-	_field_spacing_label.text = "Local BH spacing (AU)"
+	_anchor_topology_label.text = "Internal layout"
+	_bh_mass_label.text = "Sector Scale"
+	_black_hole_count_label.text = "Cluster Density"
+	_star_count_label.text = "Void Strength"
+	_planets_per_star_label.text = "BH Richness"
+	_disturbance_count_label.text = "Legacy disturbances"
+	_star_inner_orbit_label.text = "Star Richness"
+	_star_outer_orbit_label.text = "Rare-Zone Frequency"
+	_field_spacing_label.text = "Legacy field spacing"
 	_restart_button.text = "Rebuild Universe"
 	_anchor_topology_option.clear()
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
@@ -113,16 +113,23 @@ func _ready() -> void:
 		+ "Dominance radius ≈ sqrt(G·M/10) ≈ 11 AU for 12M BH — "
 		+ "set spacing above that value to keep gravity fields separate."
 	)
-	_black_hole_count_spin.min_value = 2.0
-	_black_hole_count_spin.max_value = SimConstants.MAX_FIELD_PATCH_BLACK_HOLES
-	_star_count_spin.min_value = 0.0
-	_star_count_spin.max_value = SimConstants.MAX_START_STAR_COUNT
-	_planets_per_star_spin.min_value = 0.0
-	_planets_per_star_spin.max_value = SimConstants.MAX_PLANETS_PER_STAR
+	_bh_mass_spin.min_value = SimConstants.MIN_WORLDGEN_SECTOR_SCALE
+	_bh_mass_spin.max_value = SimConstants.MAX_WORLDGEN_SECTOR_SCALE
+	_bh_mass_spin.step = 10.0 * SimConstants.AU
+	_bh_mass_spin.rounded = false
+	for spin_box in [
+		_black_hole_count_spin,
+		_star_count_spin,
+		_planets_per_star_spin,
+		_star_inner_orbit_spin,
+		_star_outer_orbit_spin,
+	]:
+		spin_box.min_value = 0.0
+		spin_box.max_value = 1.0
+		spin_box.step = 0.05
+		spin_box.rounded = false
 	_disturbance_count_spin.min_value = 0.0
 	_disturbance_count_spin.max_value = SimConstants.MAX_DISTURBANCE_BODY_COUNT
-	_star_inner_orbit_spin.max_value = SimConstants.MAX_STAR_INNER_ORBIT_AU
-	_star_outer_orbit_spin.max_value = SimConstants.MAX_STAR_OUTER_ORBIT_AU
 	_create_galaxy_controls()
 	_galaxy_cluster_count_spin.max_value = SimConstants.MAX_GALAXY_CLUSTER_COUNT
 	_galaxy_cluster_radius_spin.max_value = SimConstants.MAX_GALAXY_CLUSTER_RADIUS_AU
@@ -305,24 +312,19 @@ func _build_cluster_diagnostics_lines() -> String:
 		return ""
 	var active_cluster: ClusterState = _active_cluster_session.active_cluster_state
 	var profile: Dictionary = active_cluster.simulation_profile if active_cluster != null else {}
-	var topology_role: String = str(profile.get("topology_role", ""))
-	var requested_black_hole_count: int = int(profile.get("requested_black_hole_count", _count_total_galaxy_black_holes()))
-	var requested_cluster_count: int = (
-		int(profile.get("requested_galaxy_cluster_count", _galaxy_state.get_cluster_count()))
-		if topology_role == "galaxy_cluster_map"
-		else 1
-	)
+	var sector_coord_variant = profile.get("sector_coord", Vector2i.ZERO)
+	var sector_coord: Vector2i = sector_coord_variant if sector_coord_variant is Vector2i else Vector2i.ZERO
 	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
-		+ "Layout         %s\n" % _describe_topology_role(profile)
-		+ "Requested BHs  %d\n" % requested_black_hole_count
+		+ "Sector         %s\n" % _format_sector_coord(sector_coord)
+		+ "Archetype      %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else ""))
+		+ "Sectors seen   %d\n" % _galaxy_state.get_discovered_sector_count()
+		+ "Clusters total %d\n" % _galaxy_state.get_cluster_count()
 		+ "Galaxy BHs     %d\n" % _count_total_galaxy_black_holes()
 		+ "Cluster BHs    %d\n" % active_cluster_black_holes
 		+ "Materialized   %d\n" % materialized_black_holes
-		+ "Macro clusters %d\n" % requested_cluster_count
-		+ "Clusters total  %d\n" % _galaxy_state.get_cluster_count()
 		+ "Clusters simp   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
 		+ "Clusters idle   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED)
 		+ "Transit objs    %d\n" % _galaxy_state.get_transit_object_count()
@@ -388,24 +390,14 @@ func _sync_start_controls(config) -> void:
 		return
 	var safe_config = config.copy()
 	safe_config.clamp_values()
-	_select_option_button_id(
-		_anchor_topology_option,
-		_effective_public_anchor_topology(safe_config.anchor_topology),
-		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	)
-	_apply_topology_control_ranges(_anchor_topology_option.get_selected_id())
 	_seed_spin.value = safe_config.seed
-	_bh_mass_spin.value = safe_config.black_hole_mass
-	_black_hole_count_spin.value = safe_config.black_hole_count
-	_star_count_spin.value = safe_config.star_count
-	_planets_per_star_spin.value = safe_config.planets_per_star
-	_star_inner_orbit_spin.value = safe_config.star_inner_orbit_au
-	_star_outer_orbit_spin.value = safe_config.star_outer_orbit_au
+	_bh_mass_spin.value = safe_config.sector_scale
+	_black_hole_count_spin.value = safe_config.cluster_density
+	_star_count_spin.value = safe_config.void_strength
+	_planets_per_star_spin.value = safe_config.bh_richness
+	_star_inner_orbit_spin.value = safe_config.star_richness
+	_star_outer_orbit_spin.value = safe_config.rare_zone_frequency
 	_field_spacing_spin.value = safe_config.field_spacing_au
-	if _galaxy_cluster_count_spin != null:
-		_galaxy_cluster_count_spin.value = safe_config.galaxy_cluster_count
-		_galaxy_cluster_radius_spin.value = safe_config.galaxy_cluster_radius_au
-		_galaxy_void_scale_spin.value = safe_config.galaxy_void_scale
 	_disturbance_count_spin.value = safe_config.disturbance_body_count
 	_spawn_radius_spin.value = safe_config.spawn_radius_au
 	_spawn_spread_spin.value = safe_config.spawn_spread_au
@@ -422,41 +414,24 @@ func _sync_live_anchor_controls(config) -> void:
 
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
-	config.anchor_topology = _anchor_topology_option.get_selected_id()
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	config.seed = int(_seed_spin.value)
-	config.black_hole_mass = _bh_mass_spin.value
-	config.black_hole_count = int(_black_hole_count_spin.value)
-	config.star_count = int(_star_count_spin.value)
-	config.planets_per_star = int(_planets_per_star_spin.value)
-	config.star_inner_orbit_au = _star_inner_orbit_spin.value
-	config.star_outer_orbit_au = _star_outer_orbit_spin.value
-	config.field_spacing_au = _field_spacing_spin.value
-	if _galaxy_cluster_count_spin != null:
-		config.galaxy_cluster_count = int(_galaxy_cluster_count_spin.value)
-		config.galaxy_cluster_radius_au = _galaxy_cluster_radius_spin.value
-		config.galaxy_void_scale = _galaxy_void_scale_spin.value
-	config.disturbance_body_count = int(_disturbance_count_spin.value)
-	config.spawn_radius_au = _spawn_radius_spin.value
-	config.spawn_spread_au = _spawn_spread_spin.value
-	config.inflow_speed_scale = _speed_scale_spin.value
-	config.tangential_bias = _tangential_bias_spin.value
-	config.chaos_body_count = int(_chaos_body_count_spin.value)
+	config.black_hole_mass = _live_bh_mass_spin.value
+	config.sector_scale = _bh_mass_spin.value
+	config.cluster_density = _black_hole_count_spin.value
+	config.void_strength = _star_count_spin.value
+	config.bh_richness = _planets_per_star_spin.value
+	config.star_richness = _star_inner_orbit_spin.value
+	config.rare_zone_frequency = _star_outer_orbit_spin.value
 	config.clamp_values()
 	return config
 
 func _update_start_inputs() -> void:
-	var selected_topology: int = _anchor_topology_option.get_selected_id()
-	var field_patch_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	var galaxy_cluster_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	var multi_black_hole_enabled: bool = field_patch_enabled or galaxy_cluster_enabled
-	_apply_topology_control_ranges(selected_topology)
-	_black_hole_count_label.text = "Local black holes" if field_patch_enabled else "Total black holes"
-	_star_count_label.text = "Spawn stars in active cluster"
-	_planets_per_star_label.text = "Planets / spawn star"
-	_field_spacing_label.text = "Local BH spacing (AU)"
-	var shared_anchor_nodes: Array[CanvasItem] = [
+	var public_nodes: Array[CanvasItem] = [
 		_bh_mass_label,
 		_bh_mass_spin,
+		_black_hole_count_label,
+		_black_hole_count_spin,
 		_star_count_label,
 		_star_count_spin,
 		_planets_per_star_label,
@@ -465,22 +440,14 @@ func _update_start_inputs() -> void:
 		_star_inner_orbit_spin,
 		_star_outer_orbit_label,
 		_star_outer_orbit_spin,
-		_disturbance_count_label,
-		_disturbance_count_spin,
 	]
-	var dynamic_nodes: Array[CanvasItem] = [
+	var hidden_nodes: Array[CanvasItem] = [
 		_anchor_topology_label,
 		_anchor_topology_option,
-	]
-	var multi_black_hole_nodes: Array[CanvasItem] = [
-		_black_hole_count_label,
-		_black_hole_count_spin,
-	]
-	var field_patch_nodes: Array[CanvasItem] = [
 		_field_spacing_label,
 		_field_spacing_spin,
-	]
-	var chaos_nodes: Array[CanvasItem] = [
+		_disturbance_count_label,
+		_disturbance_count_spin,
 		_spawn_radius_label,
 		_spawn_radius_spin,
 		_spawn_spread_label,
@@ -491,32 +458,24 @@ func _update_start_inputs() -> void:
 		_tangential_bias_spin,
 		_chaos_body_count_label,
 		_chaos_body_count_spin,
+		_field_patch_hint_label,
 	]
-	for node in shared_anchor_nodes:
+	for node in public_nodes:
 		node.visible = true
-	for node in dynamic_nodes:
-		node.visible = true
-	for node in multi_black_hole_nodes:
-		node.visible = multi_black_hole_enabled
-	for node in field_patch_nodes:
-		node.visible = field_patch_enabled
-	var galaxy_nodes: Array = []
+	for node in hidden_nodes:
+		node.visible = false
 	if _galaxy_cluster_count_label != null:
-		galaxy_nodes = [
+		for node in [
 			_galaxy_cluster_count_label,
 			_galaxy_cluster_count_spin,
 			_galaxy_cluster_radius_label,
 			_galaxy_cluster_radius_spin,
 			_galaxy_void_scale_label,
 			_galaxy_void_scale_spin,
-		]
-	for node in galaxy_nodes:
-		node.visible = galaxy_cluster_enabled
+		]:
+			node.visible = false
 	if _galaxy_hint_label != null:
-		_galaxy_hint_label.visible = galaxy_cluster_enabled
-	for node in chaos_nodes:
-		node.visible = false
-	_field_patch_hint_label.visible = field_patch_enabled
+		_galaxy_hint_label.visible = false
 	_update_panel_group_visibility()
 
 func _on_anchor_topology_selected(_index: int) -> void:
@@ -597,15 +556,11 @@ func _update_panel_group_visibility() -> void:
 
 func _set_topology_hint_texts() -> void:
 	_field_patch_hint_label.text = (
-		"Field Patch: local multi-BH system. "
-		+ "Requested black holes are all spawned inside the active cluster. "
-		+ "Increase local BH spacing to keep gravity wells more separated."
+		"Universe Worldgen: sectors describe density, void pressure and content richness deterministically. "
+		+ "Discovery only reveals nearby sectors; cluster state and transit keep the wider universe alive."
 	)
 	if _galaxy_hint_label != null:
-		_galaxy_hint_label.text = (
-			"Galaxy Cluster: large map layout with compact BH clusters separated by voids. "
-			+ "The total black-hole count is distributed across the galaxy, but only the active cluster is materialized in the live sim."
-		)
+		_galaxy_hint_label.text = ""
 
 func _effective_public_anchor_topology(anchor_topology: int) -> int:
 	if anchor_topology == START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH:
@@ -654,12 +609,14 @@ func _apply_topology_control_ranges(selected_topology: int) -> void:
 func _describe_topology_role(profile: Dictionary) -> String:
 	var topology_role: String = str(profile.get("topology_role", ""))
 	match topology_role:
+		"sector_worldgen_cluster":
+			return "Sector Worldgen"
 		"field_patch_local_system":
-			return "Field Patch"
+			return "Legacy Field Patch"
 		"galaxy_cluster_map":
-			return "Galaxy Cluster"
+			return "Legacy Galaxy Cluster"
 		"central_anchor_dev":
-			return "Central BH (dev)"
+			return "Legacy Central BH"
 		_:
 			return "Universe"
 
@@ -675,3 +632,6 @@ func _count_active_cluster_black_holes() -> int:
 	if _active_cluster_session == null or _active_cluster_session.active_cluster_state == null:
 		return 0
 	return _active_cluster_session.active_cluster_state.get_objects_by_kind("black_hole").size()
+
+func _format_sector_coord(sector_coord: Vector2i) -> String:
+	return "%d:%d" % [sector_coord.x, sector_coord.y]

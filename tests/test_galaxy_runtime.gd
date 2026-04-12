@@ -452,29 +452,33 @@ func test_active_dynamic_asteroid_exports_into_galaxy_transit_registry() -> void
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 6
-	config.galaxy_cluster_count = 2
-	config.star_count = 1
-	config.planets_per_star = 0
+	config.cluster_density = 0.90
+	config.void_strength = 0.12
+	config.bh_richness = 0.68
+	config.star_richness = 0.42
 	config.disturbance_body_count = 1
 
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
 	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
-	var target_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, active_cluster.cluster_id)
-	var target_cluster: ClusterState = runtime.galaxy_state.get_cluster(target_cluster_id)
 	var asteroid: SimBody = _find_active_body_of_type(runtime.get_active_sim_world(), SimBody.BodyType.ASTEROID)
 	assert_not_null(asteroid, "the export test needs one free dynamic asteroid in the active cluster")
 
 	var export_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_export_radius(active_cluster)
-	var to_target_dir: Vector2 = (target_cluster.global_center - active_cluster.global_center).normalized()
-	var outbound_dir: Vector2 = Vector2(-to_target_dir.y, to_target_dir.x)
+	var outbound_dir: Vector2 = Vector2.RIGHT
 	asteroid.position = outbound_dir * (export_radius + SimConstants.AU)
 	asteroid.velocity = Vector2(0.0, 0.0)
+	var expected_global_position: Vector2 = runtime.active_cluster_session.to_global(asteroid.position)
+	var discovered_sectors_before: int = runtime.get_discovered_sector_count()
 	var exported_object_id: String = asteroid.persistent_object_id
 
 	runtime.step(SimConstants.FIXED_DT)
 
 	var transit_state = runtime.galaxy_state.get_transit_object(exported_object_id)
+	var expected_target_cluster_id: int = _find_best_non_source_claim_cluster_id(
+		runtime.galaxy_state,
+		expected_global_position,
+		active_cluster.cluster_id
+	)
 	assert_not_null(transit_state, "free dynamic asteroids beyond cluster ownership range should become transit records")
 	assert_eq(
 		runtime.get_transit_object_count(),
@@ -501,13 +505,17 @@ func test_active_dynamic_asteroid_exports_into_galaxy_transit_registry() -> void
 	)
 	assert_eq(
 		transit_state.target_cluster_id,
-		target_cluster_id,
-		"exported objects should be assigned to the nearest non-source cluster as their first transfer target"
+		expected_target_cluster_id,
+		"exported objects should claim the current best non-source cluster after worldgen-aware discovery"
 	)
 	assert_eq(
 		transit_state.arrival_phase,
 		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE,
 		"objects outside the target cluster radius should remain en route until they actually enter the target cluster"
+	)
+	assert_true(
+		runtime.get_discovered_sector_count() >= discovered_sectors_before,
+		"transit export should be allowed to discover additional sectors without depending on camera focus"
 	)
 
 func test_transit_routing_keeps_current_target_until_a_competitor_wins_by_clear_margin() -> void:
@@ -1131,6 +1139,24 @@ func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: in
 		if cluster_state.cluster_id != active_cluster_id:
 			return cluster_state.cluster_id
 	return -1
+
+func _find_best_non_source_claim_cluster_id(
+		galaxy_state: GalaxyState,
+		global_position: Vector2,
+		source_cluster_id: int) -> int:
+	var matched_cluster_id: int = -1
+	var best_score: float = INF
+	for cluster_state in galaxy_state.get_clusters():
+		if cluster_state.cluster_id == source_cluster_id:
+			continue
+		var claim_score: float = OBJECT_RESIDENCY_POLICY_SCRIPT.cluster_claim_score_for_position(
+			global_position,
+			cluster_state
+		)
+		if claim_score < best_score:
+			best_score = claim_score
+			matched_cluster_id = cluster_state.cluster_id
+	return matched_cluster_id
 
 func _find_active_body_of_type(world: SimWorld, body_type: int) -> SimBody:
 	for body in world.bodies:

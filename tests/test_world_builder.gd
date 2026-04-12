@@ -68,54 +68,75 @@ func test_live_black_hole_mass_updates_analytic_star_carrier_speed_in_internal_r
 
 	assert_gt(star.orbit_angular_speed, old_speed, "raising BH mass should immediately strengthen analytic star carrier speed")
 
-func test_field_patch_layout_keeps_central_bh_at_origin_and_outer_ring_spaced() -> void:
-	var world := SimWorld.new()
+func test_worldgen_materialization_matches_the_active_cluster_black_hole_registry() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	config.black_hole_count = 7
-	config.field_spacing_au = 9.0
+	config.seed = 27
+	config.cluster_density = 0.88
+	config.void_strength = 0.10
+	config.bh_richness = 0.74
+	config.star_richness = 0.46
+	config.rare_zone_frequency = 0.35
 
-	WorldBuilder.build_from_config(world, config)
-	var black_holes: Array = world.get_black_holes()
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_config(config)
+	var world: SimWorld = session.sim_world
+	var active_cluster: ClusterState = session.active_cluster_state
+	var black_hole_states: Array = active_cluster.get_objects_by_kind("black_hole")
 
-	assert_eq(black_holes.size(), 7, "field patch should create the configured total BH count")
+	assert_eq(
+		world.get_black_holes().size(),
+		black_hole_states.size(),
+		"the active local projection should materialize exactly the registered active-cluster BH count"
+	)
+	for object_state in black_hole_states:
+		var body: SimBody = world.get_body_by_persistent_object_id(object_state.object_id)
+		assert_not_null(body, "every registered active-cluster BH should materialize into the local SimWorld")
+		assert_true(
+			body.position.is_equal_approx(object_state.local_position),
+			"materialized black holes should keep the cluster registry's local positions"
+		)
+		assert_almost_eq(
+			body.mass,
+			float(object_state.descriptor.get("mass", 0.0)),
+			0.001,
+			"materialized black holes should keep the cluster registry's stored mass"
+		)
 
-	var central_count: int = 0
-	var ring_one_count: int = 0
-	for black_hole in black_holes:
-		var distance: float = black_hole.position.length()
-		if is_zero_approx(distance):
-			central_count += 1
-		else:
-			if is_equal_approx(distance, config.field_spacing_au * SimConstants.AU):
-				ring_one_count += 1
-
-	assert_eq(central_count, 1, "field patch should keep exactly one black hole at the center")
-	assert_eq(ring_one_count, 6, "with 7 total black holes the first outer ring should fill all 6 slots")
-
-func test_field_patch_accepts_single_black_hole_count_as_center_only() -> void:
-	var world := SimWorld.new()
+func test_worldgen_active_cluster_keeps_sector_metadata_for_runtime_and_debug() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	config.black_hole_count = 1
+	config.seed = 61
+	config.cluster_density = 0.82
+	config.void_strength = 0.16
+	config.bh_richness = 0.69
+	config.star_richness = 0.58
+	config.rare_zone_frequency = 0.44
 
-	WorldBuilder.build_from_config(world, config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_config(config)
+	var profile: Dictionary = session.active_cluster_state.simulation_profile
 
-	assert_eq(world.get_black_holes().size(), 1, "field patch with one BH should remain a valid center-only layout")
-	assert_true(is_zero_approx(world.get_black_hole().position.length()), "the single field-patch BH should stay at the center")
+	assert_true(profile.get("sector_coord", null) is Vector2i, "active worldgen clusters should keep their source sector coordinate")
+	assert_true(int(profile.get("candidate_index", -1)) >= 0, "active worldgen clusters should keep their candidate index")
+	assert_true(str(profile.get("region_archetype", "")) != "", "active worldgen clusters should keep their source archetype")
+	assert_eq(
+		profile.get("topology_role", ""),
+		"sector_worldgen_cluster",
+		"active worldgen clusters should advertise the canonical topology role to runtime and diagnostics"
+	)
 
-func test_live_black_hole_mass_updates_every_field_patch_anchor() -> void:
-	var world := SimWorld.new()
+func test_live_black_hole_mass_updates_every_active_cluster_black_hole() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	config.seed = 44
+	config.cluster_density = 0.84
+	config.void_strength = 0.10
+	config.bh_richness = 0.72
 
+	var world := SimWorld.new()
 	WorldBuilder.build_from_config(world, config)
 	world.set_black_hole_mass(config.black_hole_mass * 1.25)
 
 	for black_hole in world.get_black_holes():
-		assert_almost_eq(black_hole.mass, config.black_hole_mass * 1.25, 0.001, "live BH mass changes should affect all anchors in the field patch")
+		assert_almost_eq(black_hole.mass, config.black_hole_mass * 1.25, 0.001, "live BH mass changes should affect all active-cluster anchors")
 
-func test_public_anchor_cluster_can_materialize_more_than_four_planets_per_star() -> void:
+func test_public_worldgen_cluster_can_materialize_more_than_four_planets_per_star_when_legacy_hint_requests_it() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH

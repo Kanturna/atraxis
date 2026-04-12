@@ -42,6 +42,12 @@ const DEFAULT_FIELD_SPACING_AU: float = 9.0
 const DEFAULT_GALAXY_CLUSTER_COUNT: int = SimConstants.DEFAULT_GALAXY_CLUSTER_COUNT
 const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = SimConstants.DEFAULT_GALAXY_CLUSTER_RADIUS_AU
 const DEFAULT_GALAXY_VOID_SCALE: float = SimConstants.DEFAULT_GALAXY_VOID_SCALE
+const DEFAULT_SECTOR_SCALE: float = SimConstants.DEFAULT_WORLDGEN_SECTOR_SCALE
+const DEFAULT_CLUSTER_DENSITY: float = SimConstants.DEFAULT_WORLDGEN_CLUSTER_DENSITY
+const DEFAULT_VOID_STRENGTH: float = SimConstants.DEFAULT_WORLDGEN_VOID_STRENGTH
+const DEFAULT_BH_RICHNESS: float = SimConstants.DEFAULT_WORLDGEN_BH_RICHNESS
+const DEFAULT_STAR_RICHNESS: float = SimConstants.DEFAULT_WORLDGEN_STAR_RICHNESS
+const DEFAULT_RARE_ZONE_FREQUENCY: float = SimConstants.DEFAULT_WORLDGEN_RARE_ZONE_FREQUENCY
 
 var world_profile: int = WorldProfile.ORBITAL_SANDBOX
 var mode: int:
@@ -67,6 +73,12 @@ var field_spacing_au: float = DEFAULT_FIELD_SPACING_AU
 var galaxy_cluster_count: int = DEFAULT_GALAXY_CLUSTER_COUNT
 var galaxy_cluster_radius_au: float = DEFAULT_GALAXY_CLUSTER_RADIUS_AU
 var galaxy_void_scale: float = DEFAULT_GALAXY_VOID_SCALE
+var sector_scale: float = DEFAULT_SECTOR_SCALE
+var cluster_density: float = DEFAULT_CLUSTER_DENSITY
+var void_strength: float = DEFAULT_VOID_STRENGTH
+var bh_richness: float = DEFAULT_BH_RICHNESS
+var star_richness: float = DEFAULT_STAR_RICHNESS
+var rare_zone_frequency: float = DEFAULT_RARE_ZONE_FREQUENCY
 
 func copy():
 	var config = get_script().new()
@@ -89,6 +101,12 @@ func copy():
 	config.galaxy_cluster_count = galaxy_cluster_count
 	config.galaxy_cluster_radius_au = galaxy_cluster_radius_au
 	config.galaxy_void_scale = galaxy_void_scale
+	config.sector_scale = sector_scale
+	config.cluster_density = cluster_density
+	config.void_strength = void_strength
+	config.bh_richness = bh_richness
+	config.star_richness = star_richness
+	config.rare_zone_frequency = rare_zone_frequency
 	return config
 
 func clamp_values() -> void:
@@ -116,6 +134,16 @@ func clamp_values() -> void:
 	galaxy_cluster_count = clampi(galaxy_cluster_count, 1, max_cluster_count)
 	galaxy_cluster_radius_au = clampf(galaxy_cluster_radius_au, 1.0, SimConstants.MAX_GALAXY_CLUSTER_RADIUS_AU)
 	galaxy_void_scale = clampf(galaxy_void_scale, 2.0, SimConstants.MAX_GALAXY_VOID_SCALE)
+	sector_scale = clampf(
+		sector_scale,
+		SimConstants.MIN_WORLDGEN_SECTOR_SCALE,
+		SimConstants.MAX_WORLDGEN_SECTOR_SCALE
+	)
+	cluster_density = clampf(cluster_density, 0.0, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM)
+	void_strength = clampf(void_strength, 0.0, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM)
+	bh_richness = clampf(bh_richness, 0.0, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM)
+	star_richness = clampf(star_richness, 0.0, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM)
+	rare_zone_frequency = clampf(rare_zone_frequency, 0.0, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM)
 
 func uses_inflow_lab_profile() -> bool:
 	return world_profile == WorldProfile.INFLOW_LAB
@@ -138,3 +166,14 @@ func canonicalized_public_copy():
 		config.black_hole_count = 1
 	config.clamp_values()
 	return config
+
+func has_legacy_generation_hint_override() -> bool:
+	return anchor_topology != AnchorTopology.GALAXY_CLUSTER \
+		or black_hole_count != DEFAULT_BLACK_HOLE_COUNT \
+		or field_spacing_au != DEFAULT_FIELD_SPACING_AU \
+		or galaxy_cluster_count != DEFAULT_GALAXY_CLUSTER_COUNT \
+		or galaxy_cluster_radius_au != DEFAULT_GALAXY_CLUSTER_RADIUS_AU \
+		or galaxy_void_scale != DEFAULT_GALAXY_VOID_SCALE \
+		or star_count != DEFAULT_STAR_COUNT \
+		or planets_per_star != DEFAULT_PLANETS_PER_STAR \
+		or disturbance_body_count != DEFAULT_DISTURBANCE_BODY_COUNT

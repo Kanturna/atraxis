@@ -7,9 +7,14 @@ const TRANSIT_GROUP_STATE_SCRIPT := preload("res://simulation/transit_group_stat
 const WORLD_ENTITY_STATE_SCRIPT := preload("res://simulation/world_entity_state.gd")
 
 var galaxy_seed: int = 0
+var worldgen_config = null
 var primary_cluster_id: int = -1
 var cluster_order: Array = []
 var clusters_by_id: Dictionary = {}
+var discovered_sector_order: Array = []
+var region_descriptors_by_sector_key: Dictionary = {}
+var candidate_descriptors_by_sector_key: Dictionary = {}
+var cluster_ids_by_sector_key: Dictionary = {}
 var transit_order: Array = []
 var transit_objects_by_id: Dictionary = {}
 var transit_group_order: Array = []
@@ -17,10 +22,24 @@ var transit_groups_by_id: Dictionary = {}
 var entity_order: Array = []
 var entities_by_id: Dictionary = {}
 
+func set_worldgen_config(next_worldgen_config) -> void:
+	worldgen_config = next_worldgen_config.copy() if next_worldgen_config != null else null
+
 func add_cluster(cluster_state: ClusterState) -> void:
+	if cluster_state == null:
+		return
 	clusters_by_id[cluster_state.cluster_id] = cluster_state
 	if not cluster_order.has(cluster_state.cluster_id):
 		cluster_order.append(cluster_state.cluster_id)
+	var sector_coord_variant = cluster_state.simulation_profile.get("sector_coord", null)
+	if sector_coord_variant is Vector2i:
+		var sector_coord: Vector2i = sector_coord_variant
+		var sector_key: String = _sector_key_from_coord(sector_coord)
+		if not cluster_ids_by_sector_key.has(sector_key):
+			cluster_ids_by_sector_key[sector_key] = []
+		var sector_cluster_ids: Array = cluster_ids_by_sector_key[sector_key]
+		if not sector_cluster_ids.has(cluster_state.cluster_id):
+			sector_cluster_ids.append(cluster_state.cluster_id)
 	if primary_cluster_id < 0:
 		primary_cluster_id = cluster_state.cluster_id
 
@@ -46,6 +65,52 @@ func get_cluster_count() -> int:
 
 func get_cluster_ids() -> Array:
 	return cluster_order.duplicate()
+
+func get_discovered_sector_count() -> int:
+	return discovered_sector_order.size()
+
+func get_discovered_sector_coords() -> Array:
+	var coords: Array = []
+	for sector_key in discovered_sector_order:
+		var descriptor = region_descriptors_by_sector_key.get(sector_key, null)
+		if descriptor != null:
+			coords.append(descriptor.sector_coord)
+	return coords
+
+func has_discovered_sector(sector_coord: Vector2i) -> bool:
+	return region_descriptors_by_sector_key.has(_sector_key_from_coord(sector_coord))
+
+func get_region_descriptor(sector_coord: Vector2i):
+	return region_descriptors_by_sector_key.get(_sector_key_from_coord(sector_coord), null)
+
+func get_sector_candidate_descriptors(sector_coord: Vector2i) -> Array:
+	var candidates: Array = candidate_descriptors_by_sector_key.get(_sector_key_from_coord(sector_coord), [])
+	return candidates.duplicate()
+
+func get_cluster_ids_for_sector(sector_coord: Vector2i) -> Array:
+	var cluster_ids: Array = cluster_ids_by_sector_key.get(_sector_key_from_coord(sector_coord), [])
+	return cluster_ids.duplicate()
+
+func discover_sector(sector_coord: Vector2i, worldgen):
+	if worldgen == null:
+		return null
+	var sector_key: String = worldgen.sector_key(sector_coord)
+	var existing_descriptor = region_descriptors_by_sector_key.get(sector_key, null)
+	if existing_descriptor != null:
+		return existing_descriptor
+
+	var descriptor = worldgen.describe_region(galaxy_seed, sector_coord)
+	var candidates: Array = worldgen.build_cluster_candidates(galaxy_seed, descriptor)
+	var cluster_ids: Array = []
+	for candidate_descriptor in candidates:
+		cluster_ids.append(candidate_descriptor.cluster_id)
+
+	region_descriptors_by_sector_key[sector_key] = descriptor
+	candidate_descriptors_by_sector_key[sector_key] = candidates
+	cluster_ids_by_sector_key[sector_key] = cluster_ids
+	if not discovered_sector_order.has(sector_key):
+		discovered_sector_order.append(sector_key)
+	return descriptor
 
 func count_clusters_by_activation_state(state: int) -> int:
 	var count: int = 0
@@ -361,3 +426,6 @@ func _resolve_entity_anchor_object_id(entity_state, primary_object_id: String, a
 			return primary_object_id if primary_object_id != "" else anchor_object_id
 		_:
 			return anchor_object_id if anchor_object_id != "" else primary_object_id
+
+func _sector_key_from_coord(sector_coord: Vector2i) -> String:
+	return "%d:%d" % [sector_coord.x, sector_coord.y]

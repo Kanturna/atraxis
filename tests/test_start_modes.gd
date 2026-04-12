@@ -9,37 +9,34 @@ func test_default_config_starts_on_the_public_main_universe_path() -> void:
 	assert_eq(
 		config.anchor_topology,
 		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER,
-		"the public bootstrap should start on the canonical galaxy-cluster universe path"
+		"the public bootstrap should start on the canonical universe path"
 	)
 
-func test_public_generation_config_uses_expanded_spawn_ranges() -> void:
+func test_public_generation_config_clamps_worldgen_parameters_into_supported_ranges() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.star_count = 99
-	config.planets_per_star = 99
-	config.disturbance_body_count = 99
-	config.field_spacing_au = 999.0
-	config.galaxy_cluster_radius_au = 999.0
-	config.galaxy_void_scale = 999.0
-	config.black_hole_count = 9_999
-	config.galaxy_cluster_count = 9_999
+	config.sector_scale = 999_999_999.0
+	config.cluster_density = 99.0
+	config.void_strength = -10.0
+	config.bh_richness = 99.0
+	config.star_richness = -5.0
+	config.rare_zone_frequency = 99.0
 	config.clamp_values()
 
-	assert_eq(config.star_count, SimConstants.MAX_START_STAR_COUNT, "star count should clamp to the expanded public cap")
-	assert_eq(config.planets_per_star, SimConstants.MAX_PLANETS_PER_STAR, "planets per star should clamp to the expanded public cap")
-	assert_eq(config.disturbance_body_count, SimConstants.MAX_DISTURBANCE_BODY_COUNT, "disturbances should clamp to the expanded public cap")
-	assert_eq(config.field_spacing_au, SimConstants.MAX_FIELD_PATCH_SPACING_AU, "field patch spacing should clamp to the expanded public cap")
-	assert_eq(config.galaxy_cluster_radius_au, SimConstants.MAX_GALAXY_CLUSTER_RADIUS_AU, "galaxy cluster radius should clamp to the expanded public cap")
-	assert_eq(config.galaxy_void_scale, SimConstants.MAX_GALAXY_VOID_SCALE, "galaxy void scale should clamp to the expanded public cap")
-	assert_eq(config.black_hole_count, SimConstants.MAX_GALAXY_BLACK_HOLES, "galaxy BH totals should clamp to the expanded public cap")
-	assert_eq(config.galaxy_cluster_count, SimConstants.MAX_GALAXY_CLUSTER_COUNT, "macro cluster count should clamp to the expanded public cap")
+	assert_eq(config.sector_scale, SimConstants.MAX_WORLDGEN_SECTOR_SCALE, "sector scale should clamp to the supported public worldgen maximum")
+	assert_eq(config.cluster_density, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM, "cluster density should clamp to the normalized public worldgen range")
+	assert_eq(config.void_strength, 0.0, "void strength should clamp to the normalized public worldgen range")
+	assert_eq(config.bh_richness, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM, "BH richness should clamp to the normalized public worldgen range")
+	assert_eq(config.star_richness, 0.0, "star richness should clamp to the normalized public worldgen range")
+	assert_eq(config.rare_zone_frequency, SimConstants.MAX_WORLDGEN_NORMALIZED_PARAM, "rare-zone frequency should clamp to the normalized public worldgen range")
 
 func test_public_builder_ignores_internal_fixture_profile_selection() -> void:
 	var sandbox_config = START_CONFIG_SCRIPT.new()
-	sandbox_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	sandbox_config.black_hole_count = 6
-	sandbox_config.star_count = 2
-	sandbox_config.planets_per_star = 1
-	sandbox_config.disturbance_body_count = 2
+	sandbox_config.seed = 91
+	sandbox_config.cluster_density = 0.72
+	sandbox_config.void_strength = 0.18
+	sandbox_config.bh_richness = 0.61
+	sandbox_config.star_richness = 0.57
+	sandbox_config.rare_zone_frequency = 0.28
 
 	var reference_config = sandbox_config.copy()
 	reference_config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
@@ -107,38 +104,61 @@ func test_internal_fixture_builder_can_still_materialize_inflow_lab() -> void:
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 1, "internal inflow lab fixture should still create one central star")
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 4, "internal inflow lab fixture should create the configured inflow body count")
 
-func test_public_field_patch_builds_central_and_outer_black_holes() -> void:
+func test_public_worldgen_builder_materializes_active_cluster_from_derived_profile() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 133
+	config.cluster_density = 0.80
+	config.void_strength = 0.18
+	config.bh_richness = 0.74
+	config.star_richness = 0.70
+	config.rare_zone_frequency = 0.30
+
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_config(config)
+	var world: SimWorld = session.sim_world
+	var active_cluster: ClusterState = session.active_cluster_state
+
+	assert_eq(
+		active_cluster.simulation_profile.get("topology_role", ""),
+		"sector_worldgen_cluster",
+		"public startup should materialize the canonical sector-worldgen cluster path"
+	)
+	assert_eq(
+		world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE),
+		active_cluster.get_objects_by_kind("black_hole").size(),
+		"public startup should materialize exactly the active cluster's registered BH count"
+	)
+	assert_eq(
+		world.count_bodies_by_type(SimBody.BodyType.STAR),
+		int(active_cluster.simulation_profile.get("star_count", 0)),
+		"public startup should materialize the cluster's derived star richness"
+	)
+	assert_eq(
+		world.count_bodies_by_type(SimBody.BodyType.PLANET),
+		int(active_cluster.simulation_profile.get("star_count", 0))
+			* int(active_cluster.simulation_profile.get("planets_per_star", 0)),
+		"public startup should materialize the derived planet count from the active cluster profile"
+	)
+	assert_eq(
+		world.count_bodies_by_type(SimBody.BodyType.ASTEROID),
+		int(active_cluster.simulation_profile.get("disturbance_body_count", 0)),
+		"public startup should materialize the derived disturbance count from the active cluster profile"
+	)
+
+func test_public_worldgen_startup_remains_stable_for_initial_steps() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	config.black_hole_count = 6
-	config.star_count = 2
-	config.planets_per_star = 1
-	config.disturbance_body_count = 2
-	config.field_spacing_au = 9.0
-
-	WorldBuilder.build_from_config(world, config)
-
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 6, "field patch should build the configured total black-hole count")
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 2, "field patch should still build the configured stars")
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 2, "field patch should keep the configured planets per star")
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.ASTEROID), 2, "field patch should keep the configured disturbance count")
-
-func test_public_field_patch_remains_stable_for_initial_steps() -> void:
-	var world := SimWorld.new()
-	var config = START_CONFIG_SCRIPT.new()
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	config.black_hole_count = 5
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-	config.black_hole_mass = 12_000_000.0
-	config.field_spacing_au = 9.0
 	config.seed = 42
+	config.cluster_density = 0.78
+	config.void_strength = 0.20
+	config.bh_richness = 0.60
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.22
+	config.black_hole_mass = 12_000_000.0
 
 	WorldBuilder.build_from_config(world, config)
 
 	var star: SimBody = world.get_star()
+	assert_not_null(star, "worldgen startup smoke test needs at least one star in the active cluster")
 	var initial_speed: float = star.velocity.length()
 	for _step in range(240):
 		world.step_sim(SimConstants.FIXED_DT)
@@ -150,16 +170,16 @@ func test_public_field_patch_remains_stable_for_initial_steps() -> void:
 			star.position.distance_to(black_hole.position)
 		)
 
-	assert_true(star.active, "field-patch startup stars should survive the initial multi-BH evolution")
+	assert_true(star.active, "worldgen startup stars should survive the initial local evolution")
 	assert_lt(
 		star.velocity.length(),
 		initial_speed * 5.0,
-		"field-patch startup should not explode into runaway velocity during the first seconds"
+		"worldgen startup should not explode into runaway velocity during the first seconds"
 	)
 	assert_gt(
 		nearest_black_hole_distance,
 		SimConstants.BLACK_HOLE_RADIUS + SimConstants.STAR_RADIUS,
-		"field-patch startup stars should stay outside direct BH impact in the initial smoke test"
+		"worldgen startup stars should stay outside direct BH impact in the initial smoke test"
 	)
 
 func _sorted_positions_by_type(world: SimWorld, body_type: int) -> Array:

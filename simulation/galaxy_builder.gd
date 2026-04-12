@@ -4,6 +4,9 @@ extends RefCounted
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
+const WORLDGEN_CONFIG_SCRIPT := preload("res://simulation/galaxy_worldgen_config.gd")
+const WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
+const WORLDGEN_MAPPING_SCRIPT := preload("res://simulation/galaxy_worldgen_mapping.gd")
 
 static func build_from_config(start_config) -> GalaxyState:
 	var config = start_config if start_config != null else START_CONFIG_SCRIPT.new()
@@ -13,8 +16,10 @@ static func build_from_config(start_config) -> GalaxyState:
 
 	var galaxy_state := GalaxyState.new()
 	galaxy_state.galaxy_seed = public_config.seed
+	var worldgen_config = _build_public_worldgen_config(public_config)
+	galaxy_state.set_worldgen_config(worldgen_config)
 
-	_build_main_universe_galaxy(galaxy_state, public_config)
+	_build_worldgen_main_universe(galaxy_state, worldgen_config)
 
 	return galaxy_state
 
@@ -34,6 +39,45 @@ static func build_fixture_from_config(start_config) -> GalaxyState:
 		_build_main_universe_galaxy(galaxy_state, safe_config)
 
 	return galaxy_state
+
+static func discover_sector_into_galaxy(
+		galaxy_state: GalaxyState,
+		worldgen,
+		sector_coord: Vector2i):
+	if galaxy_state == null or worldgen == null:
+		return null
+	var region_descriptor = galaxy_state.discover_sector(sector_coord, worldgen)
+	for candidate_descriptor in galaxy_state.get_sector_candidate_descriptors(sector_coord):
+		if galaxy_state.has_cluster(candidate_descriptor.cluster_id):
+			continue
+		galaxy_state.add_cluster(_build_cluster_state_from_candidate(
+			worldgen.config,
+			candidate_descriptor
+		))
+	return region_descriptor
+
+static func discover_sector_neighborhood(
+		galaxy_state: GalaxyState,
+		worldgen,
+		center_sector_coord: Vector2i,
+		radius: int = 1) -> void:
+	if galaxy_state == null or worldgen == null:
+		return
+	for y in range(center_sector_coord.y - radius, center_sector_coord.y + radius + 1):
+		for x in range(center_sector_coord.x - radius, center_sector_coord.x + radius + 1):
+			discover_sector_into_galaxy(galaxy_state, worldgen, Vector2i(x, y))
+
+static func _build_worldgen_main_universe(
+		galaxy_state: GalaxyState,
+		worldgen_config) -> void:
+	var worldgen := WORLDGEN_SCRIPT.new(worldgen_config)
+	discover_sector_neighborhood(galaxy_state, worldgen, Vector2i.ZERO, 1)
+	if galaxy_state.get_cluster_count() == 0:
+		var fallback_candidate = worldgen.build_starter_fallback_candidate(galaxy_state.galaxy_seed)
+		galaxy_state.add_cluster(_build_cluster_state_from_candidate(worldgen_config, fallback_candidate))
+	var primary_cluster: ClusterState = _find_nearest_cluster_to_origin(galaxy_state)
+	if primary_cluster != null:
+		galaxy_state.primary_cluster_id = primary_cluster.cluster_id
 
 static func _build_main_universe_galaxy(galaxy_state: GalaxyState, config) -> void:
 	match config.anchor_topology:
@@ -95,6 +139,35 @@ static func _build_main_universe_galaxy(galaxy_state: GalaxyState, config) -> vo
 				}
 			)
 			galaxy_state.add_cluster(cluster_state)
+
+static func _build_public_worldgen_config(start_config):
+	var worldgen_config := WORLDGEN_CONFIG_SCRIPT.new()
+	worldgen_config.sector_scale = start_config.sector_scale
+	worldgen_config.cluster_density = start_config.cluster_density
+	worldgen_config.void_strength = start_config.void_strength
+	worldgen_config.bh_richness = start_config.bh_richness
+	worldgen_config.star_richness = start_config.star_richness
+	worldgen_config.rare_zone_frequency = start_config.rare_zone_frequency
+	worldgen_config.black_hole_mass = start_config.black_hole_mass
+	worldgen_config.star_inner_orbit_au = start_config.star_inner_orbit_au
+	worldgen_config.star_outer_orbit_au = start_config.star_outer_orbit_au
+	worldgen_config.spawn_radius_au = start_config.spawn_radius_au
+	worldgen_config.spawn_spread_au = start_config.spawn_spread_au
+	worldgen_config.inflow_speed_scale = start_config.inflow_speed_scale
+	worldgen_config.tangential_bias = start_config.tangential_bias
+	worldgen_config.chaos_body_count = start_config.chaos_body_count
+	worldgen_config.legacy_generation_hints_enabled = start_config.has_legacy_generation_hint_override()
+	worldgen_config.legacy_anchor_topology = start_config.anchor_topology
+	worldgen_config.legacy_black_hole_count_hint = start_config.black_hole_count
+	worldgen_config.legacy_galaxy_cluster_count_hint = start_config.galaxy_cluster_count
+	worldgen_config.legacy_field_spacing_au_hint = start_config.field_spacing_au
+	worldgen_config.legacy_star_count_hint = start_config.star_count
+	worldgen_config.legacy_planets_per_star_hint = start_config.planets_per_star
+	worldgen_config.legacy_disturbance_body_count_hint = start_config.disturbance_body_count
+	worldgen_config.legacy_galaxy_cluster_radius_au_hint = start_config.galaxy_cluster_radius_au
+	worldgen_config.legacy_galaxy_void_scale_hint = start_config.galaxy_void_scale
+	worldgen_config.clamp_values()
+	return worldgen_config
 
 static func _build_reference_fixture_galaxy(galaxy_state: GalaxyState, config) -> void:
 	var local_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
@@ -200,6 +273,111 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 
 	return cluster_state
 
+static func _build_cluster_state_from_candidate(
+		worldgen_config,
+		candidate_descriptor) -> ClusterState:
+	var local_black_hole_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
+		candidate_descriptor.bh_count,
+		candidate_descriptor.bh_spacing_au,
+		worldgen_config.black_hole_mass
+	)
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_id = candidate_descriptor.cluster_id
+	cluster_state.global_center = candidate_descriptor.global_center
+	cluster_state.cluster_seed = candidate_descriptor.cluster_seed
+	cluster_state.classification = candidate_descriptor.classification
+	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
+	cluster_state.last_unloaded_runtime_time = 0.0
+	cluster_state.last_relevance_runtime_time = 0.0
+	cluster_state.cluster_blueprint = {
+		"local_black_hole_specs": local_black_hole_specs.duplicate(true),
+		"primary_black_hole_object_id": "",
+		"supported_object_kinds": ["black_hole", "star", "planet", "asteroid", "agent"],
+		"supported_entity_kinds": ["agent", "unit", "creature"],
+		"supported_residency_states": [
+			ObjectResidencyState.State.RESIDENT,
+			ObjectResidencyState.State.ACTIVE,
+			ObjectResidencyState.State.SIMPLIFIED,
+			ObjectResidencyState.State.IN_TRANSIT,
+		],
+		"sector_coord": candidate_descriptor.sector_coord,
+		"candidate_index": candidate_descriptor.candidate_index,
+		"region_archetype": candidate_descriptor.region_archetype,
+		"worldgen_bh_richness": candidate_descriptor.bh_richness,
+		"worldgen_star_richness": candidate_descriptor.star_richness,
+		"rare_zone_weight": candidate_descriptor.rare_zone_weight,
+		"scrap_potential": candidate_descriptor.scrap_potential,
+		"life_potential": candidate_descriptor.life_potential,
+		"descriptor": candidate_descriptor.descriptor.duplicate(true),
+	}
+	cluster_state.simulation_profile = _build_worldgen_simulation_profile(
+		worldgen_config,
+		candidate_descriptor,
+		local_black_hole_specs.size()
+	)
+	cluster_state.radius = _estimate_cluster_radius(local_black_hole_specs, cluster_state.simulation_profile)
+
+	for spec in local_black_hole_specs:
+		var object_state := ClusterObjectState.new()
+		object_state.object_id = "cluster_%d:black_hole_%d" % [candidate_descriptor.cluster_id, spec["id"]]
+		object_state.kind = "black_hole"
+		object_state.residency_state = ObjectResidencyState.State.RESIDENT
+		object_state.local_position = spec["local_position"]
+		object_state.seed = _derive_object_seed(cluster_state.cluster_seed, spec["id"])
+		object_state.descriptor = {
+			"mass": spec["mass"],
+			"ring_index": spec["ring_index"],
+			"is_primary": spec["is_primary"],
+		}
+		cluster_state.register_object(object_state)
+		if spec["is_primary"]:
+			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
+
+	return cluster_state
+
+static func _build_worldgen_simulation_profile(
+		worldgen_config,
+		candidate_descriptor,
+		local_black_hole_count: int) -> Dictionary:
+	var star_count: int = WORLDGEN_MAPPING_SCRIPT.candidate_star_count(worldgen_config, candidate_descriptor)
+	var planets_per_star: int = WORLDGEN_MAPPING_SCRIPT.candidate_planets_per_star(worldgen_config, candidate_descriptor)
+	var disturbance_body_count: int = WORLDGEN_MAPPING_SCRIPT.candidate_disturbance_count(worldgen_config, candidate_descriptor)
+	return {
+		"content_archetype": "anchor_orbital",
+		"analytic_star_carriers": false,
+		"fixture_profile": "main_universe_worldgen",
+		"topology_role": "sector_worldgen_cluster",
+		"has_runtime_snapshot": false,
+		"spawn_anchor_content": true,
+		"seed": candidate_descriptor.cluster_seed,
+		"black_hole_mass": worldgen_config.black_hole_mass,
+		"local_black_hole_count": local_black_hole_count,
+		"star_count": star_count,
+		"planets_per_star": planets_per_star,
+		"disturbance_body_count": disturbance_body_count,
+		"star_inner_orbit_au": worldgen_config.star_inner_orbit_au,
+		"star_outer_orbit_au": worldgen_config.star_outer_orbit_au,
+		"spawn_radius_au": worldgen_config.spawn_radius_au,
+		"spawn_spread_au": worldgen_config.spawn_spread_au,
+		"inflow_speed_scale": worldgen_config.inflow_speed_scale,
+		"tangential_bias": worldgen_config.tangential_bias,
+		"chaos_body_count": worldgen_config.chaos_body_count,
+		"sector_coord": candidate_descriptor.sector_coord,
+		"candidate_index": candidate_descriptor.candidate_index,
+		"region_archetype": candidate_descriptor.region_archetype,
+		"worldgen_bh_richness": candidate_descriptor.bh_richness,
+		"worldgen_star_richness": candidate_descriptor.star_richness,
+		"rare_zone_weight": candidate_descriptor.rare_zone_weight,
+		"scrap_potential": candidate_descriptor.scrap_potential,
+		"life_potential": candidate_descriptor.life_potential,
+		"sector_scale": worldgen_config.sector_scale,
+		"cluster_density": worldgen_config.cluster_density,
+		"void_strength": worldgen_config.void_strength,
+		"bh_richness": worldgen_config.bh_richness,
+		"star_richness": worldgen_config.star_richness,
+		"rare_zone_frequency": worldgen_config.rare_zone_frequency,
+	}
+
 static func _build_simulation_profile(
 		config,
 		spawn_anchor_content: bool,
@@ -265,3 +443,15 @@ static func _derive_cluster_seed(galaxy_seed: int, cluster_id: int) -> int:
 static func _derive_object_seed(cluster_seed: int, local_index: int) -> int:
 	var derived: int = (cluster_seed + 1) * 31_337 + (local_index + 1) * 1_003
 	return absi(derived)
+
+static func _find_nearest_cluster_to_origin(galaxy_state: GalaxyState) -> ClusterState:
+	if galaxy_state == null:
+		return null
+	var matched_cluster: ClusterState = null
+	var best_distance: float = INF
+	for cluster_state in galaxy_state.get_clusters():
+		var distance: float = cluster_state.global_center.length()
+		if distance < best_distance:
+			best_distance = distance
+			matched_cluster = cluster_state
+	return matched_cluster
