@@ -78,12 +78,19 @@ func _request_zoom(screen_point: Vector2, factor: float) -> void:
 
 func start_focus_transition(target_world_position: Vector2, target_visible_world_radius: float) -> void:
 	_focus_transition_target_position = target_world_position
-	_focus_transition_target_visible_world_radius = maxf(target_visible_world_radius, 1.0)
-	_focus_transition_target_zoom = _zoom_for_visible_world_radius(_focus_transition_target_visible_world_radius)
+	_focus_transition_target_zoom = _zoom_for_visible_world_radius(maxf(target_visible_world_radius, 1.0))
+	# Derive the achievable visible radius from the clamped zoom so that
+	# _has_reached_focus_transition_target() compares against a value the camera
+	# can actually reach. Without this, requests that exceed ZOOM_MIN result in a
+	# zoom that is clamped but a target radius that can never be matched, causing
+	# _focus_transition_arrived to stay false and cluster activation to never fire.
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var viewport_radius: float = 0.5 * maxf(viewport_size.x, viewport_size.y)
+	_focus_transition_target_visible_world_radius = viewport_radius / maxf(_focus_transition_target_zoom, 0.001)
 	_focus_transition_active = true
 	_focus_transition_arrived = false
 	_target_zoom = _focus_transition_target_zoom
-	_zoom_focus_screen = get_viewport().get_visible_rect().size * 0.5
+	_zoom_focus_screen = viewport_size * 0.5
 
 func cancel_focus_transition() -> void:
 	if not _focus_transition_active and not _focus_transition_arrived:
