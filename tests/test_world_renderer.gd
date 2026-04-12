@@ -1,6 +1,9 @@
 extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const ACTIVE_MACRO_SECTOR_SESSION_SCRIPT := preload("res://simulation/active_macro_sector_session.gd")
+const MACRO_SECTOR_DESCRIPTOR_SCRIPT := preload("res://simulation/macro_sector_descriptor.gd")
+const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const WORLD_RENDERER_SCRIPT := preload("res://rendering/world_renderer.gd")
 
 func test_registered_cluster_debug_markers_encode_active_simplified_and_unloaded_states() -> void:
@@ -271,7 +274,70 @@ func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
 	assert_false(mid_kinds.has("planet"), "mid-distance LOD should drop planet previews")
 	assert_true(near_kinds.has("planet"), "near LOD should restore full planet previews")
 
-func _make_manual_preview_cluster(cluster_id: int, global_center: Vector2, radius: float) -> ClusterState:
+func test_macro_sector_preview_rules_keep_ambient_planets_and_strip_far_planets_from_bh_only_snapshots() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var ambient_cluster: ClusterState = _make_manual_simplified_bh_only_preview_cluster(
+		1,
+		Vector2(1_000.0, 0.0),
+		100.0,
+		true
+	)
+	var far_cluster: ClusterState = _make_manual_simplified_bh_only_preview_cluster(
+		2,
+		Vector2(1_240.0, 0.0),
+		100.0,
+		true
+	)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(ambient_cluster)
+	galaxy_state.add_cluster(far_cluster)
+
+	var session := ActiveClusterSession.new()
+	session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var macro_sector_session = _make_manual_macro_sector_session(galaxy_state, session, 0, [1], [2])
+	var near_visible_canvas_rect := Rect2(Vector2(-430.0, -305.0), Vector2(860.0, 610.0))
+	var preview_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		session,
+		near_visible_canvas_rect,
+		1.0,
+		Vector2(1_600.0, 900.0),
+		macro_sector_session
+	)
+	var ambient_specs: Array = preview_specs.filter(func(spec): return int(spec.get("cluster_id", -1)) == 1)
+	var far_specs: Array = preview_specs.filter(func(spec): return int(spec.get("cluster_id", -1)) == 2)
+	var ambient_kinds: Array = ambient_specs.map(func(spec): return str(spec.get("kind", "")))
+	var far_kinds: Array = far_specs.map(func(spec): return str(spec.get("kind", "")))
+
+	assert_false(ambient_specs.is_empty(), "ambient macro-sector previews should produce visible bodies at full preview LOD")
+	assert_false(far_specs.is_empty(), "far macro-sector previews should still produce macro-structure bodies at full preview LOD")
+	assert_true(ambient_kinds.has("black_hole"), "ambient previews should keep the black-hole anchor visible")
+	assert_true(ambient_kinds.has("star"), "ambient previews should supplement BH-only runtime snapshots with star data")
+	assert_true(ambient_kinds.has("planet"), "ambient previews should keep planet silhouettes once the cluster reaches full preview LOD")
+	assert_false(ambient_kinds.has("asteroid"), "ambient previews should not render asteroid noise or local clutter")
+	assert_false(ambient_kinds.has("fragment"), "ambient previews should not render fragment noise or local clutter")
+	assert_true(far_kinds.has("black_hole"), "far previews should keep the black-hole anchor visible")
+	assert_true(far_kinds.has("star"), "far previews should still supplement BH-only snapshots with star macro-structure")
+	assert_false(far_kinds.has("planet"), "far previews should never restore planets, even at full preview LOD")
+	assert_false(far_kinds.has("asteroid"), "far previews should not render asteroid clutter")
+	assert_false(far_kinds.has("fragment"), "far previews should not render fragment clutter")
+	assert_eq(
+		str(ambient_specs[0].get("macro_sector_zone", "")),
+		"ambient",
+		"ambient preview payloads should expose their macro sector zone for debugging"
+	)
+	assert_eq(
+		str(far_specs[0].get("macro_sector_zone", "")),
+		"far",
+		"far preview payloads should expose their macro sector zone for debugging"
+	)
+
+func _make_manual_preview_cluster(
+		cluster_id: int,
+		global_center: Vector2,
+		radius: float,
+		include_noise_objects: bool = false) -> ClusterState:
 	var cluster_state := ClusterState.new()
 	cluster_state.cluster_id = cluster_id
 	cluster_state.global_center = global_center
@@ -308,4 +374,94 @@ func _make_manual_preview_cluster(cluster_id: int, global_center: Vector2, radiu
 			"seed": 30 + cluster_id,
 		},
 	]
+	if include_noise_objects:
+		cluster_state.cluster_blueprint["preview_object_specs"].append_array([
+			{
+				"object_id": "cluster_%d:asteroid_0" % cluster_id,
+				"kind": "asteroid",
+				"body_type": SimBody.BodyType.ASTEROID,
+				"material_type": SimBody.MaterialType.ROCKY,
+				"local_position": Vector2(96.0, 0.0),
+				"radius": 4.0,
+				"seed": 40 + cluster_id,
+			},
+			{
+				"object_id": "cluster_%d:fragment_0" % cluster_id,
+				"kind": "fragment",
+				"body_type": SimBody.BodyType.FRAGMENT,
+				"material_type": SimBody.MaterialType.MIXED,
+				"local_position": Vector2(102.0, 0.0),
+				"radius": 2.0,
+				"seed": 50 + cluster_id,
+			},
+		])
 	return cluster_state
+
+func _make_manual_simplified_bh_only_preview_cluster(
+		cluster_id: int,
+		global_center: Vector2,
+		radius: float,
+		include_noise_objects: bool = false) -> ClusterState:
+	var cluster_state: ClusterState = _make_manual_preview_cluster(
+		cluster_id,
+		global_center,
+		radius,
+		include_noise_objects
+	)
+	cluster_state.mark_simplified(0.0)
+	cluster_state.simulation_profile["has_runtime_snapshot"] = true
+	cluster_state.object_registry.clear()
+	cluster_state.register_object(_make_manual_preview_object_state(
+		"cluster_%d:black_hole_0" % cluster_id,
+		"black_hole",
+		SimBody.BodyType.BLACK_HOLE,
+		SimBody.MaterialType.STELLAR,
+		Vector2.ZERO,
+		SimConstants.BLACK_HOLE_RADIUS
+	))
+	return cluster_state
+
+func _make_manual_macro_sector_session(
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession,
+		focus_cluster_id: int,
+		ambient_cluster_ids: Array = [],
+		far_cluster_ids: Array = []):
+	var descriptor = MACRO_SECTOR_DESCRIPTOR_SCRIPT.new()
+	descriptor.anchor_cluster_id = focus_cluster_id
+	descriptor.focus_cluster_id = focus_cluster_id
+	descriptor.member_cluster_ids = [focus_cluster_id]
+	descriptor.zone_by_cluster_id = {
+		focus_cluster_id: MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS,
+	}
+	for cluster_id in ambient_cluster_ids:
+		var member_id: int = int(cluster_id)
+		descriptor.member_cluster_ids.append(member_id)
+		descriptor.zone_by_cluster_id[member_id] = MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT
+	for cluster_id in far_cluster_ids:
+		var member_id: int = int(cluster_id)
+		descriptor.member_cluster_ids.append(member_id)
+		descriptor.zone_by_cluster_id[member_id] = MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR
+	var session = ACTIVE_MACRO_SECTOR_SESSION_SCRIPT.new()
+	session.bind(galaxy_state, descriptor, active_cluster_session)
+	return session
+
+func _make_manual_preview_object_state(
+		object_id: String,
+		kind: String,
+		body_type: int,
+		material_type: int,
+		local_position: Vector2,
+		radius: float) -> ClusterObjectState:
+	var object_state := ClusterObjectState.new()
+	object_state.object_id = object_id
+	object_state.kind = kind
+	object_state.residency_state = ObjectResidencyState.State.SIMPLIFIED
+	object_state.local_position = local_position
+	object_state.local_velocity = Vector2.ZERO
+	object_state.descriptor = {
+		"body_type": body_type,
+		"material_type": material_type,
+		"radius": radius,
+	}
+	return object_state

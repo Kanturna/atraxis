@@ -22,6 +22,7 @@ const CLICK_CLUSTER_ACTIVATION_PROGRESS_THRESHOLD: float = 0.55
 var galaxy_runtime: GalaxyRuntime = null
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
+var active_macro_sector_session: ActiveMacroSectorSession = null
 var sim_world: SimWorld = null
 var _current_start_config: RefCounted = START_CONFIG_SCRIPT.new()
 var _pending_click_activation_cluster_id: int = -1
@@ -182,10 +183,12 @@ func _sync_runtime_aliases() -> bool:
 	if galaxy_runtime == null:
 		galaxy_state = null
 		active_cluster_session = null
+		active_macro_sector_session = null
 		sim_world = null
 		return previous_world != sim_world
 	galaxy_state = galaxy_runtime.galaxy_state
 	active_cluster_session = galaxy_runtime.active_cluster_session
+	active_macro_sector_session = galaxy_runtime.active_macro_sector_session
 	sim_world = galaxy_runtime.get_active_sim_world()
 	return previous_world != sim_world
 
@@ -201,7 +204,13 @@ func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_vis
 	sim_world.body_added.connect(_world_renderer._on_body_added)
 	sim_world.body_removed.connect(_world_renderer._on_body_removed)
 
-	_world_renderer.initialize(sim_world, zones_by_star, galaxy_state, active_cluster_session)
+	_world_renderer.initialize(
+		sim_world,
+		zones_by_star,
+		galaxy_state,
+		active_cluster_session,
+		active_macro_sector_session
+	)
 	_debug_overlay.initialize(sim_world, _current_start_config, galaxy_state, active_cluster_session)
 	_hud.initialize(sim_world, time_scale)
 	_debug_overlay.visible = debug_visible
@@ -245,6 +254,7 @@ func _release_runtime_references() -> void:
 	galaxy_runtime = null
 	galaxy_state = null
 	active_cluster_session = null
+	active_macro_sector_session = null
 	sim_world = null
 
 func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:

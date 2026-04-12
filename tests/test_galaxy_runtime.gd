@@ -1,6 +1,7 @@
 extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
 const WORLD_ENTITY_STATE_SCRIPT := preload("res://simulation/world_entity_state.gd")
@@ -202,41 +203,189 @@ func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic
 		"simplified stepping should keep remote objects marked as simplified"
 	)
 
-func test_simplified_cluster_step_budget_only_advances_nearest_remote_clusters() -> void:
-	var galaxy_state := GalaxyState.new()
-	var active_cluster: ClusterState = _make_manual_runtime_snapshot_cluster(0, Vector2.ZERO)
-	galaxy_state.add_cluster(active_cluster)
-	for cluster_index in range(1, 7):
-		var remote_cluster: ClusterState = _make_manual_runtime_snapshot_cluster(
-			cluster_index,
-			Vector2(float(cluster_index) * 2_000.0, 0.0)
-		)
-		remote_cluster.mark_simplified(0.0)
-		galaxy_state.add_cluster(remote_cluster)
+func test_active_macro_sector_caps_members_and_assigns_ambient_and_far_zones() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var descriptor = runtime.get_active_macro_sector()
 
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, active_cluster.cluster_id)
+	assert_not_null(descriptor, "runtime should expose the active macro sector descriptor once initialized")
+	assert_eq(descriptor.member_cluster_ids.size(), 5, "v1 macro sectors should cap membership at five clusters")
+	assert_eq(descriptor.focus_cluster_id, 0, "the initial focus cluster should seed the macro sector focus id")
+	assert_eq(runtime.get_cluster_macro_sector_zone(0), MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS, "the active cluster should be the macro sector focus zone")
+	assert_eq(runtime.get_cluster_macro_sector_zone(1), MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT, "the nearest remote cluster should become an ambient neighbor")
+	assert_eq(runtime.get_cluster_macro_sector_zone(2), MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT, "the second nearest remote cluster should also stay ambient")
+	assert_eq(runtime.get_cluster_macro_sector_zone(3), MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR, "more distant members should downgrade into the far zone")
+	assert_eq(runtime.get_cluster_macro_sector_zone(4), MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR, "the fifth member should still remain inside the macro sector as far structure")
+	assert_eq(runtime.get_cluster_macro_sector_zone(5), MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE, "clusters beyond the five-member cap should stay outside the active macro sector")
+	assert_eq(runtime.get_cluster_macro_sector_zone(6), MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE, "extra distant clusters should remain outside the active macro sector")
+
+func test_macro_sector_zone_step_budget_advances_ambient_each_tick_and_far_in_batches() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
 
 	runtime.step(SimConstants.FIXED_DT)
 
-	var stepped_cluster_ids: Array = []
-	var frozen_cluster_ids: Array = []
-	for cluster_state in galaxy_state.get_clusters():
-		if cluster_state.cluster_id == active_cluster.cluster_id:
-			continue
-		if is_equal_approx(cluster_state.simulated_time, SimConstants.FIXED_DT):
-			stepped_cluster_ids.append(cluster_state.cluster_id)
-		else:
-			frozen_cluster_ids.append(cluster_state.cluster_id)
+	assert_almost_eq(
+		galaxy_state.get_cluster(1).simulated_time,
+		SimConstants.FIXED_DT,
+		0.0001,
+		"ambient cluster 1 should advance every fixed tick"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(2).simulated_time,
+		SimConstants.FIXED_DT,
+		0.0001,
+		"ambient cluster 2 should also advance every fixed tick"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(3).simulated_time,
+		0.0,
+		0.0001,
+		"far cluster 3 should stay frozen until the batched far-zone interval elapses"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(4).simulated_time,
+		0.0,
+		0.0001,
+		"far cluster 4 should also wait for the batched far-zone step"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(5).simulated_time,
+		0.0,
+		0.0001,
+		"clusters outside the macro sector should not receive simplified runtime steps"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(6).simulated_time,
+		0.0,
+		0.0001,
+		"non-member clusters should stay frozen outside the active macro sector"
+	)
 
+	for _i in range(3):
+		runtime.step(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		galaxy_state.get_cluster(1).simulated_time,
+		SimConstants.FIXED_DT * 4.0,
+		0.0001,
+		"ambient clusters should continue stepping every tick across the full batch window"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(2).simulated_time,
+		SimConstants.FIXED_DT * 4.0,
+		0.0001,
+		"both ambient members should stay fully live inside the simplified budget"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(3).simulated_time,
+		SimConstants.FIXED_DT * 4.0,
+		0.0001,
+		"far clusters should catch up in one bundled 4x fixed-dt step"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(4).simulated_time,
+		SimConstants.FIXED_DT * 4.0,
+		0.0001,
+		"every far member should advance only on the four-tick cadence"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(5).simulated_time,
+		0.0,
+		0.0001,
+		"clusters outside the active macro sector should remain frozen even after the far-zone batch"
+	)
+	assert_almost_eq(
+		galaxy_state.get_cluster(6).simulated_time,
+		0.0,
+		0.0001,
+		"the runtime should still avoid spending simplified steps on non-members"
+	)
+
+func test_focus_promotion_within_macro_sector_preserves_member_set() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var descriptor_before = runtime.get_active_macro_sector()
+	var promoted_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
+		runtime,
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT
+	)
+
+	runtime.activate_cluster(promoted_cluster_id)
+
+	var descriptor_after = runtime.get_active_macro_sector()
+	var member_ids_before: Array = descriptor_before.member_cluster_ids.duplicate()
+	var member_ids_after: Array = descriptor_after.member_cluster_ids.duplicate()
+	member_ids_before.sort()
+	member_ids_after.sort()
+
+	assert_eq(member_ids_after, member_ids_before, "focus promotion inside the macro sector should preserve the existing member set")
 	assert_eq(
-		stepped_cluster_ids,
-		[1, 2, 3, 4],
-		"runtime should only step the nearest simplified remote clusters inside the fixed per-tick budget"
+		descriptor_after.anchor_cluster_id,
+		descriptor_before.anchor_cluster_id,
+		"promoting an in-sector neighbor should keep the original macro sector anchor instead of rebuilding a new one"
+	)
+	assert_eq(descriptor_after.focus_cluster_id, promoted_cluster_id, "focus promotion should update the descriptor focus id")
+	assert_eq(runtime.active_cluster_session.cluster_id, promoted_cluster_id, "focus promotion should swap the active cluster session to the requested in-sector neighbor")
+	assert_eq(runtime.get_cluster_macro_sector_zone(promoted_cluster_id), MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS, "the promoted cluster should become the new focus zone")
+	assert_true(
+		runtime.is_cluster_in_active_macro_sector(0),
+		"the old focus cluster should remain in the active macro sector after an in-sector promotion"
 	)
 	assert_eq(
-		frozen_cluster_ids,
-		[5, 6],
-		"remote simplified clusters beyond the step budget should stay frozen for this tick"
+		galaxy_state.get_cluster(0).activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"the previous focus cluster should demote to simplified instead of dropping out of the macro sector"
+	)
+
+func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_frozen() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(5, 2_000.0, true)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var ambient_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
+		runtime,
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT
+	)
+	var far_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
+		runtime,
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR
+	)
+	var ambient_cluster: ClusterState = galaxy_state.get_cluster(ambient_cluster_id)
+	var far_cluster: ClusterState = galaxy_state.get_cluster(far_cluster_id)
+	var ambient_planet_id: String = "cluster_%d:star_0:planet_0" % ambient_cluster_id
+	var far_planet_id: String = "cluster_%d:star_0:planet_0" % far_cluster_id
+	var far_star_id: String = "cluster_%d:star_0" % far_cluster_id
+	var ambient_planet_before: Vector2 = ambient_cluster.get_object(ambient_planet_id).local_position
+	var far_planet_before: Vector2 = far_cluster.get_object(far_planet_id).local_position
+	var far_star_before: Vector2 = far_cluster.get_object(far_star_id).local_position
+
+	for _i in range(4):
+		runtime.step(SimConstants.FIXED_DT)
+
+	var ambient_planet_after: Vector2 = ambient_cluster.get_object(ambient_planet_id).local_position
+	var far_planet_after: Vector2 = far_cluster.get_object(far_planet_id).local_position
+	var far_star_after: Vector2 = far_cluster.get_object(far_star_id).local_position
+
+	assert_false(
+		ambient_planet_after.is_equal_approx(ambient_planet_before),
+		"ambient neighbors should keep registered planets moving under simplified stepping"
+	)
+	assert_true(
+		far_planet_after.is_equal_approx(far_planet_before),
+		"far-zone planets should remain frozen on their last snapshot instead of continuing to step"
+	)
+	assert_false(
+		far_star_after.is_equal_approx(far_star_before),
+		"far-zone stars should still advance as macro-structure carriers during the batched far step"
+	)
+	assert_eq(
+		ambient_cluster.get_objects_by_kind("fragment").size(),
+		0,
+		"ambient simplified stepping should not generate fragments or collision byproducts"
+	)
+	assert_eq(
+		far_cluster.get_objects_by_kind("fragment").size(),
+		0,
+		"far simplified stepping should also avoid any fragment generation"
 	)
 
 func test_focus_relevance_does_not_switch_active_cluster_without_explicit_request() -> void:
@@ -492,21 +641,14 @@ func test_activation_override_pins_cluster_until_cleared() -> void:
 	)
 
 func test_simplified_cluster_unloads_after_idle_delay() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
 	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
 	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
 	var first_star: SimBody = runtime.get_active_sim_world().get_star()
 	var persisted_star_id: String = first_star.persistent_object_id
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster_id: int = _find_cluster_outside_active_macro_sector(runtime)
+	assert_true(second_cluster_id >= 0, "the unload test needs a switch target outside the current macro sector")
 
 	runtime.activate_cluster(second_cluster_id)
 
@@ -534,18 +676,10 @@ func test_simplified_cluster_unloads_after_idle_delay() -> void:
 	)
 
 func test_pending_manual_target_is_not_unloaded_before_activation() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
 	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster_id: int = _find_cluster_outside_active_macro_sector(runtime)
 	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
 
 	assert_eq(
@@ -742,18 +876,10 @@ func test_grouped_transit_objects_share_one_group_target_and_anchor_routing() ->
 	)
 
 func test_arriving_transit_object_settles_into_unloaded_target_cluster_as_resident() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 6
-	config.galaxy_cluster_count = 2
-	config.star_count = 1
-	config.planets_per_star = 0
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
 	var source_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
-	var target_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, source_cluster.cluster_id)
+	var target_cluster_id: int = _find_cluster_outside_active_macro_sector(runtime)
 	var target_cluster: ClusterState = runtime.galaxy_state.get_cluster(target_cluster_id)
 	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(target_cluster)
 	var transit_state = _make_test_transit_asteroid(
@@ -1303,9 +1429,26 @@ func _make_manual_cluster(cluster_id: int, global_center: Vector2, radius: float
 	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
 	return cluster_state
 
-func _make_manual_runtime_snapshot_cluster(cluster_id: int, global_center: Vector2) -> ClusterState:
+func _make_manual_runtime_snapshot_galaxy(
+		cluster_count: int,
+		spacing: float = 2_000.0,
+		include_planet: bool = false) -> GalaxyState:
+	var galaxy_state := GalaxyState.new()
+	for cluster_id in range(cluster_count):
+		galaxy_state.add_cluster(_make_manual_runtime_snapshot_cluster(
+			cluster_id,
+			Vector2(float(cluster_id) * spacing, 0.0),
+			include_planet
+		))
+	return galaxy_state
+
+func _make_manual_runtime_snapshot_cluster(
+		cluster_id: int,
+		global_center: Vector2,
+		include_planet: bool = false) -> ClusterState:
 	var cluster_state: ClusterState = _make_manual_cluster(cluster_id, global_center, 100.0)
 	var black_hole_object_id: String = "cluster_%d:black_hole_0" % cluster_id
+	var star_object_id: String = "cluster_%d:star_0" % cluster_id
 	cluster_state.cluster_blueprint["primary_black_hole_object_id"] = black_hole_object_id
 	cluster_state.simulation_profile["has_runtime_snapshot"] = true
 	cluster_state.register_object(_make_manual_cluster_object_state(
@@ -1333,7 +1476,7 @@ func _make_manual_runtime_snapshot_cluster(cluster_id: int, global_center: Vecto
 		}
 	))
 	cluster_state.register_object(_make_manual_cluster_object_state(
-		"cluster_%d:star_0" % cluster_id,
+		star_object_id,
 		"star",
 		Vector2(400.0, 0.0),
 		Vector2.ZERO,
@@ -1356,6 +1499,31 @@ func _make_manual_runtime_snapshot_cluster(cluster_id: int, global_center: Vecto
 			"parent_object_id": "",
 		}
 	))
+	if include_planet:
+		cluster_state.register_object(_make_manual_cluster_object_state(
+			"%s:planet_0" % star_object_id,
+			"planet",
+			Vector2(460.0, 0.0),
+			Vector2.ZERO,
+			{
+				"body_type": SimBody.BodyType.PLANET,
+				"material_type": SimBody.MaterialType.ROCKY,
+				"influence_level": SimBody.InfluenceLevel.B,
+				"mass": SimConstants.PLANET_MASS_MIN,
+				"radius": SimConstants.PLANET_RADIUS_MIN,
+				"temperature": 260.0,
+				"kinematic": false,
+				"scripted_orbit_enabled": true,
+				"orbit_binding_state": SimBody.OrbitBindingState.BOUND_ANALYTIC,
+				"orbit_radius": 60.0,
+				"orbit_angle": 0.0,
+				"orbit_angular_speed": 0.5,
+				"debris_mass": 0.0,
+				"sleeping": false,
+				"active": true,
+				"parent_object_id": star_object_id,
+			}
+		))
 	return cluster_state
 
 func _make_manual_cluster_object_state(
@@ -1376,6 +1544,28 @@ func _make_manual_cluster_object_state(
 func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: int) -> int:
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state.cluster_id != active_cluster_id:
+			return cluster_state.cluster_id
+	return -1
+
+func _find_cluster_outside_active_macro_sector(runtime: GalaxyRuntime) -> int:
+	if runtime == null or runtime.galaxy_state == null:
+		return -1
+	for cluster_state in runtime.galaxy_state.get_clusters():
+		if cluster_state == null:
+			continue
+		if cluster_state.cluster_id == runtime.active_cluster_session.cluster_id:
+			continue
+		if not runtime.is_cluster_in_active_macro_sector(cluster_state.cluster_id):
+			return cluster_state.cluster_id
+	return -1
+
+func _find_first_cluster_in_macro_sector_zone(runtime: GalaxyRuntime, zone: int) -> int:
+	if runtime == null or runtime.galaxy_state == null:
+		return -1
+	for cluster_state in runtime.galaxy_state.get_clusters():
+		if cluster_state == null:
+			continue
+		if runtime.get_cluster_macro_sector_zone(cluster_state.cluster_id) == zone:
 			return cluster_state.cluster_id
 	return -1
 

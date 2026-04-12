@@ -5,6 +5,7 @@ class_name WorldBuilder
 extends RefCounted
 
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
+const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
 const WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
@@ -418,7 +419,10 @@ static func import_transit_objects_into_active_session(
 		imported_object_ids.append(transit_state.object_id)
 	return imported_object_ids
 
-static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> void:
+static func step_simplified_cluster(
+		cluster_state: ClusterState,
+		dt: float,
+		macro_sector_zone: int = MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT) -> void:
 	if cluster_state == null or dt <= 0.0:
 		return
 	if cluster_state.object_registry.is_empty():
@@ -441,6 +445,8 @@ static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> v
 			black_hole_states.append(object_state)
 
 	for object_state in object_states:
+		if not _should_step_simplified_object(object_state, macro_sector_zone):
+			continue
 		if _is_simplified_analytic_orbiter(object_state):
 			continue
 		if object_state.kind == "black_hole" or bool(object_state.descriptor.get("kinematic", false)):
@@ -453,6 +459,8 @@ static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> v
 		object_state.age += dt
 
 	for object_state in object_states:
+		if not _should_step_simplified_object(object_state, macro_sector_zone):
+			continue
 		if not _is_simplified_analytic_orbiter(object_state):
 			continue
 		var parent_object_id: String = str(object_state.descriptor.get("parent_object_id", ""))
@@ -480,6 +488,13 @@ static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> v
 	cluster_state.simulated_time += dt
 	cluster_state.simulation_profile["has_runtime_snapshot"] = true
 	cluster_state.update_runtime_extent(_estimate_runtime_cluster_radius(cluster_state.object_registry))
+
+static func _should_step_simplified_object(object_state: ClusterObjectState, macro_sector_zone: int) -> bool:
+	if object_state == null:
+		return false
+	if macro_sector_zone == MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR:
+		return object_state.kind in ["black_hole", "star"]
+	return true
 
 static func _compute_simplified_black_hole_acceleration(object_state: ClusterObjectState, black_hole_states: Array) -> Vector2:
 	var acceleration: Vector2 = Vector2.ZERO

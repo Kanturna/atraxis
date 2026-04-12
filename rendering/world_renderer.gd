@@ -8,6 +8,7 @@ extends Node2D
 const GRAVITY_DEBUG_RENDERER_SCRIPT := preload("res://rendering/gravity_debug_renderer.gd")
 const CLUSTER_PREVIEW_RENDERER_SCRIPT := preload("res://rendering/cluster_preview_renderer.gd")
 const CLUSTER_MARKER_RENDERER_SCRIPT := preload("res://rendering/cluster_marker_renderer.gd")
+const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const REMOTE_CLUSTER_MARKER_CULL_MARGIN_PX: float = 96.0
 const REMOTE_CLUSTER_PREVIEW_CULL_MARGIN_PX: float = 96.0
 const PREVIEW_LOD_MARKER_ONLY: int = 0
@@ -33,6 +34,7 @@ var _preview_renderer: Node2D = null
 var _cluster_marker_renderer: Node2D = null
 var _galaxy_state: GalaxyState = null
 var _active_cluster_session: ActiveClusterSession = null
+var _active_macro_sector_session = null
 var _worldgen = null
 var _debug_overlays_visible: bool = false
 var _cached_remote_preview_specs: Array = []
@@ -42,7 +44,8 @@ func initialize(
 		world: SimWorld,
 		zones_by_star: Dictionary,
 		galaxy_state: GalaxyState = null,
-		active_cluster_session: ActiveClusterSession = null) -> void:
+		active_cluster_session: ActiveClusterSession = null,
+		active_macro_sector_session = null) -> void:
 	_ensure_overlay_layers()
 	_clear_layer(_zone_layer)
 	_zone_renderers.clear()
@@ -54,6 +57,7 @@ func initialize(
 	_clear_layer(_marker_layer)
 	_galaxy_state = galaxy_state
 	_active_cluster_session = active_cluster_session
+	_active_macro_sector_session = active_macro_sector_session
 	_cached_remote_preview_specs = []
 	_cached_marker_payload = {}
 	_worldgen = GalaxyWorldgen.new(galaxy_state.worldgen_config) \
@@ -104,7 +108,8 @@ func render_frame(world: SimWorld) -> void:
 		_active_cluster_session,
 		visible_canvas_rect,
 		canvas_scale,
-		viewport_size
+		viewport_size,
+		_active_macro_sector_session
 	)
 	_cached_marker_payload = build_registered_cluster_debug_markers(
 		_galaxy_state,
@@ -298,7 +303,8 @@ static func build_remote_cluster_preview_specs(
 		active_cluster_session: ActiveClusterSession,
 		visible_canvas_rect: Rect2 = Rect2(),
 		canvas_scale: float = 1.0,
-		viewport_size: Vector2 = Vector2.ZERO) -> Array:
+		viewport_size: Vector2 = Vector2.ZERO,
+		active_macro_sector_session = null) -> Array:
 	var preview_specs: Array = []
 	if galaxy_state == null or active_cluster_session == null:
 		return preview_specs
@@ -307,6 +313,10 @@ static func build_remote_cluster_preview_specs(
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state == null or cluster_state.cluster_id == active_cluster_session.cluster_id:
 			continue
+		var macro_sector_zone: int = _resolve_macro_sector_zone(
+			active_macro_sector_session,
+			cluster_state.cluster_id
+		)
 		var local_center: Vector2 = active_cluster_session.to_local(cluster_state.global_center)
 		var cluster_center_canvas: Vector2 = BodyRenderer.sim_to_screen(local_center)
 		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(cluster_state.get_authoritative_radius())
@@ -325,7 +335,11 @@ static func build_remote_cluster_preview_specs(
 		var preview_lod: int = cluster_preview_lod_for_screen_radius(cluster_screen_radius)
 		if preview_lod == PREVIEW_LOD_MARKER_ONLY:
 			continue
-		var source_specs: Array = _remote_cluster_preview_source_specs(cluster_state, preview_lod)
+		var source_specs: Array = _remote_cluster_preview_source_specs(
+			cluster_state,
+			preview_lod,
+			macro_sector_zone
+		)
 		for source_spec in source_specs:
 			var source_local_position: Vector2 = Vector2(source_spec.get("local_position", Vector2.ZERO))
 			var source_global_position: Vector2 = cluster_state.global_center + source_local_position
@@ -341,6 +355,7 @@ static func build_remote_cluster_preview_specs(
 				"cluster_id": cluster_state.cluster_id,
 				"state": activation_state_debug_name(cluster_state.activation_state),
 				"preview_lod": preview_lod,
+				"macro_sector_zone": MACRO_SECTOR_ZONE_SCRIPT.debug_name(macro_sector_zone),
 			}
 			preview_specs.append(preview_spec)
 	return preview_specs
@@ -469,7 +484,8 @@ static func _remote_cluster_pick_result(
 
 static func _remote_cluster_preview_source_specs(
 		cluster_state: ClusterState,
-		preview_lod: int = PREVIEW_LOD_FULL) -> Array:
+		preview_lod: int = PREVIEW_LOD_FULL,
+		macro_sector_zone: int = MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE) -> Array:
 	var preview_specs: Array = []
 	if cluster_state == null:
 		return preview_specs
@@ -486,7 +502,7 @@ static func _remote_cluster_preview_source_specs(
 				SimBody.BodyType.PLANET,
 			]:
 				continue
-			if not _preview_body_type_allowed_in_lod(body_type, preview_lod):
+			if not _preview_body_type_allowed_in_lod(body_type, preview_lod, macro_sector_zone):
 				continue
 			preview_specs.append(_make_preview_source_spec(
 				object_state.object_id,
@@ -498,9 +514,9 @@ static func _remote_cluster_preview_source_specs(
 				int(object_state.seed)
 			))
 		# step_simplified_cluster() sets has_runtime_snapshot=true after the first BH-only
-		# step, before the cluster has ever been ACTIVE. In that case the registry only
-		# holds BHs; supplement with blueprint preview specs for stars/planets so distant
-		# clusters show their full content even before they have been visited.
+		# style remote step, before the cluster has ever been ACTIVE. In that case the
+		# registry may only hold BHs; supplement from blueprint data so remote zones can
+		# still show the content allowed by their current preview policy.
 		var registry_has_stars_or_planets: bool = false
 		for spec in preview_specs:
 			if int(spec.get("body_type", -1)) != SimBody.BodyType.BLACK_HOLE:
@@ -513,7 +529,7 @@ static func _remote_cluster_preview_source_specs(
 					continue  # BH already present from registry with live positions
 				if bt not in [SimBody.BodyType.STAR, SimBody.BodyType.PLANET]:
 					continue
-				if not _preview_body_type_allowed_in_lod(bt, preview_lod):
+				if not _preview_body_type_allowed_in_lod(bt, preview_lod, macro_sector_zone):
 					continue
 				preview_specs.append(_copy_preview_source_spec(source_spec))
 		return preview_specs
@@ -525,7 +541,7 @@ static func _remote_cluster_preview_source_specs(
 			SimBody.BodyType.PLANET,
 		]:
 			continue
-		if not _preview_body_type_allowed_in_lod(body_type, preview_lod):
+		if not _preview_body_type_allowed_in_lod(body_type, preview_lod, macro_sector_zone):
 			continue
 		preview_specs.append(_copy_preview_source_spec(source_spec))
 	return preview_specs
@@ -537,14 +553,27 @@ static func cluster_preview_lod_for_screen_radius(cluster_screen_radius: float) 
 		return PREVIEW_LOD_BH_AND_STARS
 	return PREVIEW_LOD_FULL
 
-static func _preview_body_type_allowed_in_lod(body_type: int, preview_lod: int) -> bool:
+static func _preview_body_type_allowed_in_lod(
+		body_type: int,
+		preview_lod: int,
+		macro_sector_zone: int = MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE) -> bool:
 	if body_type == SimBody.BodyType.BLACK_HOLE:
 		return true
+	if macro_sector_zone == MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR:
+		return preview_lod in [PREVIEW_LOD_BH_AND_STARS, PREVIEW_LOD_FULL] \
+			and body_type == SimBody.BodyType.STAR
 	if preview_lod == PREVIEW_LOD_FULL:
 		return body_type in [SimBody.BodyType.STAR, SimBody.BodyType.PLANET]
 	if preview_lod == PREVIEW_LOD_BH_AND_STARS:
 		return body_type == SimBody.BodyType.STAR
 	return false
+
+static func _resolve_macro_sector_zone(
+		active_macro_sector_session,
+		cluster_id: int) -> int:
+	if active_macro_sector_session == null:
+		return MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE
+	return active_macro_sector_session.zone_for_cluster(cluster_id)
 
 static func _copy_preview_source_spec(source_spec: Dictionary) -> Dictionary:
 	return _make_preview_source_spec(
