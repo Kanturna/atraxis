@@ -65,9 +65,6 @@ static func dominance_radius_for_mass(mass: float) -> float:
 		return 0.0
 	return sqrt((SimConstants.G * mass) / SimConstants.ANCHOR_DOMINANCE_THRESHOLD)
 
-static func nearfield_radius_for_mass(mass: float) -> float:
-	return dominance_radius_for_mass(mass) * SimConstants.BH_NEARFIELD_DISTANCE_FACTOR
-
 static func rank_black_holes_for_body(body: SimBody, black_holes: Array) -> Array:
 	var ranked: Array = []
 	for black_hole in black_holes:

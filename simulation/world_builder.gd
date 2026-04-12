@@ -205,12 +205,7 @@ static func _place_dynamic_stars(black_hole: SimBody, config, rng: RandomNumberG
 		star.kinematic = false
 		star.scripted_orbit_enabled = false
 		star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
-		# Non-zero initial eccentricity so stars naturally swing to larger apoapsis.
-		# In a multi-BH field this lets ring BHs (at field_spacing_au) compete at
-		# apoapsis and produce genuine orbit transfers rather than fixed-radius circles.
-		# 0.35 means apoapsis ≈ 2.1 × periapsis (e.g. 6 AU → 12.5 AU apoapsis),
-		# which crosses a typical 9 AU ring-BH zone for inner stars.
-		_place_in_orbit(star, black_hole, spec["orbit_radius"], spec["phase"], 0.35)
+		_place_in_orbit(star, black_hole, spec["orbit_radius"], spec["phase"], 0.0)
 		stars.append(star)
 	return stars
 

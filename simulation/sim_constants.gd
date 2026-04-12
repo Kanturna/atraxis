@@ -87,47 +87,15 @@ const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = 5.0 # BH spread within each clus
 const DEFAULT_GALAXY_VOID_SCALE: float = 4.0        # inter-cluster spacing as multiple of cluster radius
 const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy topology
 
-# --- Dominant BH nearfield integration ---
-# Phase A is intentionally numerical only: bodies very close to a dominant BH
-# are integrated with smaller local timesteps so high speed resolves as
-# stronger curvature/orbital steering, not as a coarse-timestep escape spike.
-# 0.65 ≈ 7.1 AU for a 12M BH — this covers the default inner star orbit range
-# (4–20 AU) so that orbiting stars are reliably in 8-substep mode and the
-# broad energy guardrail (see below) applies wherever stars can actually orbit.
-# Previous values: 0.22 (1.4 AU), 0.35 (3.8 AU) — both too small: stars at 4 AU
-# fell just outside the nearfield and were integrated with a single coarse step.
-const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.65
-const BH_NEARFIELD_SUBSTEPS: int = 8
-# Physical floor for the Stage-1 periapsis guardrail (BH + star radii + tiny gap).
-# The actual guardrail fires at max(this, BH_MIN_PERIAPSIS_FACTOR × nearfield_radius)
-# so this only matters for very small/light BHs where the factor would fall below
-# the physical surface.
-const BH_STAR_APPROACH_PADDING: float = 8.0
-# Stage-1 minimum periapsis expressed as a fraction of the dominant BH's nearfield radius.
-# The guardrail repositions the star at max(physical_min, factor × nearfield_radius).
-# Why 0.06:  For a 12M BH nearfield_radius ≈ 7120 units → floor ≈ 427 units (0.43 AU).
-# A star on a natural orbit in the multi-BH field has periapsis at 1–20 AU and never
-# triggers Stage 1 at all, letting the orbit evolve freely through BH perturbations.
-# Only truly extreme close passes (< 0.43 AU) are redirected.  The resulting orbit has
-# apoapsis ≈ 6.8 AU (12M BH), ≈ 3.9 AU (4M BH), ≈ 10.8 AU (30M BH).
-const BH_MIN_PERIAPSIS_FACTOR: float = 0.06
-# Escape-velocity clamp margin — used by Stage 1 only (see sim_world.gd).
-# Stage 2 (broad energy guardrail) has been removed; Stage 1 is the sole
-# velocity intervention, and only fires for extreme close passes (< 0.43 AU).
-# After Stage 1 the star has tangential speed = min(v_tangential, MARGIN × v_esc).
+# --- Dominant BH adaptive integration ---
+# Dynamic bodies keep the raw inverse-square gravity law. We only adapt the
+# number of substeps when the dominant BH's local orbital timescale becomes
+# small compared to the fixed frame dt.
 #
-# Why 0.97:  At the Stage-1 floor (r ≈ 427 units, 12M BH), v_esc ≈ 2371 units/s.
-# 0.97 × v_esc ≈ 2300 → apoapsis ≈ 6.8 AU, comfortably inside the normal orbit
-# zone (4–20 AU).  In a multi-BH field the star then travels freely and is
-# captured naturally by whichever BH has the strongest pull at apoapsis.
-const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.97
-# Gravity contribution cutoff for kinematic BHs only.
-# BH→body gravity is skipped when G*M/r² falls below this threshold.
-# Conservative: 0.05 acc-units is negligible compared to near-BH values of
-# thousands of units/s². Relevant only with many BHs spread over large distances;
-# in the current 5-BH default it has almost no effect.
-# Do not raise this too high — hard gravity cutoffs create visible boundary artefacts.
-const BH_GRAVITY_MIN_ACCEL: float = 0.05
+# target_dt = BH_ADAPTIVE_TIMESTEP_FACTOR × sqrt(r³ / (G × M))
+# required_substeps = ceil(frame_dt / target_dt), clamped to MAX_SUBSTEPS.
+const BH_ADAPTIVE_TIMESTEP_FACTOR: float = 0.20
+const BH_ADAPTIVE_MAX_SUBSTEPS: int = 16
 
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.

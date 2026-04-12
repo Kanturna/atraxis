@@ -53,9 +53,8 @@ offset_bottom = 40.0
 text = "<"
 
 [node name="RightPanelScroll" type="ScrollContainer" parent="DebugOverlay" unique_id=148800000]
-anchors_preset = 1
+anchors_preset = 11
 anchor_left = 1.0
-anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -320.0

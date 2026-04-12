@@ -56,12 +56,6 @@ func apply_gravity(bodies: Array) -> void:
 
 func _apply_from_source(source: SimBody, targets: Array) -> void:
 	var gm: float = SimConstants.G * source.mass
-	# For kinematic black holes, skip targets that are so far away that the
-	# gravitational contribution would be below BH_GRAVITY_MIN_ACCEL.
-	# This has no effect in the default 5-BH setup but becomes a meaningful
-	# performance saver when many BHs are spread over galaxy-scale distances.
-	# Non-kinematic sources (e.g. dynamic stars) always apply full gravity.
-	var is_kinematic_bh: bool = source.kinematic and source.body_type == SimBody.BodyType.BLACK_HOLE
 	for target in targets:
 		if target.sleeping or target.kinematic or target.id == source.id:
 			continue
@@ -69,8 +63,6 @@ func _apply_from_source(source: SimBody, targets: Array) -> void:
 		var dist_sq: float = delta.length_squared() + SimConstants.GRAVITY_SOFTENING_SQ
 		# a = G*M / r² (target mass cancels: F = G*M*m/r², a = F/m = G*M/r²)
 		var accel_magnitude: float = gm / dist_sq
-		if is_kinematic_bh and accel_magnitude < SimConstants.BH_GRAVITY_MIN_ACCEL:
-			continue
 		target.acceleration += delta.normalized() * accel_magnitude
 
 func _apply_mutual(body_a: SimBody, body_b: SimBody) -> void:

@@ -5,8 +5,6 @@
 class_name SimWorld
 extends RefCounted
 
-const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
-
 signal body_added(body: SimBody)
 signal body_removed(body_id: int)
 signal debris_field_changed(field: DebrisField)
@@ -22,12 +20,9 @@ var _gravity: GravitySolver
 var _detector: CollisionDetector
 var _resolver: CollisionResolver
 
-# Dominant-BH cache: rebuilt once per step_sim call so that the O(n_bodies × n_BH)
-# scan happens exactly once per frame, not once per substep per body.
-# Bodies use this for the periapsis guardrail and nearfield substep check.
-# BHs are kinematic and do not move within a single step, so the cache is valid
-# for all substeps of the same frame.
-var _dominant_bh_cache: Dictionary = {}  # body.id → {dominant_bh: SimBody, distance: float}
+# Dominant-BH cache: rebuilt from the current positions and used only to steer
+# adaptive integration around the strongest nearby black hole.
+var _dominant_bh_cache: Dictionary = {}  # body.id → {dominant_bh: SimBody, distance: float, orbital_timescale: float}
 
 func _init() -> void:
 	_gravity = GravitySolver.new()
@@ -36,55 +31,18 @@ func _init() -> void:
 
 func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
-	# Build cache once to determine substep count. BHs are kinematic (no position
-	# change during the frame) so this initial build is safe for that decision.
-	_rebuild_dominant_bh_cache()
-	var integration_substeps: int = _determine_black_hole_nearfield_substeps()
-	var sub_dt: float = sim_dt / float(integration_substeps)
 
-	for _substep in range(integration_substeps):
-		for body in bodies:
-			if body.active:
-				body.acceleration = Vector2.ZERO
-
-		_gravity.apply_gravity(bodies)
-
-		# Rebuild the cache every substep so that the guardrail always uses the
-		# dominant BH relative to each star's current substep position.
-		# At high time_scale a fast star can cross into a different BH's dominance
-		# zone mid-frame; using a stale cache would apply the guardrail against
-		# the wrong BH (or miss it entirely). BHs never move so the BH-side of
-		# the lookup is stable; only star distances change between substeps.
+	if sim_dt > 0.0:
+		_rebuild_dominant_bh_cache()
+		var integration_substeps: int = _determine_black_hole_adaptive_substeps(sim_dt)
+		var sub_dt: float = sim_dt / float(integration_substeps)
+		for _substep in range(integration_substeps):
+			_integrate_dynamic_bodies(sub_dt)
+		_update_scripted_orbiters(sim_dt)
+		_run_sleep_phase(sim_dt)
 		_rebuild_dominant_bh_cache()
 
-		for body in bodies:
-			if not body.active or body.sleeping or body.kinematic:
-				continue
-			var previous_position: Vector2 = body.position
-			body.velocity += body.acceleration * sub_dt
-			body.position += body.velocity * sub_dt
-			_apply_star_black_hole_periapsis_guardrail(body, previous_position)
-			body.age += sub_dt
-
-	_update_scripted_orbiters(sim_dt)
-
-	for body in bodies:
-		if not body.active or body.kinematic or body.scripted_orbit_enabled:
-			continue
-		if body.check_sleep_eligible():
-			body.sleep_timer += sim_dt
-			if body.sleep_timer >= SimConstants.SLEEP_CONFIRM_TIME:
-				body.sleeping = true
-		else:
-			body.reset_sleep_timer()
-
-	var pairs: Array = _detector.broadphase(bodies)
-	for pair in pairs:
-		var result: CollisionDetector.CollisionResult = _detector.narrowphase(pair[0], pair[1])
-		if result.colliding:
-			_resolver.resolve(result)
-			collision_occurred.emit(result.body_a.position)
-
+	_run_collision_phase()
 	_aggregate_debris_fields()
 	_cleanup_inactive_debris_fields()
 	_flush_removals()
@@ -194,13 +152,64 @@ func set_black_hole_mass(new_mass: float) -> void:
 			var orbit_speed: float = sqrt(SimConstants.G * parent_black_hole.mass / body.orbit_radius)
 			body.orbit_angular_speed = orbit_speed / body.orbit_radius
 
+func _integrate_dynamic_bodies(sub_dt: float) -> void:
+	var black_holes: Array = get_black_holes()
+
+	_reset_accelerations()
+	_gravity.apply_gravity(bodies)
+
+	for body in bodies:
+		if not _should_integrate_body(body):
+			continue
+		body.velocity += body.acceleration * (0.5 * sub_dt)
+		var previous_position: Vector2 = body.position
+		body.position += body.velocity * sub_dt
+		_handle_black_hole_segment_impacts(body, previous_position, black_holes)
+		if body.active:
+			body.age += sub_dt
+
+	_reset_accelerations()
+	_gravity.apply_gravity(bodies)
+
+	for body in bodies:
+		if not _should_integrate_body(body):
+			continue
+		body.velocity += body.acceleration * (0.5 * sub_dt)
+
+func _run_sleep_phase(sim_dt: float) -> void:
+	for body in bodies:
+		if not body.active or body.kinematic or body.scripted_orbit_enabled:
+			continue
+		if body.check_sleep_eligible():
+			body.sleep_timer += sim_dt
+			if body.sleep_timer >= SimConstants.SLEEP_CONFIRM_TIME:
+				body.sleeping = true
+		else:
+			body.reset_sleep_timer()
+
+func _run_collision_phase() -> void:
+	var pairs: Array = _detector.broadphase(bodies)
+	for pair in pairs:
+		var result: CollisionDetector.CollisionResult = _detector.narrowphase(pair[0], pair[1])
+		if result.colliding:
+			_resolver.resolve(result)
+			collision_occurred.emit(result.body_a.position)
+
+func _reset_accelerations() -> void:
+	for body in bodies:
+		if body.active:
+			body.acceleration = Vector2.ZERO
+
+func _should_integrate_body(body: SimBody) -> bool:
+	return body.active and not body.sleeping and not body.kinematic
+
 func _rebuild_dominant_bh_cache() -> void:
 	_dominant_bh_cache.clear()
 	var black_holes: Array = get_black_holes()
 	if black_holes.is_empty():
 		return
 	for body in bodies:
-		if not _requires_black_hole_nearfield_substeps(body) and not _requires_star_black_hole_guardrail(body):
+		if not _requires_black_hole_adaptive_integration(body):
 			continue
 		var best_bh: SimBody = null
 		var best_strength: float = -1.0
@@ -216,31 +225,38 @@ func _rebuild_dominant_bh_cache() -> void:
 				best_bh = bh
 				best_dist = delta.length()
 		if best_bh != null:
+			var safe_distance: float = maxf(best_dist, best_bh.radius + body.radius)
+			var orbital_timescale: float = 0.0
+			if best_bh.mass > 0.0:
+				orbital_timescale = sqrt(
+					(safe_distance * safe_distance * safe_distance) / (SimConstants.G * best_bh.mass)
+				)
 			_dominant_bh_cache[body.id] = {
 				"dominant_bh": best_bh,
 				"distance": best_dist,
-				# Cache the nearfield radius so guardrail calls don't recompute it.
-				# Depends only on BH mass (fixed), safe to cache per rebuild.
-				"nearfield_radius": ANCHOR_FIELD_SCRIPT.nearfield_radius_for_mass(best_bh.mass),
+				"orbital_timescale": orbital_timescale,
 			}
 
-func _determine_black_hole_nearfield_substeps() -> int:
-	if _dominant_bh_cache.is_empty():
+func _determine_black_hole_adaptive_substeps(sim_dt: float) -> int:
+	if sim_dt <= 0.0 or _dominant_bh_cache.is_empty():
 		return 1
+	var required_substeps: int = 1
 	for body in bodies:
-		if not _requires_black_hole_nearfield_substeps(body):
+		if not _requires_black_hole_adaptive_integration(body):
 			continue
 		if not _dominant_bh_cache.has(body.id):
 			continue
 		var entry: Dictionary = _dominant_bh_cache[body.id]
-		var dominant_black_hole: SimBody = entry["dominant_bh"]
-		var dominant_distance: float = entry["distance"]
-		var nearfield_radius: float = ANCHOR_FIELD_SCRIPT.nearfield_radius_for_mass(dominant_black_hole.mass)
-		if nearfield_radius > 0.0 and dominant_distance <= nearfield_radius:
-			return SimConstants.BH_NEARFIELD_SUBSTEPS
-	return 1
+		var orbital_timescale: float = entry["orbital_timescale"]
+		if orbital_timescale <= 0.0:
+			continue
+		var target_dt: float = orbital_timescale * SimConstants.BH_ADAPTIVE_TIMESTEP_FACTOR
+		if target_dt <= 0.0:
+			continue
+		required_substeps = maxi(required_substeps, int(ceil(sim_dt / target_dt)))
+	return clampi(required_substeps, 1, SimConstants.BH_ADAPTIVE_MAX_SUBSTEPS)
 
-func _requires_black_hole_nearfield_substeps(body: SimBody) -> bool:
+func _requires_black_hole_adaptive_integration(body: SimBody) -> bool:
 	if not body.active or body.sleeping or body.kinematic:
 		return false
 	return body.body_type in [
@@ -249,71 +265,70 @@ func _requires_black_hole_nearfield_substeps(body: SimBody) -> bool:
 		SimBody.BodyType.ASTEROID,
 	]
 
-func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position: Vector2) -> void:
-	if not _requires_star_black_hole_guardrail(body):
+func _handle_black_hole_segment_impacts(body: SimBody, previous_position: Vector2, black_holes: Array) -> void:
+	if black_holes.is_empty():
 		return
-	if not _dominant_bh_cache.has(body.id):
+	var hit: Dictionary = _find_black_hole_segment_hit(body, previous_position, body.position, black_holes)
+	if hit.is_empty():
 		return
-	var entry: Dictionary = _dominant_bh_cache[body.id]
-	var dominant_black_hole: SimBody = entry["dominant_bh"]
-	var nearfield_radius: float = entry["nearfield_radius"]
-	var offset_from_black_hole: Vector2 = body.position - dominant_black_hole.position
-	var current_distance: float = offset_from_black_hole.length()
-	# Stage 1 floor = larger of the physical surface gap and the dominance-radius fraction.
-	# The fraction (≈ 0.43 AU for 12M BH) keeps Stage 1 from firing on every periapsis
-	# of a naturally eccentric orbit; only truly extreme close passes are redirected.
-	# This lets the orbit evolve freely through multi-BH perturbations between events.
-	var physical_minimum: float = dominant_black_hole.radius + body.radius + SimConstants.BH_STAR_APPROACH_PADDING
-	var minimum_distance: float = maxf(physical_minimum, nearfield_radius * SimConstants.BH_MIN_PERIAPSIS_FACTOR)
+	body.position = hit["position"]
+	body.velocity = Vector2.ZERO
+	body.active = false
+	body.marked_for_removal = true
+	collision_occurred.emit(body.position)
 
-	# --- Stage 1: Hard periapsis guardrail (minimum approach distance) ---
-	# Fires when the star has just crossed inward past minimum_distance.
-	# Repositions to minimum_distance and removes inward radial velocity.
-	if minimum_distance > 0.0 and current_distance <= minimum_distance:
-		var previous_distance: float = previous_position.distance_to(dominant_black_hole.position)
-		if previous_distance >= minimum_distance:
-			# Star just crossed the minimum boundary inward.
-			if current_distance > 0.0:
-				var radial_direction: Vector2 = offset_from_black_hole / current_distance
-				var radial_velocity: float = body.velocity.dot(radial_direction)
-				if radial_velocity < 0.0:
-					# Project back to minimum radius, preserve tangential motion.
-					var tangential_velocity: Vector2 = body.velocity - radial_direction * radial_velocity
-					body.position = dominant_black_hole.position + radial_direction * minimum_distance
-					# Escape-velocity clamp: even the tangential component can exceed v_esc
-					# after numerical energy injection at high time_scale.
-					var escape_vel_sq: float = 2.0 * SimConstants.G * dominant_black_hole.mass / minimum_distance
-					if tangential_velocity.length_squared() >= escape_vel_sq:
-						tangential_velocity = tangential_velocity.normalized() \
-							* (sqrt(escape_vel_sq) * SimConstants.BH_GUARDRAIL_ESCAPE_MARGIN)
-					body.velocity = tangential_velocity
-					return
-			else:
-				# Degenerate: star at exact BH position.
-				var fallback_offset: Vector2 = previous_position - dominant_black_hole.position
-				if fallback_offset == Vector2.ZERO:
-					fallback_offset = Vector2.RIGHT
-				var fallback_direction: Vector2 = fallback_offset.normalized()
-				body.position = dominant_black_hole.position + fallback_direction * minimum_distance
-				var fallback_radial_velocity: float = body.velocity.dot(fallback_direction)
-				if fallback_radial_velocity < 0.0:
-					body.velocity -= fallback_direction * fallback_radial_velocity
-				return
+func _find_black_hole_segment_hit(body: SimBody, start: Vector2, finish: Vector2, black_holes: Array) -> Dictionary:
+	var best_hit: Dictionary = {}
+	var best_t: float = INF
+	for black_hole in black_holes:
+		if black_hole == null or not black_hole.active:
+			continue
+		var hit_radius: float = black_hole.radius + body.radius
+		var hit: Dictionary = _first_segment_circle_hit(start, finish, black_hole.position, hit_radius)
+		if hit.is_empty():
+			continue
+		var hit_t: float = hit["t"]
+		if hit_t < best_t:
+			best_t = hit_t
+			best_hit = hit
+	return best_hit
 
-	# Stage 2 (broad energy guardrail) deliberately removed.
-	# In a multi-BH field a star that becomes unbound from the dominant BH is
-	# naturally steered toward a neighbouring BH whose gravity is already stronger
-	# at that distance; clamping its velocity here prevented that organic capture
-	# and sent the star on a very wide (46–80 AU) orbit instead, producing the
-	# visible "expands then contracts" loop.  The dynamic periapsis floor in Stage 1
-	# (BH_MIN_PERIAPSIS_FACTOR × nearfield_radius ≈ 0.43 AU) prevents the close-pass
-	# numerical energy injection that Stage 2 was originally guarding against.
+func _first_segment_circle_hit(start: Vector2, finish: Vector2, center: Vector2, radius: float) -> Dictionary:
+	var radius_sq: float = radius * radius
+	var start_offset: Vector2 = start - center
+	if start_offset.length_squared() <= radius_sq:
+		return {
+			"t": 0.0,
+			"position": start,
+		}
 
-func _requires_star_black_hole_guardrail(body: SimBody) -> bool:
-	return body.active \
-		and not body.sleeping \
-		and not body.kinematic \
-		and body.body_type == SimBody.BodyType.STAR
+	var segment: Vector2 = finish - start
+	var a: float = segment.length_squared()
+	if a <= 0.000001:
+		return {}
+
+	var b: float = 2.0 * start_offset.dot(segment)
+	var c: float = start_offset.length_squared() - radius_sq
+	var discriminant: float = b * b - 4.0 * a * c
+	if discriminant < 0.0:
+		return {}
+
+	var sqrt_disc: float = sqrt(discriminant)
+	var denom: float = 2.0 * a
+	var t0: float = (-b - sqrt_disc) / denom
+	var t1: float = (-b + sqrt_disc) / denom
+	var hit_t: float = INF
+	if t0 >= 0.0 and t0 <= 1.0:
+		hit_t = t0
+	elif t1 >= 0.0 and t1 <= 1.0:
+		hit_t = t1
+	if hit_t == INF:
+		return {}
+
+	return {
+		"t": hit_t,
+		"position": start + segment * hit_t,
+	}
 
 func _update_scripted_orbiters(sim_dt: float) -> void:
 	for body in bodies:
