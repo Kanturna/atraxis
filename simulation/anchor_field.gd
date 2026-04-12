@@ -1,5 +1,5 @@
 ## anchor_field.gd
-## Small helper for Dynamic Anchor topologies with one or more fixed black holes.
+## Small helper for anchor topologies with one or more fixed black holes.
 ## Provides ordered field layouts plus diagnostic helpers for dominant anchors.
 class_name AnchorField
 extends RefCounted

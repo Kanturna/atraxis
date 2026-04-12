@@ -50,6 +50,7 @@ var _galaxy_hint_label: Label = null
 @onready var _anchor_diagnostics_label: RichTextLabel = $RightPanelScroll/RightPanelVBox/AnchorDiagnosticsPanel/RichTextLabel
 @onready var _left_toggle_button: Button = $LeftPanelToggleButton
 @onready var _right_toggle_button: Button = $RightPanelToggleButton
+@onready var _mode_label: Label = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid/ModeLabel
 @onready var _mode_option: OptionButton = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid/ModeOption
 @onready var _anchor_topology_label: Label = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid/AnchorTopologyLabel
 @onready var _anchor_topology_option: OptionButton = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid/AnchorTopologyOption
@@ -84,10 +85,11 @@ var _galaxy_hint_label: Label = null
 @onready var _restart_button: Button = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/RestartButton
 
 func _ready() -> void:
+	_mode_label.text = "World preset"
 	_mode_option.clear()
-	_mode_option.add_item("Dynamic Anchor (Main)", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR)
-	_mode_option.add_item("Stable Anchor (Reference)", START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR)
-	_mode_option.add_item("Chaos Inflow (Lab)", START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW)
+	_mode_option.add_item("Orbital Sandbox", START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX)
+	_mode_option.add_item("Orbital Reference", START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE)
+	_mode_option.add_item("Inflow Lab", START_CONFIG_SCRIPT.WorldProfile.INFLOW_LAB)
 	_anchor_topology_option.clear()
 	_anchor_topology_option.add_item("Central BH", START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
@@ -104,8 +106,8 @@ func _ready() -> void:
 		+ "set spacing above that value to keep gravity fields separate."
 	)
 	_create_galaxy_controls()
-	if not _mode_option.item_selected.is_connected(_on_mode_selected):
-		_mode_option.item_selected.connect(_on_mode_selected)
+	if not _mode_option.item_selected.is_connected(_on_world_profile_selected):
+		_mode_option.item_selected.connect(_on_world_profile_selected)
 	if not _anchor_topology_option.item_selected.is_connected(_on_anchor_topology_selected):
 		_anchor_topology_option.item_selected.connect(_on_anchor_topology_selected)
 	if not _restart_button.pressed.is_connected(_on_restart_button_pressed):
@@ -347,7 +349,7 @@ func _sync_start_controls(config) -> void:
 		return
 	var safe_config = config.copy()
 	safe_config.clamp_values()
-	_mode_option.select(safe_config.mode)
+	_mode_option.select(safe_config.world_profile)
 	_anchor_topology_option.select(safe_config.anchor_topology)
 	_seed_spin.value = safe_config.seed
 	_bh_mass_spin.value = safe_config.black_hole_mass
@@ -367,7 +369,7 @@ func _sync_start_controls(config) -> void:
 	_speed_scale_spin.value = safe_config.inflow_speed_scale
 	_tangential_bias_spin.value = safe_config.tangential_bias
 	_chaos_body_count_spin.value = safe_config.chaos_body_count
-	_update_mode_specific_inputs()
+	_update_profile_specific_inputs()
 
 func _sync_live_anchor_controls(config) -> void:
 	var safe_config = config.copy()
@@ -377,7 +379,7 @@ func _sync_live_anchor_controls(config) -> void:
 
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
-	config.mode = _mode_option.get_selected_id()
+	config.world_profile = _mode_option.get_selected_id()
 	config.anchor_topology = _anchor_topology_option.get_selected_id()
 	config.seed = int(_seed_spin.value)
 	config.black_hole_mass = _bh_mass_spin.value
@@ -400,15 +402,16 @@ func _read_start_config():
 	config.clamp_values()
 	return config
 
-func _update_mode_specific_inputs() -> void:
-	var selected_mode: int = _mode_option.get_selected_id()
-	var chaos_enabled: bool = selected_mode == START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW
-	var dynamic_anchor_enabled: bool = selected_mode == START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+func _update_profile_specific_inputs() -> void:
+	var selected_profile: int = _mode_option.get_selected_id()
+	var inflow_lab_enabled: bool = selected_profile == START_CONFIG_SCRIPT.WorldProfile.INFLOW_LAB
+	var orbital_sandbox_enabled: bool = selected_profile == START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	var selected_topology: int = _anchor_topology_option.get_selected_id()
-	var field_patch_enabled: bool = dynamic_anchor_enabled \
+	var field_patch_enabled: bool = orbital_sandbox_enabled \
 		and selected_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	var galaxy_cluster_enabled: bool = dynamic_anchor_enabled \
+	var galaxy_cluster_enabled: bool = orbital_sandbox_enabled \
 		and selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	var multi_black_hole_enabled: bool = field_patch_enabled or galaxy_cluster_enabled
 	var shared_anchor_nodes: Array[CanvasItem] = [
 		_bh_mass_label,
 		_bh_mass_spin,
@@ -427,9 +430,11 @@ func _update_mode_specific_inputs() -> void:
 		_anchor_topology_label,
 		_anchor_topology_option,
 	]
-	var field_patch_nodes: Array[CanvasItem] = [
+	var multi_black_hole_nodes: Array[CanvasItem] = [
 		_black_hole_count_label,
 		_black_hole_count_spin,
+	]
+	var field_patch_nodes: Array[CanvasItem] = [
 		_field_spacing_label,
 		_field_spacing_spin,
 	]
@@ -446,9 +451,11 @@ func _update_mode_specific_inputs() -> void:
 		_chaos_body_count_spin,
 	]
 	for node in shared_anchor_nodes:
-		node.visible = not chaos_enabled
+		node.visible = not inflow_lab_enabled
 	for node in dynamic_nodes:
-		node.visible = dynamic_anchor_enabled
+		node.visible = orbital_sandbox_enabled
+	for node in multi_black_hole_nodes:
+		node.visible = multi_black_hole_enabled
 	for node in field_patch_nodes:
 		node.visible = field_patch_enabled
 	var galaxy_nodes: Array = []
@@ -466,17 +473,15 @@ func _update_mode_specific_inputs() -> void:
 	if _galaxy_hint_label != null:
 		_galaxy_hint_label.visible = galaxy_cluster_enabled
 	for node in chaos_nodes:
-		node.visible = chaos_enabled
+		node.visible = inflow_lab_enabled
 	_field_patch_hint_label.visible = field_patch_enabled
 	_update_panel_group_visibility()
 
-func _on_mode_selected(_index: int) -> void:
-	if _mode_option.get_selected_id() != START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR:
-		_anchor_topology_option.select(START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
-	_update_mode_specific_inputs()
+func _on_world_profile_selected(_index: int) -> void:
+	_update_profile_specific_inputs()
 
 func _on_anchor_topology_selected(_index: int) -> void:
-	_update_mode_specific_inputs()
+	_update_profile_specific_inputs()
 
 func _on_live_bh_mass_changed(value: float) -> void:
 	_bh_mass_spin.set_value_no_signal(value)

@@ -86,7 +86,7 @@ columns = 2
 
 [node name="ModeLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1348092864]
 layout_mode = 2
-text = "Mode"
+text = "World preset"
 
 [node name="ModeOption" type="OptionButton" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1861459480]
 custom_minimum_size = Vector2(170, 0)

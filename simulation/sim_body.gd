@@ -79,9 +79,9 @@ var temperature: float = 200.0
 # to move them into full N-body mutual attraction.
 var kinematic: bool = false
 
-## Analytic orbit support for calm reference bodies.
-## In Stable Anchor, bound core planets are analytically updated relative to a
-## moving parent after dynamic bodies have already advanced for the tick.
+## Analytic orbit support for calm reference carriers.
+## In the orbital-reference preset, bound core planets are analytically updated
+## relative to a moving parent after dynamic bodies have already advanced.
 var scripted_orbit_enabled: bool = false
 var orbit_binding_state: int = OrbitBindingState.FREE_DYNAMIC
 var orbit_parent_id: int = -1

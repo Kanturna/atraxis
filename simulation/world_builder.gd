@@ -4,7 +4,6 @@
 class_name WorldBuilder
 extends RefCounted
 
-const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
@@ -82,29 +81,18 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 
 	var spawned_black_holes: Array = _spawn_black_holes_from_cluster(world, cluster_state)
 	var profile: Dictionary = cluster_state.simulation_profile
-	var start_mode: int = int(profile.get("start_mode", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR))
-
-	match start_mode:
-		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
-			_materialize_chaos_cluster(world, profile, cluster_state.cluster_seed, cluster_state.cluster_id)
-		START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR:
-			_materialize_anchor_cluster(
-				world,
-				spawned_black_holes,
-				profile,
-				cluster_state.cluster_seed,
-				cluster_state.cluster_id,
-				true
-			)
-		_:
-			_materialize_anchor_cluster(
-				world,
-				spawned_black_holes,
-				profile,
-				cluster_state.cluster_seed,
-				cluster_state.cluster_id,
-				false
-			)
+	var content_archetype: String = str(profile.get("content_archetype", "anchor_orbital"))
+	if content_archetype == "inflow_lab":
+		_materialize_inflow_lab_cluster(world, profile, cluster_state.cluster_seed, cluster_state.cluster_id)
+	else:
+		_materialize_anchor_cluster(
+			world,
+			spawned_black_holes,
+			profile,
+			cluster_state.cluster_seed,
+			cluster_state.cluster_id,
+			bool(profile.get("analytic_star_carriers", false))
+		)
 	_materialize_registered_cluster_objects(world, cluster_state)
 
 static func compute_zones(star: SimBody) -> ZoneBoundaries:
@@ -528,7 +516,7 @@ static func _materialize_anchor_cluster(
 		profile: Dictionary,
 		cluster_seed: int,
 		cluster_id: int,
-		stable_mode: bool) -> void:
+		analytic_star_carriers: bool) -> void:
 	var spawn_anchor: SimBody = _resolve_primary_black_hole_body(spawned_black_holes)
 	if spawn_anchor == null or not profile.get("spawn_anchor_content", true):
 		return
@@ -536,7 +524,7 @@ static func _materialize_anchor_cluster(
 	var rng := RandomNumberGenerator.new()
 	rng.seed = cluster_seed
 	var stars: Array = _place_analytic_stars(spawn_anchor, profile, rng) \
-		if stable_mode else _place_dynamic_stars(spawn_anchor, profile, rng)
+		if analytic_star_carriers else _place_dynamic_stars(spawn_anchor, profile, rng)
 
 	for star_index in range(stars.size()):
 		stars[star_index].persistent_object_id = _make_cluster_object_id(cluster_id, "star", star_index)
@@ -555,7 +543,7 @@ static func _materialize_anchor_cluster(
 		disturbance.persistent_object_id = _make_cluster_object_id(cluster_id, "asteroid", i)
 		world.add_body(disturbance)
 
-static func _materialize_chaos_cluster(
+static func _materialize_inflow_lab_cluster(
 		world: SimWorld,
 		profile: Dictionary,
 		cluster_seed: int,

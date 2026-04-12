@@ -13,19 +13,16 @@ static func build_from_config(start_config) -> GalaxyState:
 	var galaxy_state := GalaxyState.new()
 	galaxy_state.galaxy_seed = safe_config.seed
 
-	match safe_config.mode:
-		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
-			_build_chaos_galaxy(galaxy_state, safe_config)
-		START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR:
-			_build_dynamic_anchor_galaxy(galaxy_state, safe_config)
-		_:
-			safe_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
-			_build_stable_anchor_galaxy(galaxy_state, safe_config)
+	if safe_config.uses_inflow_lab_profile():
+		_build_inflow_lab_galaxy(galaxy_state, safe_config)
+	else:
+		_build_anchor_profile_galaxy(galaxy_state, safe_config)
 
 	return galaxy_state
 
-static func _build_dynamic_anchor_galaxy(galaxy_state: GalaxyState, config) -> void:
-	match config.anchor_topology:
+static func _build_anchor_profile_galaxy(galaxy_state: GalaxyState, config) -> void:
+	var resolved_anchor_topology: int = config.resolved_anchor_topology()
+	match resolved_anchor_topology:
 		START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
 			var local_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
 				config.black_hole_count,
@@ -65,38 +62,24 @@ static func _build_dynamic_anchor_galaxy(galaxy_state: GalaxyState, config) -> v
 				config.field_spacing_au,
 				config.black_hole_mass
 			)
+			var classification: String = "orbital_reference_cluster" \
+				if config.uses_reference_star_carriers() else "central_anchor_cluster"
 			var cluster_state: ClusterState = _make_cluster_state(
 				config,
 				0,
 				Vector2.ZERO,
-				"central_anchor_cluster",
+				classification,
 				central_specs,
 				true
 			)
 			galaxy_state.add_cluster(cluster_state)
 
-static func _build_stable_anchor_galaxy(galaxy_state: GalaxyState, config) -> void:
-	var local_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
-		1,
-		config.field_spacing_au,
-		config.black_hole_mass
-	)
-	var cluster_state: ClusterState = _make_cluster_state(
-		config,
-		0,
-		Vector2.ZERO,
-		"stable_anchor_cluster",
-		local_specs,
-		true
-	)
-	galaxy_state.add_cluster(cluster_state)
-
-static func _build_chaos_galaxy(galaxy_state: GalaxyState, config) -> void:
+static func _build_inflow_lab_galaxy(galaxy_state: GalaxyState, config) -> void:
 	var cluster_state := ClusterState.new()
 	cluster_state.cluster_id = 0
 	cluster_state.global_center = Vector2.ZERO
 	cluster_state.cluster_seed = _derive_cluster_seed(config.seed, 0)
-	cluster_state.classification = "chaos_cluster"
+	cluster_state.classification = "inflow_lab_cluster"
 	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
 	cluster_state.last_unloaded_runtime_time = 0.0
 	cluster_state.last_relevance_runtime_time = 0.0
@@ -169,8 +152,10 @@ static func _build_simulation_profile(config, spawn_anchor_content: bool, local_
 	var disturbance_body_count: int = config.disturbance_body_count if spawn_anchor_content else 0
 
 	return {
-		"start_mode": config.mode,
-		"anchor_topology": config.anchor_topology,
+		"world_profile": config.world_profile,
+		"content_archetype": "inflow_lab" if config.uses_inflow_lab_profile() else "anchor_orbital",
+		"resolved_anchor_topology": config.resolved_anchor_topology(),
+		"analytic_star_carriers": config.uses_reference_star_carriers(),
 		"has_runtime_snapshot": false,
 		"spawn_anchor_content": spawn_anchor_content,
 		"seed": config.seed,
@@ -194,8 +179,8 @@ static func _estimate_cluster_radius(local_black_hole_specs: Array, simulation_p
 		max_black_hole_offset = maxf(max_black_hole_offset, spec["local_position"].length())
 
 	var radius_padding: float = 2.0 * SimConstants.AU
-	var start_mode: int = simulation_profile.get("start_mode", START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR)
-	if start_mode == START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
+	var content_archetype: String = str(simulation_profile.get("content_archetype", "anchor_orbital"))
+	if content_archetype == "inflow_lab":
 		radius_padding = (
 			simulation_profile.get("spawn_radius_au", 0.0)
 			+ simulation_profile.get("spawn_spread_au", 0.0)

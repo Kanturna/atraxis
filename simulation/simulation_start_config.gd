@@ -1,13 +1,21 @@
 ## Small debug-facing start configuration for rebuilding the simulation.
-## Dynamic Anchor is the main world-evolution mode.
-## Stable Anchor is the calm reference mode; Chaos Inflow stays the lab mode.
+## The runtime now follows one canonical world path; these values only select
+## a generation preset/profile for that shared path.
 class_name SimulationStartConfig
 extends RefCounted
 
+enum WorldProfile {
+	ORBITAL_SANDBOX = 0,
+	ORBITAL_REFERENCE = 1,
+	INFLOW_LAB = 2,
+}
+
+# Backward-compatible alias for older tests/callers while the project converges
+# on world-profile language instead of equal-status runtime modes.
 enum StartMode {
-	DYNAMIC_ANCHOR = 0,
-	STABLE_ANCHOR = 1,
-	CHAOS_INFLOW = 2,
+	DYNAMIC_ANCHOR = WorldProfile.ORBITAL_SANDBOX,
+	STABLE_ANCHOR = WorldProfile.ORBITAL_REFERENCE,
+	CHAOS_INFLOW = WorldProfile.INFLOW_LAB,
 }
 
 enum AnchorTopology {
@@ -34,7 +42,12 @@ const DEFAULT_GALAXY_CLUSTER_COUNT: int = SimConstants.DEFAULT_GALAXY_CLUSTER_CO
 const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = SimConstants.DEFAULT_GALAXY_CLUSTER_RADIUS_AU
 const DEFAULT_GALAXY_VOID_SCALE: float = SimConstants.DEFAULT_GALAXY_VOID_SCALE
 
-var mode: int = StartMode.DYNAMIC_ANCHOR
+var world_profile: int = WorldProfile.ORBITAL_SANDBOX
+var mode: int:
+	get:
+		return world_profile
+	set(value):
+		world_profile = value
 var anchor_topology: int = AnchorTopology.CENTRAL_BH
 var seed: int = DEFAULT_SEED
 var black_hole_mass: float = DEFAULT_BLACK_HOLE_MASS
@@ -56,7 +69,7 @@ var galaxy_void_scale: float = DEFAULT_GALAXY_VOID_SCALE
 
 func copy():
 	var config = get_script().new()
-	config.mode = mode
+	config.world_profile = world_profile
 	config.anchor_topology = anchor_topology
 	config.seed = seed
 	config.black_hole_mass = black_hole_mass
@@ -79,8 +92,7 @@ func copy():
 
 func clamp_values() -> void:
 	seed = maxi(seed, 0)
-	# Anchor topologies belong to the Dynamic Anchor mainline only.
-	# Other modes intentionally fall back to the central single-BH setup.
+	world_profile = clampi(world_profile, WorldProfile.ORBITAL_SANDBOX, WorldProfile.INFLOW_LAB)
 	anchor_topology = clampi(anchor_topology, AnchorTopology.CENTRAL_BH, AnchorTopology.GALAXY_CLUSTER)
 	black_hole_mass = clampf(black_hole_mass, 2_000_000.0, 30_000_000.0)
 	disturbance_body_count = clampi(disturbance_body_count, 0, 8)
@@ -104,3 +116,15 @@ func clamp_values() -> void:
 	galaxy_cluster_count = clampi(galaxy_cluster_count, 2, 12)
 	galaxy_cluster_radius_au = clampf(galaxy_cluster_radius_au, 1.0, 8.0)
 	galaxy_void_scale = clampf(galaxy_void_scale, 2.0, 6.0)
+
+func uses_inflow_lab_profile() -> bool:
+	return world_profile == WorldProfile.INFLOW_LAB
+
+func uses_reference_star_carriers() -> bool:
+	return world_profile == WorldProfile.ORBITAL_REFERENCE
+
+func supports_anchor_topology_selection() -> bool:
+	return world_profile == WorldProfile.ORBITAL_SANDBOX
+
+func resolved_anchor_topology() -> int:
+	return anchor_topology if supports_anchor_topology_selection() else AnchorTopology.CENTRAL_BH
