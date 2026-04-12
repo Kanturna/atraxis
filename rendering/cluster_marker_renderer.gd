@@ -4,14 +4,20 @@ extends Node2D
 
 var _marker_payload: Dictionary = {}
 var _canvas_scale: float = 1.0
+var _visible_canvas_rect: Rect2 = Rect2()
 var _extent_lines: Array[AntialiasedLine2D] = []
 var _marker_rings: Array[AntialiasedLine2D] = []
 var _cross_horizontal: Array[AntialiasedLine2D] = []
 var _cross_vertical: Array[AntialiasedLine2D] = []
+var _unit_circle_template_cache: Dictionary = {}
 
-func update_marker_payload(marker_payload: Dictionary, canvas_scale: float) -> void:
+func update_marker_payload(
+		marker_payload: Dictionary,
+		canvas_scale: float,
+		visible_canvas_rect: Rect2 = Rect2()) -> void:
 	_marker_payload = marker_payload
 	_canvas_scale = maxf(canvas_scale, 0.001)
+	_visible_canvas_rect = visible_canvas_rect
 	var markers: Array = _marker_payload.get("markers", [])
 	_sync_line_counts(markers.size())
 	var viewport_diagonal: float = get_viewport().get_visible_rect().size.length()
@@ -33,6 +39,11 @@ func update_marker_payload(marker_payload: Dictionary, canvas_scale: float) -> v
 		var extent_width: float = _screen_line_width(2.6 if is_active else 1.5)
 		var marker_width: float = _screen_line_width(2.0 if is_active else 1.2)
 		var cross_width: float = _screen_line_width(2.0 if is_active else 1.4)
+		var marker_visible: bool = _is_marker_visible(
+			center,
+			cluster_radius_screen,
+			marker_radius_screen
+		)
 
 		_configure_circle_line(
 			_extent_lines[index],
@@ -40,7 +51,7 @@ func update_marker_payload(marker_payload: Dictionary, canvas_scale: float) -> v
 			cluster_radius_screen,
 			cluster_color,
 			extent_width,
-			WorldRenderer.should_draw_cluster_extent_ring(cluster_radius_screen, viewport_diagonal)
+			marker_visible and WorldRenderer.should_draw_cluster_extent_ring(cluster_radius_screen, viewport_diagonal)
 		)
 		_configure_circle_line(
 			_marker_rings[index],
@@ -48,7 +59,7 @@ func update_marker_payload(marker_payload: Dictionary, canvas_scale: float) -> v
 			marker_radius_screen,
 			cluster_color,
 			marker_width,
-			true
+			marker_visible
 		)
 		_configure_segment_line(
 			_cross_horizontal[index],
@@ -56,7 +67,7 @@ func update_marker_payload(marker_payload: Dictionary, canvas_scale: float) -> v
 			center + Vector2(cross_half_extent, 0.0),
 			cluster_color,
 			cross_width,
-			true
+			marker_visible
 		)
 		_configure_segment_line(
 			_cross_vertical[index],
@@ -64,7 +75,7 @@ func update_marker_payload(marker_payload: Dictionary, canvas_scale: float) -> v
 			center + Vector2(0.0, cross_half_extent),
 			cluster_color,
 			cross_width,
-			true
+			marker_visible
 		)
 	queue_redraw()
 
@@ -84,6 +95,12 @@ func _draw() -> void:
 			is_active
 		)
 		var marker_radius_screen: float = BodyRenderer.sim_dist_to_screen(marker_radius_world)
+		if not _is_marker_visible(
+			center,
+			BodyRenderer.sim_dist_to_screen(float(marker.get("radius", 0.0))),
+			marker_radius_screen
+		):
+			continue
 		draw_circle(
 			center,
 			marker_radius_screen,
@@ -155,11 +172,33 @@ func _configure_segment_line(
 	line.points = PackedVector2Array([from_point, to_point])
 
 func _circle_points(center: Vector2, radius: float, segments: int = 96) -> PackedVector2Array:
+	var template: PackedVector2Array = _unit_circle_template(segments)
 	var points := PackedVector2Array()
-	for index in range(segments + 1):
-		var angle: float = (float(index) / float(segments)) * TAU
-		points.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	points.resize(template.size())
+	for index in range(template.size()):
+		points[index] = center + template[index] * radius
 	return points
 
 func _screen_line_width(base_width: float) -> float:
 	return maxf(base_width / _canvas_scale, 1.5 / _canvas_scale)
+
+func _unit_circle_template(segments: int) -> PackedVector2Array:
+	var cached: PackedVector2Array = _unit_circle_template_cache.get(segments, PackedVector2Array())
+	if not cached.is_empty():
+		return cached
+	var template := PackedVector2Array()
+	for index in range(segments + 1):
+		var angle: float = (float(index) / float(segments)) * TAU
+		template.append(Vector2(cos(angle), sin(angle)))
+	_unit_circle_template_cache[segments] = template
+	return template
+
+func _is_marker_visible(center: Vector2, cluster_radius_screen: float, marker_radius_screen: float) -> bool:
+	if not _visible_canvas_rect.has_area():
+		return true
+	var extent: float = maxf(cluster_radius_screen, marker_radius_screen) + (24.0 / _canvas_scale)
+	var marker_rect := Rect2(
+		center - Vector2.ONE * extent,
+		Vector2.ONE * extent * 2.0
+	)
+	return _visible_canvas_rect.intersects(marker_rect)

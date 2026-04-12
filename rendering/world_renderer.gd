@@ -8,6 +8,13 @@ extends Node2D
 const GRAVITY_DEBUG_RENDERER_SCRIPT := preload("res://rendering/gravity_debug_renderer.gd")
 const CLUSTER_PREVIEW_RENDERER_SCRIPT := preload("res://rendering/cluster_preview_renderer.gd")
 const CLUSTER_MARKER_RENDERER_SCRIPT := preload("res://rendering/cluster_marker_renderer.gd")
+const REMOTE_CLUSTER_MARKER_CULL_MARGIN_PX: float = 96.0
+const REMOTE_CLUSTER_PREVIEW_CULL_MARGIN_PX: float = 96.0
+const PREVIEW_LOD_MARKER_ONLY: int = 0
+const PREVIEW_LOD_BH_AND_STARS: int = 1
+const PREVIEW_LOD_FULL: int = 2
+const PREVIEW_LOD_BH_AND_STARS_MAX_SCREEN_RADIUS: float = 32.0
+const PREVIEW_LOD_FULL_MIN_SCREEN_RADIUS: float = 72.0
 
 @onready var _zone_layer: Node2D = $ZoneLayer
 @onready var _gravity_debug_layer: Node2D = $GravityDebugLayer
@@ -89,14 +96,27 @@ func render_frame(world: SimWorld) -> void:
 		_trail_renderer.update_all(world.bodies)
 	if _debris_renderer != null:
 		_debris_renderer.update_all(world.debris_fields)
-	_cached_remote_preview_specs = build_remote_cluster_preview_specs(_galaxy_state, _active_cluster_session)
-	_cached_marker_payload = build_registered_cluster_debug_markers(_galaxy_state, _active_cluster_session)
+	var canvas_scale: float = _debug_marker_canvas_scale()
+	var visible_canvas_rect: Rect2 = _visible_canvas_rect()
+	_cached_remote_preview_specs = build_remote_cluster_preview_specs(
+		_galaxy_state,
+		_active_cluster_session,
+		visible_canvas_rect,
+		canvas_scale
+	)
+	_cached_marker_payload = build_registered_cluster_debug_markers(
+		_galaxy_state,
+		_active_cluster_session,
+		visible_canvas_rect,
+		canvas_scale
+	)
 	if _preview_renderer != null:
-		_preview_renderer.update_preview_specs(_cached_remote_preview_specs, _debug_marker_canvas_scale())
+		_preview_renderer.update_preview_specs(_cached_remote_preview_specs, canvas_scale, visible_canvas_rect)
 	if _cluster_marker_renderer != null:
 		_cluster_marker_renderer.update_marker_payload(
 			_cached_marker_payload,
-			_debug_marker_canvas_scale()
+			canvas_scale,
+			visible_canvas_rect
 		)
 	if _debug_overlays_visible:
 		queue_redraw()
@@ -185,9 +205,34 @@ func pick_remote_cluster_at_canvas_position(canvas_position: Vector2) -> Diction
 		_debug_marker_canvas_scale()
 	)
 
+func _visible_canvas_rect() -> Rect2:
+	var viewport := get_viewport()
+	if viewport == null:
+		return Rect2()
+	var visible_rect: Rect2 = viewport.get_visible_rect()
+	var inverse_canvas: Transform2D = viewport.get_canvas_transform().affine_inverse()
+	var corners := [
+		inverse_canvas * visible_rect.position,
+		inverse_canvas * Vector2(visible_rect.position.x + visible_rect.size.x, visible_rect.position.y),
+		inverse_canvas * Vector2(visible_rect.position.x, visible_rect.position.y + visible_rect.size.y),
+		inverse_canvas * (visible_rect.position + visible_rect.size),
+	]
+	var min_x: float = corners[0].x
+	var max_x: float = corners[0].x
+	var min_y: float = corners[0].y
+	var max_y: float = corners[0].y
+	for corner in corners:
+		min_x = minf(min_x, corner.x)
+		max_x = maxf(max_x, corner.x)
+		min_y = minf(min_y, corner.y)
+		max_y = maxf(max_y, corner.y)
+	return Rect2(Vector2(min_x, min_y), Vector2(max_x - min_x, max_y - min_y))
+
 static func build_registered_cluster_debug_markers(
 		galaxy_state: GalaxyState,
-		active_cluster_session: ActiveClusterSession) -> Dictionary:
+		active_cluster_session: ActiveClusterSession,
+		visible_canvas_rect: Rect2 = Rect2(),
+		canvas_scale: float = 1.0) -> Dictionary:
 	var markers: Array = []
 	var nearest_remote_cluster_id: int = -1
 	var nearest_remote_distance: float = INF
@@ -195,12 +240,30 @@ static func build_registered_cluster_debug_markers(
 		return {
 			"markers": markers,
 			"nearest_remote_cluster_id": nearest_remote_cluster_id,
-		}
+	}
+	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var marker_cull_margin: float = REMOTE_CLUSTER_MARKER_CULL_MARGIN_PX / safe_canvas_scale
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state == null:
 			continue
 		var is_active: bool = cluster_state.cluster_id == active_cluster_session.cluster_id
 		var local_center: Vector2 = active_cluster_session.to_local(cluster_state.global_center)
+		var marker_center: Vector2 = BodyRenderer.sim_to_screen(local_center)
+		var marker_radius_world: float = cluster_debug_marker_world_radius(
+			cluster_state.get_authoritative_radius(),
+			safe_canvas_scale,
+			is_active
+		)
+		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(cluster_state.get_authoritative_radius())
+		var marker_radius_canvas: float = BodyRenderer.sim_dist_to_screen(marker_radius_world)
+		var cull_radius: float = maxf(cluster_radius_canvas, marker_radius_canvas)
+		if not _is_cluster_visible_in_canvas_rect(
+			marker_center,
+			cull_radius,
+			visible_canvas_rect,
+			marker_cull_margin
+		):
+			continue
 		markers.append({
 			"cluster_id": cluster_state.cluster_id,
 			"local_center": local_center,
@@ -230,22 +293,48 @@ static func build_registered_cluster_debug_markers(
 
 static func build_remote_cluster_preview_specs(
 		galaxy_state: GalaxyState,
-		active_cluster_session: ActiveClusterSession) -> Array:
+		active_cluster_session: ActiveClusterSession,
+		visible_canvas_rect: Rect2 = Rect2(),
+		canvas_scale: float = 1.0) -> Array:
 	var preview_specs: Array = []
 	if galaxy_state == null or active_cluster_session == null:
 		return preview_specs
+	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var preview_cull_margin: float = REMOTE_CLUSTER_PREVIEW_CULL_MARGIN_PX / safe_canvas_scale
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state == null or cluster_state.cluster_id == active_cluster_session.cluster_id:
 			continue
-		var source_specs: Array = _remote_cluster_preview_source_specs(cluster_state)
+		var local_center: Vector2 = active_cluster_session.to_local(cluster_state.global_center)
+		var cluster_center_canvas: Vector2 = BodyRenderer.sim_to_screen(local_center)
+		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(cluster_state.get_authoritative_radius())
+		if not _is_cluster_visible_in_canvas_rect(
+			cluster_center_canvas,
+			cluster_radius_canvas,
+			visible_canvas_rect,
+			preview_cull_margin
+		):
+			continue
+		var cluster_screen_radius: float = cluster_radius_canvas * safe_canvas_scale
+		var preview_lod: int = cluster_preview_lod_for_screen_radius(cluster_screen_radius)
+		if preview_lod == PREVIEW_LOD_MARKER_ONLY:
+			continue
+		var source_specs: Array = _remote_cluster_preview_source_specs(cluster_state, preview_lod)
 		for source_spec in source_specs:
 			var source_local_position: Vector2 = Vector2(source_spec.get("local_position", Vector2.ZERO))
 			var source_global_position: Vector2 = cluster_state.global_center + source_local_position
 			var local_position: Vector2 = active_cluster_session.to_local(source_global_position)
-			var preview_spec: Dictionary = source_spec.duplicate(true)
-			preview_spec["local_position"] = local_position
-			preview_spec["cluster_id"] = cluster_state.cluster_id
-			preview_spec["state"] = activation_state_debug_name(cluster_state.activation_state)
+			var preview_spec: Dictionary = {
+				"object_id": str(source_spec.get("object_id", "")),
+				"kind": str(source_spec.get("kind", "")),
+				"body_type": int(source_spec.get("body_type", SimBody.BodyType.ASTEROID)),
+				"material_type": int(source_spec.get("material_type", SimBody.MaterialType.MIXED)),
+				"local_position": local_position,
+				"radius": float(source_spec.get("radius", 1.0)),
+				"seed": int(source_spec.get("seed", 0)),
+				"cluster_id": cluster_state.cluster_id,
+				"state": activation_state_debug_name(cluster_state.activation_state),
+				"preview_lod": preview_lod,
+			}
 			preview_specs.append(preview_spec)
 	return preview_specs
 
@@ -371,7 +460,9 @@ static func _remote_cluster_pick_result(
 		"state": activation_state_debug_name(cluster_state.activation_state),
 	}
 
-static func _remote_cluster_preview_source_specs(cluster_state: ClusterState) -> Array:
+static func _remote_cluster_preview_source_specs(
+		cluster_state: ClusterState,
+		preview_lod: int = PREVIEW_LOD_FULL) -> Array:
 	var preview_specs: Array = []
 	if cluster_state == null:
 		return preview_specs
@@ -388,16 +479,17 @@ static func _remote_cluster_preview_source_specs(cluster_state: ClusterState) ->
 				SimBody.BodyType.PLANET,
 			]:
 				continue
-			preview_specs.append({
-				"object_id": object_state.object_id,
-				"kind": object_state.kind,
-				"body_type": body_type,
-				"material_type": int(object_state.descriptor.get("material_type", SimBody.MaterialType.MIXED)),
-				"local_position": object_state.local_position,
-				"radius": float(object_state.descriptor.get("radius", 1.0)),
-				"seed": int(object_state.seed),
-				"descriptor": object_state.descriptor.duplicate(true),
-			})
+			if not _preview_body_type_allowed_in_lod(body_type, preview_lod):
+				continue
+			preview_specs.append(_make_preview_source_spec(
+				object_state.object_id,
+				object_state.kind,
+				body_type,
+				int(object_state.descriptor.get("material_type", SimBody.MaterialType.MIXED)),
+				object_state.local_position,
+				float(object_state.descriptor.get("radius", 1.0)),
+				int(object_state.seed)
+			))
 		# step_simplified_cluster() sets has_runtime_snapshot=true after the first BH-only
 		# step, before the cluster has ever been ACTIVE. In that case the registry only
 		# holds BHs; supplement with blueprint preview specs for stars/planets so distant
@@ -414,17 +506,81 @@ static func _remote_cluster_preview_source_specs(cluster_state: ClusterState) ->
 					continue  # BH already present from registry with live positions
 				if bt not in [SimBody.BodyType.STAR, SimBody.BodyType.PLANET]:
 					continue
-				preview_specs.append(source_spec.duplicate(true))
+				if not _preview_body_type_allowed_in_lod(bt, preview_lod):
+					continue
+				preview_specs.append(_copy_preview_source_spec(source_spec))
 		return preview_specs
 	for source_spec in cluster_state.cluster_blueprint.get("preview_object_specs", []):
-		if int(source_spec.get("body_type", -1)) not in [
+		var body_type: int = int(source_spec.get("body_type", -1))
+		if body_type not in [
 			SimBody.BodyType.BLACK_HOLE,
 			SimBody.BodyType.STAR,
 			SimBody.BodyType.PLANET,
 		]:
 			continue
-		preview_specs.append(source_spec.duplicate(true))
+		if not _preview_body_type_allowed_in_lod(body_type, preview_lod):
+			continue
+		preview_specs.append(_copy_preview_source_spec(source_spec))
 	return preview_specs
+
+static func cluster_preview_lod_for_screen_radius(cluster_screen_radius: float) -> int:
+	if cluster_screen_radius < PREVIEW_LOD_BH_AND_STARS_MAX_SCREEN_RADIUS:
+		return PREVIEW_LOD_MARKER_ONLY
+	if cluster_screen_radius < PREVIEW_LOD_FULL_MIN_SCREEN_RADIUS:
+		return PREVIEW_LOD_BH_AND_STARS
+	return PREVIEW_LOD_FULL
+
+static func _preview_body_type_allowed_in_lod(body_type: int, preview_lod: int) -> bool:
+	if body_type == SimBody.BodyType.BLACK_HOLE:
+		return true
+	if preview_lod == PREVIEW_LOD_FULL:
+		return body_type in [SimBody.BodyType.STAR, SimBody.BodyType.PLANET]
+	if preview_lod == PREVIEW_LOD_BH_AND_STARS:
+		return body_type == SimBody.BodyType.STAR
+	return false
+
+static func _copy_preview_source_spec(source_spec: Dictionary) -> Dictionary:
+	return _make_preview_source_spec(
+		str(source_spec.get("object_id", "")),
+		str(source_spec.get("kind", "")),
+		int(source_spec.get("body_type", SimBody.BodyType.ASTEROID)),
+		int(source_spec.get("material_type", SimBody.MaterialType.MIXED)),
+		Vector2(source_spec.get("local_position", Vector2.ZERO)),
+		float(source_spec.get("radius", 1.0)),
+		int(source_spec.get("seed", 0))
+	)
+
+static func _make_preview_source_spec(
+		object_id: String,
+		kind: String,
+		body_type: int,
+		material_type: int,
+		local_position: Vector2,
+		radius: float,
+		seed: int) -> Dictionary:
+	return {
+		"object_id": object_id,
+		"kind": kind,
+		"body_type": body_type,
+		"material_type": material_type,
+		"local_position": local_position,
+		"radius": radius,
+		"seed": seed,
+	}
+
+static func _is_cluster_visible_in_canvas_rect(
+		local_center: Vector2,
+		radius: float,
+		visible_canvas_rect: Rect2,
+		extra_margin: float = 0.0) -> bool:
+	if not visible_canvas_rect.has_area():
+		return true
+	var extent: float = maxf(radius, 0.0) + maxf(extra_margin, 0.0)
+	var cluster_rect := Rect2(
+		local_center - Vector2.ONE * extent,
+		Vector2.ONE * extent * 2.0
+	)
+	return visible_canvas_rect.intersects(cluster_rect)
 
 static func cluster_debug_marker_world_radius(
 		cluster_radius: float,

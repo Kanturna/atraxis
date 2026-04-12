@@ -4,15 +4,20 @@ extends Node2D
 
 var _preview_specs: Array = []
 var _canvas_scale: float = 1.0
+var _visible_canvas_rect: Rect2 = Rect2()
 
 ## Minimum on-screen pixel sizes for preview bodies (matches marker-renderer convention).
 const MIN_PREVIEW_SCREEN_PX_STAR: float = 4.0
 const MIN_PREVIEW_SCREEN_PX_BH: float = 3.5
 const MIN_PREVIEW_SCREEN_PX_PLANET: float = 2.5
 
-func update_preview_specs(preview_specs: Array, canvas_scale: float = 1.0) -> void:
+func update_preview_specs(
+		preview_specs: Array,
+		canvas_scale: float = 1.0,
+		visible_canvas_rect: Rect2 = Rect2()) -> void:
 	_preview_specs = preview_specs
 	_canvas_scale = maxf(canvas_scale, 0.001)
+	_visible_canvas_rect = visible_canvas_rect
 	queue_redraw()
 
 func _draw() -> void:
@@ -27,6 +32,8 @@ func _draw() -> void:
 			BodyRenderer.screen_radius_for_body_traits(body_type, body_radius),
 			min_px
 		)
+		if not _is_preview_body_visible(screen_position, screen_radius):
+			continue
 		var color: Color = _preview_color(spec)
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
@@ -92,3 +99,13 @@ static func _min_preview_screen_px(body_type: int) -> float:
 			return MIN_PREVIEW_SCREEN_PX_BH
 		_:
 			return MIN_PREVIEW_SCREEN_PX_PLANET
+
+func _is_preview_body_visible(screen_position: Vector2, screen_radius: float) -> bool:
+	if not _visible_canvas_rect.has_area():
+		return true
+	var extent: float = screen_radius + (12.0 / _canvas_scale)
+	var preview_rect := Rect2(
+		screen_position - Vector2.ONE * extent,
+		Vector2.ONE * extent * 2.0
+	)
+	return _visible_canvas_rect.intersects(preview_rect)

@@ -202,6 +202,43 @@ func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic
 		"simplified stepping should keep remote objects marked as simplified"
 	)
 
+func test_simplified_cluster_step_budget_only_advances_nearest_remote_clusters() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_runtime_snapshot_cluster(0, Vector2.ZERO)
+	galaxy_state.add_cluster(active_cluster)
+	for cluster_index in range(1, 7):
+		var remote_cluster: ClusterState = _make_manual_runtime_snapshot_cluster(
+			cluster_index,
+			Vector2(float(cluster_index) * 2_000.0, 0.0)
+		)
+		remote_cluster.mark_simplified(0.0)
+		galaxy_state.add_cluster(remote_cluster)
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, active_cluster.cluster_id)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var stepped_cluster_ids: Array = []
+	var frozen_cluster_ids: Array = []
+	for cluster_state in galaxy_state.get_clusters():
+		if cluster_state.cluster_id == active_cluster.cluster_id:
+			continue
+		if is_equal_approx(cluster_state.simulated_time, SimConstants.FIXED_DT):
+			stepped_cluster_ids.append(cluster_state.cluster_id)
+		else:
+			frozen_cluster_ids.append(cluster_state.cluster_id)
+
+	assert_eq(
+		stepped_cluster_ids,
+		[1, 2, 3, 4],
+		"runtime should only step the nearest simplified remote clusters inside the fixed per-tick budget"
+	)
+	assert_eq(
+		frozen_cluster_ids,
+		[5, 6],
+		"remote simplified clusters beyond the step budget should stay frozen for this tick"
+	)
+
 func test_focus_relevance_does_not_switch_active_cluster_without_explicit_request() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -1209,6 +1246,76 @@ func _make_manual_cluster(cluster_id: int, global_center: Vector2, radius: float
 	cluster_state.classification = "test_cluster"
 	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
 	return cluster_state
+
+func _make_manual_runtime_snapshot_cluster(cluster_id: int, global_center: Vector2) -> ClusterState:
+	var cluster_state: ClusterState = _make_manual_cluster(cluster_id, global_center, 100.0)
+	var black_hole_object_id: String = "cluster_%d:black_hole_0" % cluster_id
+	cluster_state.cluster_blueprint["primary_black_hole_object_id"] = black_hole_object_id
+	cluster_state.simulation_profile["has_runtime_snapshot"] = true
+	cluster_state.register_object(_make_manual_cluster_object_state(
+		black_hole_object_id,
+		"black_hole",
+		Vector2.ZERO,
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.BLACK_HOLE,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"influence_level": SimBody.InfluenceLevel.A,
+			"mass": SimConstants.BLACK_HOLE_MASS,
+			"radius": SimConstants.BLACK_HOLE_RADIUS,
+			"temperature": 0.0,
+			"kinematic": false,
+			"scripted_orbit_enabled": false,
+			"orbit_binding_state": SimBody.OrbitBindingState.FREE_DYNAMIC,
+			"orbit_radius": 0.0,
+			"orbit_angle": 0.0,
+			"orbit_angular_speed": 0.0,
+			"debris_mass": 0.0,
+			"sleeping": false,
+			"active": true,
+			"parent_object_id": "",
+		}
+	))
+	cluster_state.register_object(_make_manual_cluster_object_state(
+		"cluster_%d:star_0" % cluster_id,
+		"star",
+		Vector2(400.0, 0.0),
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.STAR,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"influence_level": SimBody.InfluenceLevel.A,
+			"mass": SimConstants.STAR_MASS,
+			"radius": SimConstants.STAR_RADIUS,
+			"temperature": 5000.0,
+			"kinematic": false,
+			"scripted_orbit_enabled": false,
+			"orbit_binding_state": SimBody.OrbitBindingState.FREE_DYNAMIC,
+			"orbit_radius": 0.0,
+			"orbit_angle": 0.0,
+			"orbit_angular_speed": 0.0,
+			"debris_mass": 0.0,
+			"sleeping": false,
+			"active": true,
+			"parent_object_id": "",
+		}
+	))
+	return cluster_state
+
+func _make_manual_cluster_object_state(
+		object_id: String,
+		kind: String,
+		local_position: Vector2,
+		local_velocity: Vector2,
+		descriptor: Dictionary) -> ClusterObjectState:
+	var object_state := ClusterObjectState.new()
+	object_state.object_id = object_id
+	object_state.kind = kind
+	object_state.residency_state = ObjectResidencyState.State.SIMPLIFIED
+	object_state.local_position = local_position
+	object_state.local_velocity = local_velocity
+	object_state.descriptor = descriptor.duplicate(true)
+	return object_state
 
 func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: int) -> int:
 	for cluster_state in galaxy_state.get_clusters():

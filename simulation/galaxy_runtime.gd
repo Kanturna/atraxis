@@ -7,6 +7,7 @@ extends RefCounted
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
 const WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
+const MAX_SIMPLIFIED_CLUSTERS_STEPPED_PER_TICK: int = 4
 
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
@@ -48,7 +49,6 @@ func step(dt: float) -> void:
 	_discover_focus_sector_neighborhood()
 	_apply_focus_relevance_policy()
 	_flush_pending_activation_request()
-	_apply_focus_relevance_policy()
 	WorldBuilder.step_transit_objects(galaxy_state, dt)
 	_settle_arrived_transit_objects_into_inactive_clusters()
 	if active_cluster_session != null and active_cluster_session.sim_world != null:
@@ -185,15 +185,44 @@ func _activate_cluster_internal(target_cluster_id: int) -> void:
 	galaxy_state.sync_world_entity_bindings()
 
 func _step_simplified_clusters(dt: float) -> void:
-	if galaxy_state == null:
+	if galaxy_state == null or MAX_SIMPLIFIED_CLUSTERS_STEPPED_PER_TICK <= 0:
 		return
+	var context: Dictionary = _resolve_focus_context()
 	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
+	var step_candidates: Array = _collect_nearest_simplified_cluster_steps(
+		context["focus_global_position"],
+		active_cluster_id,
+		MAX_SIMPLIFIED_CLUSTERS_STEPPED_PER_TICK
+	)
+	for entry in step_candidates:
+		var cluster_state: ClusterState = entry.get("cluster_state", null)
+		if cluster_state == null:
+			continue
+		WorldBuilder.step_simplified_cluster(cluster_state, dt)
+
+func _collect_nearest_simplified_cluster_steps(
+		target_focus_global_position: Vector2,
+		active_cluster_id: int,
+		limit: int) -> Array:
+	var ranked_candidates: Array = []
+	if galaxy_state == null or limit <= 0:
+		return ranked_candidates
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state.cluster_id == active_cluster_id:
 			continue
 		if cluster_state.activation_state != ClusterActivationState.State.SIMPLIFIED:
 			continue
-		WorldBuilder.step_simplified_cluster(cluster_state, dt)
+		var distance_sq: float = cluster_state.global_center.distance_squared_to(target_focus_global_position)
+		var insert_index: int = ranked_candidates.size()
+		while insert_index > 0 and distance_sq < float(ranked_candidates[insert_index - 1]["distance_sq"]):
+			insert_index -= 1
+		ranked_candidates.insert(insert_index, {
+			"cluster_state": cluster_state,
+			"distance_sq": distance_sq,
+		})
+		if ranked_candidates.size() > limit:
+			ranked_candidates.pop_back()
+	return ranked_candidates
 
 func _flush_pending_activation_request() -> void:
 	var target_cluster_id: int = get_pending_activation_cluster_id()

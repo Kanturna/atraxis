@@ -190,3 +190,115 @@ func test_cluster_extent_ring_guard_skips_tiny_and_pathological_radii() -> void:
 		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(240.0, 2_000.0),
 		"mid-scale extent rings should remain visible"
 	)
+
+func test_offscreen_cluster_payloads_are_culled_before_rendering() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var visible_remote_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(1_000.0, 0.0), 100.0)
+	var offscreen_remote_cluster: ClusterState = _make_manual_preview_cluster(2, Vector2(6_000.0, 0.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(visible_remote_cluster)
+	galaxy_state.add_cluster(offscreen_remote_cluster)
+
+	var session := ActiveClusterSession.new()
+	session.bind(galaxy_state, active_cluster, SimWorld.new())
+	visible_remote_cluster.mark_simplified(0.0)
+	var visible_canvas_rect := Rect2(Vector2(-600.0, -400.0), Vector2(1_200.0, 800.0))
+
+	var marker_payload: Dictionary = WORLD_RENDERER_SCRIPT.build_registered_cluster_debug_markers(
+		galaxy_state,
+		session,
+		visible_canvas_rect,
+		1.0
+	)
+	var preview_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		session,
+		visible_canvas_rect,
+		1.0
+	)
+	var marker_cluster_ids: Array = marker_payload.get("markers", []).map(func(marker): return int(marker.get("cluster_id", -1)))
+	var preview_cluster_ids: Array = preview_specs.map(func(spec): return int(spec.get("cluster_id", -1)))
+
+	assert_true(marker_cluster_ids.has(0), "the active cluster marker should remain when it is on screen")
+	assert_true(marker_cluster_ids.has(1), "screen-relevant remote clusters should keep their debug marker payload")
+	assert_false(marker_cluster_ids.has(2), "offscreen remote clusters should be culled out of the marker payload")
+	assert_true(preview_cluster_ids.has(1), "screen-relevant remote clusters should still build preview specs")
+	assert_false(preview_cluster_ids.has(2), "offscreen remote clusters should not build preview specs")
+
+func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var remote_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(1_000.0, 0.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(remote_cluster)
+
+	var session := ActiveClusterSession.new()
+	session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var visible_canvas_rect := Rect2(Vector2(-4_000.0, -4_000.0), Vector2(8_000.0, 8_000.0))
+
+	var far_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		session,
+		visible_canvas_rect,
+		0.25
+	)
+	var mid_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		session,
+		visible_canvas_rect,
+		1.0
+	)
+	var near_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		session,
+		visible_canvas_rect,
+		2.5
+	)
+	var mid_kinds: Array = mid_specs.map(func(spec): return str(spec.get("kind", "")))
+	var near_kinds: Array = near_specs.map(func(spec): return str(spec.get("kind", "")))
+
+	assert_true(far_specs.is_empty(), "marker-only LOD should skip building remote preview specs entirely")
+	assert_true(mid_kinds.has("black_hole"), "mid-distance LOD should keep black-hole previews visible")
+	assert_true(mid_kinds.has("star"), "mid-distance LOD should keep star previews visible")
+	assert_false(mid_kinds.has("planet"), "mid-distance LOD should drop planet previews")
+	assert_true(near_kinds.has("planet"), "near LOD should restore full planet previews")
+
+func _make_manual_preview_cluster(cluster_id: int, global_center: Vector2, radius: float) -> ClusterState:
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_id = cluster_id
+	cluster_state.global_center = global_center
+	cluster_state.radius = radius
+	cluster_state.cluster_seed = 90_000 + cluster_id
+	cluster_state.classification = "test_preview_cluster"
+	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
+	cluster_state.cluster_blueprint["preview_object_specs"] = [
+		{
+			"object_id": "cluster_%d:black_hole_0" % cluster_id,
+			"kind": "black_hole",
+			"body_type": SimBody.BodyType.BLACK_HOLE,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"local_position": Vector2.ZERO,
+			"radius": SimConstants.BLACK_HOLE_RADIUS,
+			"seed": 10 + cluster_id,
+		},
+		{
+			"object_id": "cluster_%d:star_0" % cluster_id,
+			"kind": "star",
+			"body_type": SimBody.BodyType.STAR,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"local_position": Vector2(50.0, 0.0),
+			"radius": SimConstants.STAR_RADIUS,
+			"seed": 20 + cluster_id,
+		},
+		{
+			"object_id": "cluster_%d:star_0:planet_0" % cluster_id,
+			"kind": "planet",
+			"body_type": SimBody.BodyType.PLANET,
+			"material_type": SimBody.MaterialType.ROCKY,
+			"local_position": Vector2(82.0, 0.0),
+			"radius": SimConstants.PLANET_RADIUS_MIN,
+			"seed": 30 + cluster_id,
+		},
+	]
+	return cluster_state
