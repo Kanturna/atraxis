@@ -2,6 +2,7 @@ extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
+const WORLDGEN_MAPPING_SCRIPT := preload("res://simulation/galaxy_worldgen_mapping.gd")
 
 func test_public_worldgen_builder_is_deterministic_for_same_seed() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -346,6 +347,169 @@ func test_worldgen_archetypes_produce_distinct_region_characteristics() -> void:
 	assert_gt(scrap_region.scrap_potential, relic_region.scrap_potential, "scrap-rich remnants should carry more scrap potential than sparse relic clusters")
 	assert_gt(nursery_region.life_potential, dense_region.life_potential, "star nurseries should keep higher life potential than dense BH knots")
 
+func test_worldgen_content_profiles_keep_a_fixed_minimal_contract_for_all_cluster_archetypes() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 910
+	config.cluster_density = 0.92
+	config.void_strength = 0.22
+	config.bh_richness = 0.55
+	config.star_richness = 0.58
+	config.rare_zone_frequency = 1.0
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidates_by_archetype: Dictionary = _find_candidate_descriptors_for_all_archetypes(worldgen, config.seed, 40)
+	var required_keys := [
+		"content_archetype",
+		"spawn_priority",
+		"star_count",
+		"planets_per_star",
+		"disturbance_body_count",
+		"star_inner_orbit_au",
+		"star_outer_orbit_au",
+		"star_mass_scale_min",
+		"star_mass_scale_max",
+		"planet_temperature_offset",
+		"planet_material_profile",
+		"disturbance_eccentricity_min",
+		"disturbance_eccentricity_max",
+		"disturbance_material_profile",
+		"scrap_marker_count",
+		"scrap_marker_layout",
+	]
+
+	assert_eq(candidates_by_archetype.size(), 5, "the candidate scan should find at least one cluster candidate for each V1 archetype")
+
+	for archetype in candidates_by_archetype.keys():
+		var candidate_descriptor = candidates_by_archetype[archetype]
+		var content_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(
+			worldgen_config,
+			candidate_descriptor
+		)
+		for key in required_keys:
+			assert_true(content_profile.has(key), "content profiles should always expose the fixed minimal contract key %s" % key)
+		for material_key in ["rocky", "icy", "metallic", "mixed"]:
+			assert_true(
+				content_profile["planet_material_profile"].has(material_key),
+				"planet material profiles should always expose the explicit material weight %s" % material_key
+			)
+			assert_true(
+				content_profile["disturbance_material_profile"].has(material_key),
+				"disturbance material profiles should always expose the explicit material weight %s" % material_key
+			)
+
+func test_content_profiles_and_scrap_markers_are_deterministic_for_same_candidate() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1001
+	config.cluster_density = 0.90
+	config.void_strength = 0.16
+	config.bh_richness = 0.58
+	config.star_richness = 0.62
+	config.rare_zone_frequency = 1.0
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidates_by_archetype: Dictionary = _find_candidate_descriptors_for_all_archetypes(worldgen, config.seed, 40)
+	var candidate_descriptor = candidates_by_archetype["scrap_rich_remnant"]
+	var profile_a: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(worldgen_config, candidate_descriptor)
+	var profile_b: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(worldgen_config, candidate_descriptor)
+	var markers_a: Array = WORLDGEN_MAPPING_SCRIPT.build_scrap_markers(candidate_descriptor, profile_a)
+	var markers_b: Array = WORLDGEN_MAPPING_SCRIPT.build_scrap_markers(candidate_descriptor, profile_b)
+
+	assert_eq(profile_a, profile_b, "content profiles should rebuild identically for the same cluster candidate")
+	assert_eq(markers_a.size(), markers_b.size(), "scrap markers should rebuild with the same count for the same cluster candidate")
+	for idx in range(markers_a.size()):
+		_assert_marker_equivalent(markers_a[idx], markers_b[idx])
+
+func test_scrap_marker_layouts_follow_their_archetype_shapes() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1222
+	config.cluster_density = 0.94
+	config.void_strength = 0.18
+	config.bh_richness = 0.58
+	config.star_richness = 0.56
+	config.rare_zone_frequency = 1.0
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidates_by_archetype: Dictionary = _find_candidate_descriptors_for_all_archetypes(worldgen, config.seed, 40)
+
+	var relic_candidate = candidates_by_archetype["sparse_relic_cluster"]
+	var relic_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(worldgen_config, relic_candidate)
+	var relic_markers: Array = WORLDGEN_MAPPING_SCRIPT.build_scrap_markers(relic_candidate, relic_profile)
+	var relic_shell_markers: Array = relic_markers.filter(func(marker): return marker["kind"] == "relic_shell")
+	var relic_scrap_fields: Array = relic_markers.filter(func(marker): return marker["kind"] == "scrap_field")
+
+	assert_false(relic_shell_markers.is_empty(), "sparse relic clusters should expose shell-like relic markers")
+	for marker in relic_shell_markers:
+		assert_gt(
+			marker["local_position"].length(),
+			relic_candidate.radius * 0.70,
+			"relic_shell markers should stay near the outer cluster shell"
+		)
+	assert_false(relic_scrap_fields.is_empty(), "sparse relic clusters should still expose a smaller clustered scrap field component")
+
+	var scrap_candidate = candidates_by_archetype["scrap_rich_remnant"]
+	var scrap_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(worldgen_config, scrap_candidate)
+	var scrap_markers: Array = WORLDGEN_MAPPING_SCRIPT.build_scrap_markers(scrap_candidate, scrap_profile)
+	var wreck_band_markers: Array = scrap_markers.filter(func(marker): return marker["kind"] == "wreck_band")
+	var scrap_field_markers: Array = scrap_markers.filter(func(marker): return marker["kind"] == "scrap_field")
+
+	assert_false(wreck_band_markers.is_empty(), "scrap-rich remnants should expose wreck-band markers")
+	assert_false(scrap_field_markers.is_empty(), "scrap-rich remnants should expose clustered scrap-field markers")
+	assert_lt(
+		_max_marker_radius(wreck_band_markers) - _min_marker_radius(wreck_band_markers),
+		scrap_candidate.radius * 0.20,
+		"wreck_band markers should stay in a readable ring/band with limited radial spread"
+	)
+	assert_lt(
+		_min_pair_distance(scrap_field_markers),
+		scrap_candidate.radius * 0.20,
+		"scrap_field markers should visibly cluster into flecks instead of spreading uniformly"
+	)
+
+func test_primary_cluster_prefers_friendly_spawn_archetypes_over_hostile_candidates() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.cluster_density = 0.96
+	config.void_strength = 0.20
+	config.bh_richness = 0.58
+	config.star_richness = 0.58
+	config.rare_zone_frequency = 1.0
+
+	var matched_galaxy_state: GalaxyState = null
+	for seed in range(1, 256):
+		config.seed = seed
+		var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+		var has_hostile: bool = false
+		var has_friendly: bool = false
+		for cluster_state in galaxy_state.get_clusters():
+			var archetype: String = str(cluster_state.simulation_profile.get("content_archetype", ""))
+			if archetype in ["void", "dense_bh_knot"]:
+				has_hostile = true
+			if archetype in ["star_nursery", "scrap_rich_remnant", "sparse_relic_cluster"]:
+				has_friendly = true
+		if has_hostile and has_friendly:
+			matched_galaxy_state = galaxy_state
+			break
+
+	assert_not_null(matched_galaxy_state, "the bootstrap scan should find a seed whose origin neighborhood contains both friendly and hostile spawn archetypes")
+
+	var primary_cluster: ClusterState = matched_galaxy_state.get_primary_cluster()
+	var primary_archetype: String = str(primary_cluster.simulation_profile.get("content_archetype", ""))
+	var max_spawn_priority: int = -9_999
+	for cluster_state in matched_galaxy_state.get_clusters():
+		max_spawn_priority = maxi(max_spawn_priority, int(cluster_state.simulation_profile.get("spawn_priority", 0)))
+
+	assert_false(
+		primary_archetype in ["void", "dense_bh_knot"],
+		"the bootstrap spawn should avoid hostile start archetypes when friendlier candidates are present"
+	)
+	assert_eq(
+		int(primary_cluster.simulation_profile.get("spawn_priority", -1)),
+		max_spawn_priority,
+		"the primary cluster should be chosen from the highest-priority spawnable archetype tier first"
+	)
+
 func test_active_cluster_session_switch_marks_previous_cluster_simplified() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 28
@@ -515,14 +679,34 @@ func _assert_clusters_equivalent(cluster_a: ClusterState, cluster_b: ClusterStat
 		"cluster candidate indices should be deterministic"
 	)
 	assert_eq(
+		cluster_a.simulation_profile.get("spawn_priority", -1),
+		cluster_b.simulation_profile.get("spawn_priority", -2),
+		"cluster spawn priority should be deterministic"
+	)
+	assert_eq(
+		cluster_a.simulation_profile.get("scrap_marker_count", -1),
+		cluster_b.simulation_profile.get("scrap_marker_count", -2),
+		"cluster marker counts should be deterministic"
+	)
+	assert_eq(
 		cluster_a.get_primary_black_hole_object_id(),
 		cluster_b.get_primary_black_hole_object_id(),
 		"primary BH object selection should be deterministic"
+	)
+	assert_eq(
+		cluster_a.cluster_blueprint.get("content_profile", {}),
+		cluster_b.cluster_blueprint.get("content_profile", {}),
+		"cluster content profiles should be deterministic"
 	)
 
 	var black_holes_a: Array = cluster_a.get_objects_by_kind("black_hole")
 	var black_holes_b: Array = cluster_b.get_objects_by_kind("black_hole")
 	assert_eq(black_holes_a.size(), black_holes_b.size(), "cluster BH registry size should be deterministic")
+	var markers_a: Array = cluster_a.cluster_blueprint.get("content_markers", [])
+	var markers_b: Array = cluster_b.cluster_blueprint.get("content_markers", [])
+	assert_eq(markers_a.size(), markers_b.size(), "cluster content-marker counts should be deterministic")
+	for marker_index in range(markers_a.size()):
+		_assert_marker_equivalent(markers_a[marker_index], markers_b[marker_index])
 
 	for idx in range(black_holes_a.size()):
 		var object_a: ClusterObjectState = black_holes_a[idx]
@@ -560,6 +744,66 @@ func _find_region_descriptors_for_all_archetypes(worldgen, galaxy_seed: int, sca
 			if found.size() == 5:
 				return found
 	return found
+
+func _find_candidate_descriptors_for_all_archetypes(worldgen, galaxy_seed: int, scan_radius: int) -> Dictionary:
+	var found: Dictionary = {}
+	for y in range(-scan_radius, scan_radius + 1):
+		for x in range(-scan_radius, scan_radius + 1):
+			var region_descriptor = worldgen.describe_region(galaxy_seed, Vector2i(x, y))
+			var candidates: Array = worldgen.build_cluster_candidates(galaxy_seed, region_descriptor)
+			for candidate_descriptor in candidates:
+				var archetype: String = candidate_descriptor.region_archetype
+				if not found.has(archetype):
+					found[archetype] = candidate_descriptor
+				if found.size() == 5:
+					return found
+	return found
+
+func _assert_marker_equivalent(marker_a: Dictionary, marker_b: Dictionary) -> void:
+	assert_eq(marker_a.get("marker_id", ""), marker_b.get("marker_id", ""), "marker ids should be deterministic")
+	assert_eq(marker_a.get("kind", ""), marker_b.get("kind", ""), "marker kinds should be deterministic")
+	assert_true(
+		Vector2(marker_a.get("local_position", Vector2.ZERO)).is_equal_approx(
+			Vector2(marker_b.get("local_position", Vector2.ZERO))
+		),
+		"marker positions should be deterministic"
+	)
+	assert_almost_eq(
+		float(marker_a.get("radius", 0.0)),
+		float(marker_b.get("radius", -1.0)),
+		0.0001,
+		"marker radii should be deterministic"
+	)
+	assert_almost_eq(
+		float(marker_a.get("signal_strength", 0.0)),
+		float(marker_b.get("signal_strength", -1.0)),
+		0.0001,
+		"marker signal strengths should be deterministic"
+	)
+
+func _min_marker_radius(markers: Array) -> float:
+	var best_radius: float = INF
+	for marker in markers:
+		best_radius = minf(best_radius, Vector2(marker["local_position"]).length())
+	return best_radius
+
+func _max_marker_radius(markers: Array) -> float:
+	var best_radius: float = 0.0
+	for marker in markers:
+		best_radius = maxf(best_radius, Vector2(marker["local_position"]).length())
+	return best_radius
+
+func _min_pair_distance(markers: Array) -> float:
+	if markers.size() < 2:
+		return INF
+	var best_distance: float = INF
+	for i in range(markers.size()):
+		for j in range(i + 1, markers.size()):
+			var distance: float = Vector2(markers[i]["local_position"]).distance_to(
+				Vector2(markers[j]["local_position"])
+			)
+			best_distance = minf(best_distance, distance)
+	return best_distance
 
 func _sorted_positions_by_type(world: SimWorld, body_type: int) -> Array:
 	var positions: Array = []

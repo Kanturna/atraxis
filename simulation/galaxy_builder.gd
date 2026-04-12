@@ -75,7 +75,7 @@ static func _build_worldgen_main_universe(
 	if galaxy_state.get_cluster_count() == 0:
 		var fallback_candidate = worldgen.build_starter_fallback_candidate(galaxy_state.galaxy_seed)
 		galaxy_state.add_cluster(_build_cluster_state_from_candidate(worldgen_config, fallback_candidate))
-	var primary_cluster: ClusterState = _find_nearest_cluster_to_origin(galaxy_state)
+	var primary_cluster: ClusterState = _find_preferred_spawn_cluster(galaxy_state)
 	if primary_cluster != null:
 		galaxy_state.primary_cluster_id = primary_cluster.cluster_id
 
@@ -281,6 +281,14 @@ static func _build_cluster_state_from_candidate(
 		candidate_descriptor.bh_spacing_au,
 		worldgen_config.black_hole_mass
 	)
+	var content_profile: Dictionary = WORLDGEN_MAPPING_SCRIPT.build_cluster_content_profile(
+		worldgen_config,
+		candidate_descriptor
+	)
+	var content_markers: Array = WORLDGEN_MAPPING_SCRIPT.build_scrap_markers(
+		candidate_descriptor,
+		content_profile
+	)
 	var cluster_state := ClusterState.new()
 	cluster_state.cluster_id = candidate_descriptor.cluster_id
 	cluster_state.global_center = candidate_descriptor.global_center
@@ -308,12 +316,15 @@ static func _build_cluster_state_from_candidate(
 		"rare_zone_weight": candidate_descriptor.rare_zone_weight,
 		"scrap_potential": candidate_descriptor.scrap_potential,
 		"life_potential": candidate_descriptor.life_potential,
+		"content_profile": content_profile.duplicate(true),
+		"content_markers": content_markers.duplicate(true),
 		"descriptor": candidate_descriptor.descriptor.duplicate(true),
 	}
 	cluster_state.simulation_profile = _build_worldgen_simulation_profile(
 		worldgen_config,
 		candidate_descriptor,
-		local_black_hole_specs.size()
+		local_black_hole_specs.size(),
+		content_profile
 	)
 	cluster_state.radius = _estimate_cluster_radius(local_black_hole_specs, cluster_state.simulation_profile)
 
@@ -338,12 +349,10 @@ static func _build_cluster_state_from_candidate(
 static func _build_worldgen_simulation_profile(
 		worldgen_config,
 		candidate_descriptor,
-		local_black_hole_count: int) -> Dictionary:
-	var star_count: int = WORLDGEN_MAPPING_SCRIPT.candidate_star_count(worldgen_config, candidate_descriptor)
-	var planets_per_star: int = WORLDGEN_MAPPING_SCRIPT.candidate_planets_per_star(worldgen_config, candidate_descriptor)
-	var disturbance_body_count: int = WORLDGEN_MAPPING_SCRIPT.candidate_disturbance_count(worldgen_config, candidate_descriptor)
-	return {
-		"content_archetype": "anchor_orbital",
+		local_black_hole_count: int,
+		content_profile: Dictionary) -> Dictionary:
+	var profile := {
+		"content_archetype": str(content_profile.get("content_archetype", candidate_descriptor.region_archetype)),
 		"analytic_star_carriers": false,
 		"fixture_profile": "main_universe_worldgen",
 		"topology_role": "sector_worldgen_cluster",
@@ -352,11 +361,22 @@ static func _build_worldgen_simulation_profile(
 		"seed": candidate_descriptor.cluster_seed,
 		"black_hole_mass": worldgen_config.black_hole_mass,
 		"local_black_hole_count": local_black_hole_count,
-		"star_count": star_count,
-		"planets_per_star": planets_per_star,
-		"disturbance_body_count": disturbance_body_count,
-		"star_inner_orbit_au": worldgen_config.star_inner_orbit_au,
-		"star_outer_orbit_au": worldgen_config.star_outer_orbit_au,
+		"star_count": int(content_profile.get("star_count", 0)),
+		"planets_per_star": int(content_profile.get("planets_per_star", 0)),
+		"disturbance_body_count": int(content_profile.get("disturbance_body_count", 0)),
+		"star_inner_orbit_au": float(content_profile.get("star_inner_orbit_au", worldgen_config.star_inner_orbit_au)),
+		"star_outer_orbit_au": float(content_profile.get("star_outer_orbit_au", worldgen_config.star_outer_orbit_au)),
+		"star_mass_scale_min": float(content_profile.get("star_mass_scale_min", 0.85)),
+		"star_mass_scale_max": float(content_profile.get("star_mass_scale_max", 1.15)),
+		"planet_temperature_offset": float(content_profile.get("planet_temperature_offset", 0.0)),
+		"planet_material_profile": content_profile.get("planet_material_profile", {}).duplicate(true),
+		"disturbance_eccentricity_min": float(content_profile.get("disturbance_eccentricity_min", 0.03)),
+		"disturbance_eccentricity_max": float(content_profile.get("disturbance_eccentricity_max", 0.18)),
+		"disturbance_material_profile": content_profile.get("disturbance_material_profile", {}).duplicate(true),
+		"spawn_priority": int(content_profile.get("spawn_priority", 0)),
+		"scrap_marker_count": int(content_profile.get("scrap_marker_count", 0)),
+		"scrap_marker_layout": str(content_profile.get("scrap_marker_layout", "none")),
+		"content_profile": content_profile.duplicate(true),
 		"spawn_radius_au": worldgen_config.spawn_radius_au,
 		"spawn_spread_au": worldgen_config.spawn_spread_au,
 		"inflow_speed_scale": worldgen_config.inflow_speed_scale,
@@ -377,6 +397,7 @@ static func _build_worldgen_simulation_profile(
 		"star_richness": worldgen_config.star_richness,
 		"rare_zone_frequency": worldgen_config.rare_zone_frequency,
 	}
+	return profile
 
 static func _build_simulation_profile(
 		config,
@@ -444,14 +465,21 @@ static func _derive_object_seed(cluster_seed: int, local_index: int) -> int:
 	var derived: int = (cluster_seed + 1) * 31_337 + (local_index + 1) * 1_003
 	return absi(derived)
 
-static func _find_nearest_cluster_to_origin(galaxy_state: GalaxyState) -> ClusterState:
+static func _find_preferred_spawn_cluster(galaxy_state: GalaxyState) -> ClusterState:
 	if galaxy_state == null:
 		return null
 	var matched_cluster: ClusterState = null
+	var best_spawn_priority: int = -9_999
 	var best_distance: float = INF
 	for cluster_state in galaxy_state.get_clusters():
+		var spawn_priority: int = int(cluster_state.simulation_profile.get("spawn_priority", 0))
 		var distance: float = cluster_state.global_center.length()
-		if distance < best_distance:
+		if matched_cluster == null \
+				or spawn_priority > best_spawn_priority \
+				or (spawn_priority == best_spawn_priority and distance < best_distance) \
+				or (spawn_priority == best_spawn_priority and is_equal_approx(distance, best_distance)
+					and cluster_state.cluster_id < matched_cluster.cluster_id):
+			best_spawn_priority = spawn_priority
 			best_distance = distance
 			matched_cluster = cluster_state
 	return matched_cluster

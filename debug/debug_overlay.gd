@@ -316,10 +316,14 @@ func _build_cluster_diagnostics_lines() -> String:
 	var sector_coord: Vector2i = sector_coord_variant if sector_coord_variant is Vector2i else Vector2i.ZERO
 	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
+	var content_markers: Array = active_cluster.cluster_blueprint.get("content_markers", []) if active_cluster != null else []
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
 		+ "Sector         %s\n" % _format_sector_coord(sector_coord)
 		+ "Archetype      %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else ""))
+		+ "Content        %s\n" % str(profile.get("content_archetype", ""))
+		+ "Spawn priority %d\n" % int(profile.get("spawn_priority", 0))
+		+ "Markers        %d\n" % content_markers.size()
 		+ "Sectors seen   %d\n" % _galaxy_state.get_discovered_sector_count()
 		+ "Clusters total %d\n" % _galaxy_state.get_cluster_count()
 		+ "Galaxy BHs     %d\n" % _count_total_galaxy_black_holes()

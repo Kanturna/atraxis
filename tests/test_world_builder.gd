@@ -2,6 +2,7 @@ extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
+const GALAXY_WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
 
 func test_internal_reference_fixture_creates_analytic_reference_layout() -> void:
 	var world := _build_fixture_world(func(config):
@@ -116,6 +117,12 @@ func test_worldgen_active_cluster_keeps_sector_metadata_for_runtime_and_debug() 
 	assert_true(profile.get("sector_coord", null) is Vector2i, "active worldgen clusters should keep their source sector coordinate")
 	assert_true(int(profile.get("candidate_index", -1)) >= 0, "active worldgen clusters should keep their candidate index")
 	assert_true(str(profile.get("region_archetype", "")) != "", "active worldgen clusters should keep their source archetype")
+	assert_true(str(profile.get("content_archetype", "")) != "", "active worldgen clusters should keep their resolved content archetype")
+	assert_true(profile.get("content_profile", null) is Dictionary, "active worldgen clusters should keep their resolved content profile")
+	assert_true(
+		session.active_cluster_state.cluster_blueprint.get("content_markers", null) is Array,
+		"active worldgen clusters should keep their passive content markers in the blueprint"
+	)
 	assert_eq(
 		profile.get("topology_role", ""),
 		"sector_worldgen_cluster",
@@ -154,9 +161,123 @@ func test_public_worldgen_cluster_can_materialize_more_than_four_planets_per_sta
 		"planet generation should no longer be capped by the old four-slot orbit template"
 	)
 
+func test_star_nursery_materializes_richer_local_system_than_dense_bh_knot() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1888
+	config.cluster_density = 0.92
+	config.void_strength = 0.16
+	config.bh_richness = 0.55
+	config.star_richness = 0.62
+	config.rare_zone_frequency = 1.0
+
+	var nursery_world: SimWorld = _materialize_worldgen_archetype(config, "star_nursery")
+	var dense_world: SimWorld = _materialize_worldgen_archetype(config, "dense_bh_knot")
+
+	assert_gt(
+		nursery_world.count_bodies_by_type(SimBody.BodyType.STAR),
+		dense_world.count_bodies_by_type(SimBody.BodyType.STAR),
+		"star nurseries should materialize more stars than dense BH knots"
+	)
+	assert_gt(
+		nursery_world.count_bodies_by_type(SimBody.BodyType.PLANET),
+		dense_world.count_bodies_by_type(SimBody.BodyType.PLANET),
+		"star nurseries should materialize more planets than dense BH knots"
+	)
+
+func test_scrap_rich_remnant_materializes_more_disturbances_than_void() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1999
+	config.cluster_density = 0.94
+	config.void_strength = 0.18
+	config.bh_richness = 0.57
+	config.star_richness = 0.57
+	config.rare_zone_frequency = 1.0
+
+	var remnant_world: SimWorld = _materialize_worldgen_archetype(config, "scrap_rich_remnant")
+	var void_world: SimWorld = _materialize_worldgen_archetype(config, "void")
+
+	assert_gt(
+		remnant_world.count_bodies_by_type(SimBody.BodyType.ASTEROID),
+		void_world.count_bodies_by_type(SimBody.BodyType.ASTEROID),
+		"scrap-rich remnants should materialize more disturbance bodies than void clusters"
+	)
+
+func test_archetype_material_profiles_bias_materialized_body_materials() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 2111
+	config.cluster_density = 0.94
+	config.void_strength = 0.18
+	config.bh_richness = 0.58
+	config.star_richness = 0.59
+	config.rare_zone_frequency = 1.0
+
+	var remnant_world: SimWorld = _materialize_worldgen_archetype(config, "scrap_rich_remnant")
+	var nursery_world: SimWorld = _materialize_worldgen_archetype(config, "star_nursery")
+
+	var remnant_metallic_asteroids: int = _count_bodies_with_material(
+		remnant_world,
+		SimBody.BodyType.ASTEROID,
+		SimBody.MaterialType.METALLIC
+	)
+	var nursery_rocky_or_mixed_planets: int = _count_bodies_with_materials(
+		nursery_world,
+		SimBody.BodyType.PLANET,
+		[SimBody.MaterialType.ROCKY, SimBody.MaterialType.MIXED]
+	)
+
+	assert_gt(
+		remnant_metallic_asteroids,
+		0,
+		"scrap-rich remnants should bias at least some disturbance bodies toward metallic materials"
+	)
+	assert_gt(
+		nursery_rocky_or_mixed_planets,
+		0,
+		"star nurseries should bias at least some planets toward rocky or mixed materials"
+	)
+
 func _build_fixture_world(configure: Callable) -> SimWorld:
 	var config = START_CONFIG_SCRIPT.new()
 	configure.call(config)
 	var galaxy_state: GalaxyState = GALAXY_BUILDER_SCRIPT.build_fixture_from_config(config)
 	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state)
 	return session.sim_world
+
+func _materialize_worldgen_archetype(config, archetype: String) -> SimWorld:
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+	var worldgen_config = GALAXY_BUILDER_SCRIPT._build_public_worldgen_config(safe_config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidate_descriptor = _find_candidate_descriptor_for_archetype(worldgen, safe_config.seed, archetype, 40)
+	assert_not_null(candidate_descriptor, "test setup should find a %s candidate within the scan window" % archetype)
+	var cluster_state: ClusterState = GALAXY_BUILDER_SCRIPT._build_cluster_state_from_candidate(
+		worldgen_config,
+		candidate_descriptor
+	)
+	var world := SimWorld.new()
+	WorldBuilder.materialize_cluster_into_world(world, cluster_state)
+	return world
+
+func _find_candidate_descriptor_for_archetype(worldgen, galaxy_seed: int, archetype: String, scan_radius: int):
+	for y in range(-scan_radius, scan_radius + 1):
+		for x in range(-scan_radius, scan_radius + 1):
+			var region_descriptor = worldgen.describe_region(galaxy_seed, Vector2i(x, y))
+			var candidates: Array = worldgen.build_cluster_candidates(galaxy_seed, region_descriptor)
+			for candidate_descriptor in candidates:
+				if candidate_descriptor.region_archetype == archetype:
+					return candidate_descriptor
+	return null
+
+func _count_bodies_with_material(world: SimWorld, body_type: int, material_type: int) -> int:
+	var count: int = 0
+	for body in world.bodies:
+		if body.active and body.body_type == body_type and body.material_type == material_type:
+			count += 1
+	return count
+
+func _count_bodies_with_materials(world: SimWorld, body_type: int, material_types: Array) -> int:
+	var count: int = 0
+	for body in world.bodies:
+		if body.active and body.body_type == body_type and material_types.has(body.material_type):
+			count += 1
+	return count

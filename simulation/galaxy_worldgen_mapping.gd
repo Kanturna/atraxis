@@ -4,6 +4,8 @@
 class_name GalaxyWorldgenMapping
 extends RefCounted
 
+const MATERIAL_PROFILE_KEYS := ["rocky", "icy", "metallic", "mixed"]
+
 static func archetype_weights(config) -> Dictionary:
 	var density: float = clampf(config.cluster_density, 0.0, 1.0)
 	var void_strength: float = clampf(config.void_strength, 0.0, 1.0)
@@ -137,27 +139,310 @@ static func candidate_cluster_radius_au(
 	return maxf(local_radius, config.star_outer_orbit_au + 3.0)
 
 static func candidate_star_count(config, candidate_descriptor) -> int:
-	if config.legacy_generation_hints_enabled and config.legacy_star_count_hint >= 0:
-		return config.legacy_star_count_hint
-	var star_richness: float = clampf(candidate_descriptor.star_richness, 0.0, 1.0)
-	return clampi(int(round(lerpf(0.0, 5.0, star_richness))), 0, SimConstants.MAX_START_STAR_COUNT)
+	return int(build_cluster_content_profile(config, candidate_descriptor).get("star_count", 0))
 
 static func candidate_planets_per_star(config, candidate_descriptor) -> int:
-	if config.legacy_generation_hints_enabled and config.legacy_planets_per_star_hint >= 0:
-		return config.legacy_planets_per_star_hint
-	var planet_richness: float = clampf(
-		candidate_descriptor.star_richness * 0.75 + candidate_descriptor.scrap_potential * 0.20,
-		0.0,
-		1.0
-	)
-	return clampi(int(round(lerpf(0.0, 6.0, planet_richness))), 0, SimConstants.MAX_PLANETS_PER_STAR)
+	return int(build_cluster_content_profile(config, candidate_descriptor).get("planets_per_star", 0))
 
 static func candidate_disturbance_count(config, candidate_descriptor) -> int:
-	if config.legacy_generation_hints_enabled and config.legacy_disturbance_body_count_hint >= 0:
-		return config.legacy_disturbance_body_count_hint
-	var disturbance_signal: float = clampf(
-		candidate_descriptor.scrap_potential * 0.70 + candidate_descriptor.bh_richness * 0.20,
-		0.0,
-		1.0
+	return int(build_cluster_content_profile(config, candidate_descriptor).get("disturbance_body_count", 0))
+
+static func build_cluster_content_profile(config, candidate_descriptor) -> Dictionary:
+	var archetype: String = str(candidate_descriptor.region_archetype)
+	var star_signal: float = clampf(candidate_descriptor.star_richness, 0.0, 1.0)
+	var bh_signal: float = clampf(candidate_descriptor.bh_richness, 0.0, 1.0)
+	var scrap_signal: float = clampf(candidate_descriptor.scrap_potential, 0.0, 1.0)
+	var life_signal: float = clampf(candidate_descriptor.life_potential, 0.0, 1.0)
+	var base_inner: float = clampf(config.star_inner_orbit_au, 3.5, SimConstants.MAX_STAR_INNER_ORBIT_AU)
+	var base_outer: float = maxf(
+		base_inner + 0.5,
+		clampf(config.star_outer_orbit_au, 6.0, SimConstants.MAX_STAR_OUTER_ORBIT_AU)
 	)
-	return clampi(int(round(lerpf(0.0, 6.0, disturbance_signal))), 0, SimConstants.MAX_DISTURBANCE_BODY_COUNT)
+	var content_profile := {
+		"content_archetype": archetype,
+		"spawn_priority": _spawn_priority_for_archetype(archetype),
+		"star_count": 0,
+		"planets_per_star": 0,
+		"disturbance_body_count": 0,
+		"star_inner_orbit_au": base_inner,
+		"star_outer_orbit_au": base_outer,
+		"star_mass_scale_min": 0.85,
+		"star_mass_scale_max": 1.15,
+		"planet_temperature_offset": 0.0,
+		"planet_material_profile": _material_profile(0.25, 0.25, 0.25, 0.25),
+		"disturbance_eccentricity_min": 0.03,
+		"disturbance_eccentricity_max": 0.18,
+		"disturbance_material_profile": _material_profile(0.25, 0.25, 0.25, 0.25),
+		"scrap_marker_count": 0,
+		"scrap_marker_layout": "none",
+	}
+
+	match archetype:
+		"void":
+			content_profile["star_count"] = clampi(int(round(lerpf(1.0, 2.0, star_signal * 0.25))), 1, 2)
+			content_profile["planets_per_star"] = clampi(int(round(lerpf(0.0, 1.0, life_signal * 0.70))), 0, 1)
+			content_profile["disturbance_body_count"] = clampi(int(round(lerpf(0.0, 1.0, scrap_signal * 0.30))), 0, 1)
+			content_profile["star_inner_orbit_au"] = base_inner * 1.50
+			content_profile["star_outer_orbit_au"] = base_outer * 1.35
+			content_profile["star_mass_scale_min"] = 0.70
+			content_profile["star_mass_scale_max"] = 0.98
+			content_profile["planet_temperature_offset"] = -75.0
+			content_profile["planet_material_profile"] = _material_profile(0.05, 0.55, 0.05, 0.35)
+			content_profile["disturbance_eccentricity_min"] = 0.02
+			content_profile["disturbance_eccentricity_max"] = 0.10
+			content_profile["disturbance_material_profile"] = _material_profile(0.10, 0.45, 0.10, 0.35)
+		"sparse_relic_cluster":
+			content_profile["star_count"] = clampi(int(round(lerpf(1.0, 2.0, star_signal * 0.85))), 1, 2)
+			content_profile["planets_per_star"] = clampi(int(round(lerpf(1.0, 2.0, life_signal * 0.80))), 1, 2)
+			content_profile["disturbance_body_count"] = clampi(int(round(lerpf(1.0, 3.0, scrap_signal * 0.85))), 1, 3)
+			content_profile["star_inner_orbit_au"] = base_inner * 1.15
+			content_profile["star_outer_orbit_au"] = base_outer * 0.95
+			content_profile["star_mass_scale_min"] = 0.82
+			content_profile["star_mass_scale_max"] = 1.08
+			content_profile["planet_temperature_offset"] = -35.0
+			content_profile["planet_material_profile"] = _material_profile(0.10, 0.30, 0.40, 0.20)
+			content_profile["disturbance_eccentricity_min"] = 0.08
+			content_profile["disturbance_eccentricity_max"] = 0.20
+			content_profile["disturbance_material_profile"] = _material_profile(0.10, 0.20, 0.50, 0.20)
+			content_profile["scrap_marker_count"] = clampi(int(round(lerpf(4.0, 6.0, scrap_signal))), 4, 6)
+			content_profile["scrap_marker_layout"] = "relic_shell"
+		"dense_bh_knot":
+			content_profile["star_count"] = clampi(int(round(lerpf(1.0, 2.0, star_signal * 0.40))), 1, 2)
+			content_profile["planets_per_star"] = clampi(int(round(lerpf(0.0, 1.0, life_signal * 0.55))), 0, 1)
+			content_profile["disturbance_body_count"] = clampi(int(round(lerpf(1.0, 3.0, bh_signal * 0.80))), 1, 3)
+			content_profile["star_inner_orbit_au"] = base_inner * 0.85
+			content_profile["star_outer_orbit_au"] = base_outer * 0.65
+			content_profile["star_mass_scale_min"] = 0.72
+			content_profile["star_mass_scale_max"] = 1.05
+			content_profile["planet_temperature_offset"] = 95.0
+			content_profile["planet_material_profile"] = _material_profile(0.25, 0.05, 0.40, 0.30)
+			content_profile["disturbance_eccentricity_min"] = 0.18
+			content_profile["disturbance_eccentricity_max"] = 0.42
+			content_profile["disturbance_material_profile"] = _material_profile(0.30, 0.05, 0.55, 0.10)
+		"star_nursery":
+			content_profile["star_count"] = clampi(int(round(lerpf(3.0, 5.0, star_signal))), 3, 5)
+			content_profile["planets_per_star"] = clampi(int(round(lerpf(2.0, 5.0, life_signal))), 2, 5)
+			content_profile["disturbance_body_count"] = clampi(int(round(lerpf(0.0, 1.0, scrap_signal * 0.35))), 0, 1)
+			content_profile["star_inner_orbit_au"] = base_inner * 1.05
+			content_profile["star_outer_orbit_au"] = base_outer * 1.18
+			content_profile["star_mass_scale_min"] = 0.92
+			content_profile["star_mass_scale_max"] = 1.42
+			content_profile["planet_temperature_offset"] = 55.0
+			content_profile["planet_material_profile"] = _material_profile(0.45, 0.10, 0.10, 0.35)
+			content_profile["disturbance_eccentricity_min"] = 0.03
+			content_profile["disturbance_eccentricity_max"] = 0.12
+			content_profile["disturbance_material_profile"] = _material_profile(0.30, 0.20, 0.10, 0.40)
+		"scrap_rich_remnant":
+			content_profile["star_count"] = clampi(int(round(lerpf(2.0, 3.0, star_signal * 0.80))), 2, 3)
+			content_profile["planets_per_star"] = clampi(int(round(lerpf(1.0, 3.0, life_signal * 0.85))), 1, 3)
+			content_profile["disturbance_body_count"] = clampi(int(round(lerpf(3.0, 6.0, scrap_signal))), 3, 6)
+			content_profile["star_inner_orbit_au"] = base_inner * 1.02
+			content_profile["star_outer_orbit_au"] = base_outer * 1.08
+			content_profile["star_mass_scale_min"] = 0.82
+			content_profile["star_mass_scale_max"] = 1.18
+			content_profile["planet_temperature_offset"] = 10.0
+			content_profile["planet_material_profile"] = _material_profile(0.15, 0.10, 0.45, 0.30)
+			content_profile["disturbance_eccentricity_min"] = 0.16
+			content_profile["disturbance_eccentricity_max"] = 0.36
+			content_profile["disturbance_material_profile"] = _material_profile(0.10, 0.05, 0.65, 0.20)
+			content_profile["scrap_marker_count"] = clampi(int(round(lerpf(6.0, 9.0, scrap_signal))), 6, 9)
+			content_profile["scrap_marker_layout"] = "wreck_band"
+		_:
+			pass
+
+	if config.legacy_generation_hints_enabled and config.legacy_star_count_hint >= 0:
+		content_profile["star_count"] = config.legacy_star_count_hint
+	if config.legacy_generation_hints_enabled and config.legacy_planets_per_star_hint >= 0:
+		content_profile["planets_per_star"] = config.legacy_planets_per_star_hint
+	if config.legacy_generation_hints_enabled and config.legacy_disturbance_body_count_hint >= 0:
+		content_profile["disturbance_body_count"] = config.legacy_disturbance_body_count_hint
+
+	content_profile["star_inner_orbit_au"] = clampf(
+		float(content_profile["star_inner_orbit_au"]),
+		3.5,
+		SimConstants.MAX_STAR_INNER_ORBIT_AU
+	)
+	content_profile["star_outer_orbit_au"] = maxf(
+		float(content_profile["star_inner_orbit_au"]) + 0.5,
+		clampf(float(content_profile["star_outer_orbit_au"]), 6.0, SimConstants.MAX_STAR_OUTER_ORBIT_AU)
+	)
+	content_profile["star_mass_scale_min"] = clampf(float(content_profile["star_mass_scale_min"]), 0.5, 2.0)
+	content_profile["star_mass_scale_max"] = maxf(
+		float(content_profile["star_mass_scale_min"]) + 0.02,
+		clampf(float(content_profile["star_mass_scale_max"]), 0.52, 2.2)
+	)
+	content_profile["planet_temperature_offset"] = clampf(float(content_profile["planet_temperature_offset"]), -150.0, 180.0)
+	content_profile["disturbance_eccentricity_min"] = clampf(float(content_profile["disturbance_eccentricity_min"]), 0.0, 0.75)
+	content_profile["disturbance_eccentricity_max"] = maxf(
+		float(content_profile["disturbance_eccentricity_min"]) + 0.01,
+		clampf(float(content_profile["disturbance_eccentricity_max"]), 0.02, 0.85)
+	)
+	content_profile["star_count"] = clampi(int(content_profile["star_count"]), 0, SimConstants.MAX_START_STAR_COUNT)
+	content_profile["planets_per_star"] = clampi(int(content_profile["planets_per_star"]), 0, SimConstants.MAX_PLANETS_PER_STAR)
+	content_profile["disturbance_body_count"] = clampi(
+		int(content_profile["disturbance_body_count"]),
+		0,
+		SimConstants.MAX_DISTURBANCE_BODY_COUNT
+	)
+	content_profile["planet_material_profile"] = _normalize_material_profile(content_profile["planet_material_profile"])
+	content_profile["disturbance_material_profile"] = _normalize_material_profile(
+		content_profile["disturbance_material_profile"]
+	)
+	content_profile["scrap_marker_count"] = clampi(int(content_profile["scrap_marker_count"]), 0, 12)
+	content_profile["scrap_marker_layout"] = str(content_profile["scrap_marker_layout"])
+	return content_profile
+
+static func build_scrap_markers(candidate_descriptor, content_profile: Dictionary) -> Array:
+	var markers: Array = []
+	var marker_count: int = int(content_profile.get("scrap_marker_count", 0))
+	var archetype: String = str(content_profile.get("content_archetype", candidate_descriptor.region_archetype))
+	if marker_count <= 0:
+		return markers
+
+	match archetype:
+		"sparse_relic_cluster":
+			var shell_count: int = maxi(marker_count - 1, 3)
+			markers.append_array(_build_relic_shell_markers(candidate_descriptor, shell_count, 0))
+			if marker_count > shell_count:
+				markers.append_array(_build_scrap_field_markers(candidate_descriptor, marker_count - shell_count, shell_count))
+		"scrap_rich_remnant":
+			var band_count: int = maxi(3, int(ceil(float(marker_count) * 0.6)))
+			band_count = mini(band_count, marker_count)
+			markers.append_array(_build_wreck_band_markers(candidate_descriptor, content_profile, band_count, 0))
+			if marker_count > band_count:
+				markers.append_array(_build_scrap_field_markers(candidate_descriptor, marker_count - band_count, band_count))
+		_:
+			pass
+
+	markers.sort_custom(func(a, b): return str(a["marker_id"]) < str(b["marker_id"]))
+	return markers
+
+static func _spawn_priority_for_archetype(archetype: String) -> int:
+	match archetype:
+		"star_nursery":
+			return 100
+		"scrap_rich_remnant":
+			return 80
+		"sparse_relic_cluster":
+			return 60
+		"dense_bh_knot":
+			return 15
+		"void":
+			return 0
+		_:
+			return 25
+
+static func _material_profile(rocky: float, icy: float, metallic: float, mixed: float) -> Dictionary:
+	return _normalize_material_profile({
+		"rocky": rocky,
+		"icy": icy,
+		"metallic": metallic,
+		"mixed": mixed,
+	})
+
+static func _normalize_material_profile(profile: Dictionary) -> Dictionary:
+	var normalized := {
+		"rocky": maxf(float(profile.get("rocky", 0.0)), 0.0),
+		"icy": maxf(float(profile.get("icy", 0.0)), 0.0),
+		"metallic": maxf(float(profile.get("metallic", 0.0)), 0.0),
+		"mixed": maxf(float(profile.get("mixed", 0.0)), 0.0),
+	}
+	var total: float = 0.0
+	for key in MATERIAL_PROFILE_KEYS:
+		total += float(normalized[key])
+	if total <= 0.0:
+		return {
+			"rocky": 0.25,
+			"icy": 0.25,
+			"metallic": 0.25,
+			"mixed": 0.25,
+		}
+	for key in MATERIAL_PROFILE_KEYS:
+		normalized[key] = float(normalized[key]) / total
+	return normalized
+
+static func _build_relic_shell_markers(candidate_descriptor, marker_count: int, marker_offset: int) -> Array:
+	var markers: Array = []
+	var shell_rng := RandomNumberGenerator.new()
+	shell_rng.seed = candidate_descriptor.cluster_seed + 11_701
+	var shell_radius: float = candidate_descriptor.radius * 0.82
+	for marker_index in range(marker_count):
+		var angle: float = ((float(marker_index) + 0.5) / float(marker_count)) * TAU \
+			+ shell_rng.randf_range(-0.18, 0.18)
+		var radial_scale: float = shell_rng.randf_range(0.94, 1.02)
+		var position: Vector2 = Vector2(cos(angle), sin(angle)) * shell_radius * radial_scale
+		markers.append(_make_marker(
+			marker_offset + marker_index,
+			"relic_shell",
+			position,
+			candidate_descriptor.radius * 0.08,
+			shell_rng.randf_range(0.45, 0.72)
+		))
+	return markers
+
+static func _build_wreck_band_markers(candidate_descriptor, content_profile: Dictionary, marker_count: int, marker_offset: int) -> Array:
+	var markers: Array = []
+	var band_rng := RandomNumberGenerator.new()
+	band_rng.seed = candidate_descriptor.cluster_seed + 29_911
+	var orbit_mid_au: float = (
+		float(content_profile.get("star_inner_orbit_au", 0.0))
+		+ float(content_profile.get("star_outer_orbit_au", 0.0))
+	) * 0.5
+	var band_radius: float = clampf(
+		orbit_mid_au * SimConstants.AU,
+		candidate_descriptor.radius * 0.24,
+		candidate_descriptor.radius * 0.62
+	)
+	for marker_index in range(marker_count):
+		var angle: float = ((float(marker_index) + 0.35) / float(marker_count)) * TAU \
+			+ band_rng.randf_range(-0.14, 0.14)
+		var radial_scale: float = band_rng.randf_range(0.90, 1.08)
+		var position: Vector2 = Vector2(cos(angle), sin(angle)) * band_radius * radial_scale
+		markers.append(_make_marker(
+			marker_offset + marker_index,
+			"wreck_band",
+			position,
+			candidate_descriptor.radius * 0.06,
+			band_rng.randf_range(0.55, 0.95)
+		))
+	return markers
+
+static func _build_scrap_field_markers(candidate_descriptor, marker_count: int, marker_offset: int) -> Array:
+	var markers: Array = []
+	var field_rng := RandomNumberGenerator.new()
+	field_rng.seed = candidate_descriptor.cluster_seed + 47_501
+	var clump_count: int = clampi(int(ceil(float(marker_count) / 2.0)), 1, 3)
+	var clump_centers: Array = []
+	for clump_index in range(clump_count):
+		var clump_angle: float = ((float(clump_index) + 0.5) / float(clump_count)) * TAU \
+			+ field_rng.randf_range(-0.35, 0.35)
+		var clump_radius: float = field_rng.randf_range(
+			candidate_descriptor.radius * 0.22,
+			candidate_descriptor.radius * 0.52
+		)
+		clump_centers.append(Vector2(cos(clump_angle), sin(clump_angle)) * clump_radius)
+	for marker_index in range(marker_count):
+		var clump_center: Vector2 = clump_centers[marker_index % clump_centers.size()]
+		var jitter_angle: float = field_rng.randf_range(0.0, TAU)
+		var jitter_radius: float = field_rng.randf_range(
+			candidate_descriptor.radius * 0.03,
+			candidate_descriptor.radius * 0.09
+		)
+		var position: Vector2 = clump_center + Vector2(cos(jitter_angle), sin(jitter_angle)) * jitter_radius
+		markers.append(_make_marker(
+			marker_offset + marker_index,
+			"scrap_field",
+			position,
+			candidate_descriptor.radius * 0.07,
+			field_rng.randf_range(0.40, 0.80)
+		))
+	return markers
+
+static func _make_marker(marker_index: int, kind: String, local_position: Vector2, radius: float, signal_strength: float) -> Dictionary:
+	return {
+		"marker_id": "marker_%02d_%s" % [marker_index, kind],
+		"kind": kind,
+		"local_position": local_position,
+		"radius": radius,
+		"signal_strength": signal_strength,
+	}

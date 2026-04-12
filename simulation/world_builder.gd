@@ -534,13 +534,19 @@ static func _materialize_anchor_cluster(
 	for star_index in range(stars.size()):
 		var star: SimBody = stars[star_index]
 		for i in range(int(profile.get("planets_per_star", 0))):
-			var planet := _make_core_planet(star, i, int(profile.get("planets_per_star", 0)))
+			var planet := _make_core_planet(
+				star,
+				i,
+				int(profile.get("planets_per_star", 0)),
+				profile,
+				rng
+			)
 			planet.persistent_object_id = _make_child_object_id(star.persistent_object_id, "planet", i)
 			world.add_body(planet)
 	if stars.is_empty():
 		return
 	for i in range(int(profile.get("disturbance_body_count", 0))):
-		var disturbance := _make_disturbance_body(stars[i % stars.size()], rng, i)
+		var disturbance := _make_disturbance_body(stars[i % stars.size()], profile, rng, i)
 		disturbance.persistent_object_id = _make_cluster_object_id(cluster_id, "asteroid", i)
 		world.add_body(disturbance)
 
@@ -604,6 +610,11 @@ static func _build_star_specs(profile: Dictionary, rng: RandomNumberGenerator) -
 
 	var inner: float = float(profile.get("star_inner_orbit_au", 0.0)) * SimConstants.AU
 	var outer: float = float(profile.get("star_outer_orbit_au", 0.0)) * SimConstants.AU
+	var mass_scale_min: float = float(profile.get("star_mass_scale_min", 0.7))
+	var mass_scale_max: float = maxf(
+		mass_scale_min,
+		float(profile.get("star_mass_scale_max", 1.3))
+	)
 
 	var log_inner: float = log(inner)
 	var log_outer: float = log(outer)
@@ -614,7 +625,7 @@ static func _build_star_specs(profile: Dictionary, rng: RandomNumberGenerator) -
 		var log_jitter: float = rng.randf_range(-0.1, 0.1) * log_band
 		var orbit_radius: float = exp(log_center + log_jitter)
 		var phase: float = (float(i) / float(n)) * TAU + rng.randf_range(-0.25, 0.25)
-		var mass_scale: float = rng.randf_range(0.7, 1.3)
+		var mass_scale: float = rng.randf_range(mass_scale_min, mass_scale_max)
 		specs.append({
 			"orbit_radius": orbit_radius,
 			"phase": phase,
@@ -650,15 +661,14 @@ static func _place_analytic_stars(black_hole: SimBody, profile: Dictionary, rng:
 		stars.append(star)
 	return stars
 
-static func _make_core_planet(star: SimBody, index: int, total_count: int) -> SimBody:
+static func _make_core_planet(
+		star: SimBody,
+		index: int,
+		total_count: int,
+		profile: Dictionary,
+		rng: RandomNumberGenerator) -> SimBody:
 	var orbit_radii_au := [0.38, 1.0, 2.2, 3.0]
 	var masses := [800.0, 1100.0, 2800.0, 1900.0]
-	var materials := [
-		SimBody.MaterialType.ROCKY,
-		SimBody.MaterialType.ROCKY,
-		SimBody.MaterialType.ICY,
-		SimBody.MaterialType.MIXED,
-	]
 	var temperatures := [400.0, 280.0, 120.0, 90.0]
 	var angle: float = (float(index) / maxf(1.0, float(total_count))) * TAU
 	var orbit_radius_au: float = 0.0
@@ -669,7 +679,6 @@ static func _make_core_planet(star: SimBody, index: int, total_count: int) -> Si
 	if index < orbit_radii_au.size():
 		orbit_radius_au = orbit_radii_au[index]
 		mass = masses[index]
-		material = materials[index]
 		temperature = temperatures[index]
 	else:
 		var extra_index: int = index - orbit_radii_au.size() + 1
@@ -677,12 +686,10 @@ static func _make_core_planet(star: SimBody, index: int, total_count: int) -> Si
 		orbit_radius_au = orbit_radii_au[orbit_radii_au.size() - 1] + 1.35 * float(extra_index)
 		mass = lerpf(1900.0, 850.0, progression)
 		temperature = maxf(35.0, 90.0 - 12.0 * float(extra_index))
-		var outer_materials := [
-			SimBody.MaterialType.MIXED,
-			SimBody.MaterialType.ICY,
-			SimBody.MaterialType.METALLIC,
-		]
-		material = outer_materials[(extra_index - 1) % outer_materials.size()]
+	var temperature_offset: float = float(profile.get("planet_temperature_offset", 0.0))
+	var material_profile: Dictionary = profile.get("planet_material_profile", {})
+	material = _pick_material_from_profile(material_profile, rng, SimBody.MaterialType.MIXED)
+	temperature = clampf(temperature + temperature_offset, 20.0, 750.0)
 
 	return _make_planet(
 		star,
@@ -733,14 +740,57 @@ static func _make_asteroid(parent: SimBody, orbital_radius: float, angle: float,
 	_place_in_orbit(body, parent, orbital_radius, angle, eccentricity)
 	return body
 
-static func _make_disturbance_body(star: SimBody, rng: RandomNumberGenerator, index: int) -> SimBody:
+static func _make_disturbance_body(
+		star: SimBody,
+		profile: Dictionary,
+		rng: RandomNumberGenerator,
+		index: int) -> SimBody:
 	var orbital_radius: float = rng.randf_range(2.6, 3.5) * SimConstants.AU
 	var angle: float = rng.randf_range(0.0, TAU)
-	var eccentricity: float = rng.randf_range(0.03, 0.18)
+	var eccentricity: float = rng.randf_range(
+		float(profile.get("disturbance_eccentricity_min", 0.03)),
+		float(profile.get("disturbance_eccentricity_max", 0.18))
+	)
 	var mass: float = rng.randf_range(SimConstants.ASTEROID_MASS_MIN, SimConstants.ASTEROID_MASS_MAX)
-	var material: int = SimBody.MaterialType.ROCKY if (index + rng.randi_range(0, 1)) % 2 == 0 \
-		else SimBody.MaterialType.METALLIC
+	var material: int = _pick_material_from_profile(
+		profile.get("disturbance_material_profile", {}),
+		rng,
+		SimBody.MaterialType.METALLIC if index % 2 == 0 else SimBody.MaterialType.ROCKY
+	)
 	return _make_asteroid(star, orbital_radius, angle, eccentricity, mass, material, rng)
+
+static func _pick_material_from_profile(
+		material_profile: Dictionary,
+		rng: RandomNumberGenerator,
+		fallback_material: int = SimBody.MaterialType.MIXED) -> int:
+	if material_profile == null or material_profile.is_empty():
+		return fallback_material
+	var normalized_profile: Dictionary = {
+		"rocky": maxf(float(material_profile.get("rocky", 0.0)), 0.0),
+		"icy": maxf(float(material_profile.get("icy", 0.0)), 0.0),
+		"metallic": maxf(float(material_profile.get("metallic", 0.0)), 0.0),
+		"mixed": maxf(float(material_profile.get("mixed", 0.0)), 0.0),
+	}
+	var total_weight: float = 0.0
+	for key in normalized_profile.keys():
+		total_weight += float(normalized_profile[key])
+	if total_weight <= 0.0:
+		return fallback_material
+	var roll: float = rng.randf() * total_weight
+	var cursor: float = 0.0
+	for key in ["rocky", "icy", "metallic", "mixed"]:
+		cursor += float(normalized_profile.get(key, 0.0))
+		if roll <= cursor:
+			match key:
+				"rocky":
+					return SimBody.MaterialType.ROCKY
+				"icy":
+					return SimBody.MaterialType.ICY
+				"metallic":
+					return SimBody.MaterialType.METALLIC
+				"mixed":
+					return SimBody.MaterialType.MIXED
+	return fallback_material
 
 static func _place_in_orbit(body: SimBody, parent: SimBody,
 		orbital_radius: float, angle: float, eccentricity: float) -> void:
