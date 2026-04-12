@@ -552,6 +552,55 @@ func test_transit_routing_keeps_current_target_until_a_competitor_wins_by_clear_
 		"clear retargets should still remain en route until the new target is actually reached"
 	)
 
+func test_grouped_transit_objects_share_one_group_target_and_centroid_routing() -> void:
+	var galaxy_state := GalaxyState.new()
+	galaxy_state.add_cluster(_make_manual_cluster(0, Vector2.ZERO, 100.0))
+	galaxy_state.add_cluster(_make_manual_cluster(1, Vector2(1000.0, 0.0), 100.0))
+	galaxy_state.add_cluster(_make_manual_cluster(2, Vector2(1400.0, 0.0), 100.0))
+
+	var left_member = _make_test_transit_asteroid(
+		"transit:group_left",
+		0,
+		Vector2(1080.0, 0.0),
+		Vector2.ZERO,
+		"convoy:test"
+	)
+	var right_member = _make_test_transit_asteroid(
+		"transit:group_right",
+		0,
+		Vector2(1420.0, 0.0),
+		Vector2.ZERO,
+		"convoy:test"
+	)
+	galaxy_state.register_transit_object(left_member)
+	galaxy_state.register_transit_object(right_member)
+
+	WorldBuilder.step_transit_objects(galaxy_state, SimConstants.FIXED_DT)
+
+	var transit_group = galaxy_state.get_transit_group("convoy:test")
+	assert_not_null(transit_group, "grouped transit objects should create a durable transit group record")
+	assert_eq(
+		galaxy_state.get_transit_group_count(),
+		1,
+		"two grouped transit objects should be represented by one transit group"
+	)
+	assert_true(
+		transit_group.global_position.is_equal_approx(Vector2(1250.0, 0.0)),
+		"group routing should use the centroid of all grouped member positions"
+	)
+	assert_eq(
+		transit_group.target_cluster_id,
+		2,
+		"the grouped convoy should choose one shared target from its centroid instead of splitting per member"
+	)
+	assert_eq(left_member.target_cluster_id, 2, "every group member should inherit the shared group target")
+	assert_eq(right_member.target_cluster_id, 2, "every group member should inherit the shared group target")
+	assert_eq(
+		left_member.arrival_phase,
+		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE,
+		"grouped routing should keep members en route until the shared group centroid reaches the target"
+	)
+
 func test_arriving_transit_object_settles_into_unloaded_target_cluster_as_resident() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -669,6 +718,60 @@ func test_in_transit_asteroid_imports_into_active_cluster_when_it_enters_cluster
 	assert_true(
 		imported_body.position.is_equal_approx(runtime.active_cluster_session.to_local(transit_state.global_position)),
 		"transit import should convert the stored global position back into the active cluster's local space"
+	)
+
+func test_grouped_arrival_imports_all_members_into_active_cluster_together() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(active_cluster)
+	var first_transit = _make_test_transit_asteroid(
+		"transit:group_import_a",
+		-1,
+		active_cluster.global_center + Vector2(import_radius * 0.50, 0.0),
+		Vector2.ZERO,
+		"convoy:active_import"
+	)
+	var second_transit = _make_test_transit_asteroid(
+		"transit:group_import_b",
+		-1,
+		active_cluster.global_center + Vector2(import_radius * 1.05, 0.0),
+		Vector2.ZERO,
+		"convoy:active_import"
+	)
+	runtime.galaxy_state.register_transit_object(first_transit)
+	runtime.galaxy_state.register_transit_object(second_transit)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var first_body: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(first_transit.object_id)
+	var second_body: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(second_transit.object_id)
+	var first_object: ClusterObjectState = active_cluster.get_object(first_transit.object_id)
+	var second_object: ClusterObjectState = active_cluster.get_object(second_transit.object_id)
+	assert_not_null(first_body, "group arrival should import the first member into the active cluster")
+	assert_not_null(second_body, "group arrival should import the second member with the same shared handoff")
+	assert_not_null(first_object, "group arrival should persist the first imported member in the active cluster")
+	assert_not_null(second_object, "group arrival should persist the second imported member in the active cluster")
+	assert_eq(
+		runtime.get_transit_object_count(),
+		0,
+		"once a grouped arrival is handed into the active cluster the whole convoy should leave global transit"
+	)
+	assert_eq(
+		str(first_object.descriptor.get("transfer_group_id", "")),
+		"convoy:active_import",
+		"imported group members should preserve their shared transfer-group identity for future re-export"
+	)
+	assert_eq(
+		str(second_object.descriptor.get("transfer_group_id", "")),
+		"convoy:active_import",
+		"every imported group member should preserve the shared transfer-group identity"
 	)
 
 func test_transit_object_reacquires_its_source_cluster_when_it_returns_inside_source_space() -> void:
@@ -873,11 +976,13 @@ func _make_test_transit_asteroid(
 		object_id: String,
 		source_cluster_id: int,
 		global_position: Vector2,
-		global_velocity: Vector2):
+		global_velocity: Vector2,
+		transfer_group_id: String = ""):
 	var transit_state = TRANSIT_OBJECT_STATE_SCRIPT.new()
 	transit_state.object_id = object_id
 	transit_state.kind = "asteroid"
 	transit_state.source_cluster_id = source_cluster_id
+	transit_state.transfer_group_id = transfer_group_id
 	transit_state.global_position = global_position
 	transit_state.global_velocity = global_velocity
 	transit_state.seed = 12345
@@ -898,5 +1003,6 @@ func _make_test_transit_asteroid(
 		"sleeping": false,
 		"active": true,
 		"parent_object_id": "",
+		"transfer_group_id": transfer_group_id,
 	}
 	return transit_state

@@ -211,6 +211,15 @@ static func step_transit_objects(galaxy_state: GalaxyState, dt: float) -> void:
 	for transit_state in galaxy_state.get_transit_objects():
 		transit_state.global_position += transit_state.global_velocity * dt
 		transit_state.age += dt
+	galaxy_state.sync_transit_groups_from_objects()
+	for transit_group in galaxy_state.get_transit_groups():
+		_refresh_transit_group_target_assignment(galaxy_state, transit_group)
+	for transit_state in galaxy_state.get_transit_objects():
+		if transit_state.transfer_group_id != "" and galaxy_state.has_transit_group(transit_state.transfer_group_id):
+			var transit_group = galaxy_state.get_transit_group(transit_state.transfer_group_id)
+			transit_state.target_cluster_id = transit_group.target_cluster_id
+			transit_state.arrival_phase = transit_group.arrival_phase
+			continue
 		refresh_transit_target_assignment(galaxy_state, transit_state)
 
 static func settle_arrived_transit_objects_into_inactive_clusters(
@@ -219,7 +228,25 @@ static func settle_arrived_transit_objects_into_inactive_clusters(
 	var settled_object_ids: Array = []
 	if galaxy_state == null:
 		return settled_object_ids
+	galaxy_state.sync_transit_groups_from_objects()
+	for transit_group in galaxy_state.get_transit_groups():
+		if transit_group.arrival_phase != TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING:
+			continue
+		if transit_group.target_cluster_id < 0 or transit_group.target_cluster_id == active_cluster_id:
+			continue
+		var grouped_target_cluster: ClusterState = galaxy_state.get_cluster(transit_group.target_cluster_id)
+		if grouped_target_cluster == null:
+			continue
+		for object_id in transit_group.member_object_ids.duplicate():
+			var grouped_transit_state = galaxy_state.get_transit_object(str(object_id))
+			if grouped_transit_state == null:
+				continue
+			_accept_transit_object_into_cluster(grouped_target_cluster, grouped_transit_state)
+			galaxy_state.remove_transit_object(grouped_transit_state.object_id)
+			settled_object_ids.append(grouped_transit_state.object_id)
 	for transit_state in galaxy_state.get_transit_objects():
+		if transit_state.transfer_group_id != "" and galaxy_state.has_transit_group(transit_state.transfer_group_id):
+			continue
 		if transit_state.arrival_phase != TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING:
 			continue
 		if transit_state.target_cluster_id < 0 or transit_state.target_cluster_id == active_cluster_id:
@@ -244,7 +271,34 @@ static func import_transit_objects_into_active_session(
 	var galaxy_state: GalaxyState = active_cluster_session.galaxy_state
 	var cluster_state: ClusterState = active_cluster_session.active_cluster_state
 	var sim_world: SimWorld = active_cluster_session.sim_world
+	galaxy_state.sync_transit_groups_from_objects()
+	for transit_group in galaxy_state.get_transit_groups():
+		if transit_group.arrival_phase != TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING:
+			continue
+		if transit_group.target_cluster_id != cluster_state.cluster_id:
+			continue
+		for object_id in transit_group.member_object_ids.duplicate():
+			var grouped_transit_state = galaxy_state.get_transit_object(str(object_id))
+			if grouped_transit_state == null:
+				continue
+			if sim_world.get_body_by_persistent_object_id(grouped_transit_state.object_id) != null:
+				galaxy_state.remove_transit_object(grouped_transit_state.object_id)
+				continue
+			var grouped_local_position: Vector2 = active_cluster_session.to_local(grouped_transit_state.global_position)
+			cluster_state.register_object(_build_cluster_object_state_from_transit(
+				grouped_transit_state,
+				grouped_local_position,
+				ObjectResidencyState.State.ACTIVE
+			))
+			var grouped_body: SimBody = _make_body_from_transit_state(grouped_transit_state, grouped_local_position)
+			if grouped_body == null:
+				continue
+			sim_world.add_body(grouped_body)
+			galaxy_state.remove_transit_object(grouped_transit_state.object_id)
+			imported_object_ids.append(grouped_transit_state.object_id)
 	for transit_state in galaxy_state.get_transit_objects():
+		if transit_state.transfer_group_id != "" and galaxy_state.has_transit_group(transit_state.transfer_group_id):
+			continue
 		if transit_state.arrival_phase != TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING:
 			continue
 		if transit_state.target_cluster_id != cluster_state.cluster_id:
@@ -872,6 +926,7 @@ static func _build_transit_object_state_from_body(
 	transit_state.kind = object_state.kind
 	transit_state.residency_state = ObjectResidencyState.State.IN_TRANSIT
 	transit_state.source_cluster_id = cluster_state.cluster_id
+	transit_state.transfer_group_id = str(object_state.descriptor.get("transfer_group_id", ""))
 	transit_state.global_position = global_position
 	transit_state.global_velocity = body.velocity
 	transit_state.age = object_state.age
@@ -892,6 +947,7 @@ static func _build_cluster_object_state_from_transit(
 	object_state.age = transit_state.age
 	object_state.seed = transit_state.seed
 	object_state.descriptor = transit_state.descriptor.duplicate(true)
+	object_state.descriptor["transfer_group_id"] = transit_state.transfer_group_id
 	object_state.descriptor["active"] = true
 	object_state.descriptor["sleeping"] = false
 	return object_state
@@ -911,9 +967,10 @@ static func refresh_transit_target_assignment(galaxy_state: GalaxyState, transit
 	var current_target: ClusterState = galaxy_state.get_cluster(transit_state.target_cluster_id)
 	if current_target != null and current_target.cluster_id == transit_state.source_cluster_id:
 		current_target = null
-	var preferred_target: ClusterState = _find_best_non_source_transit_target_cluster(
+	var preferred_target: ClusterState = _find_best_non_source_transit_target_cluster_for_position(
 		galaxy_state,
-		transit_state
+		transit_state.global_position,
+		transit_state.source_cluster_id
 	)
 	if current_target != null \
 			and OBJECT_RESIDENCY_POLICY_SCRIPT.should_keep_transit_target(
@@ -932,18 +989,59 @@ static func refresh_transit_target_assignment(galaxy_state: GalaxyState, transit
 	else:
 		transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE
 
-static func _find_best_non_source_transit_target_cluster(
+static func _refresh_transit_group_target_assignment(galaxy_state: GalaxyState, transit_group) -> void:
+	if galaxy_state == null or transit_group == null:
+		return
+	var source_cluster: ClusterState = galaxy_state.get_cluster(transit_group.source_cluster_id)
+	if source_cluster != null \
+			and OBJECT_RESIDENCY_POLICY_SCRIPT.is_position_within_cluster_import_radius(
+				transit_group.global_position,
+				source_cluster
+			):
+		transit_group.target_cluster_id = source_cluster.cluster_id
+		transit_group.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING
+		return
+	var current_target: ClusterState = galaxy_state.get_cluster(transit_group.target_cluster_id)
+	if current_target != null and current_target.cluster_id == transit_group.source_cluster_id:
+		current_target = null
+	var preferred_target: ClusterState = _find_best_non_source_transit_target_cluster_for_position(
+		galaxy_state,
+		transit_group.global_position,
+		transit_group.source_cluster_id
+	)
+	if current_target != null \
+			and OBJECT_RESIDENCY_POLICY_SCRIPT.should_keep_routing_target_for_position(
+				transit_group.global_position,
+				current_target,
+				preferred_target
+			):
+		preferred_target = current_target
+	if preferred_target == null:
+		transit_group.target_cluster_id = -1
+		transit_group.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.UNASSIGNED
+		return
+	transit_group.target_cluster_id = preferred_target.cluster_id
+	if OBJECT_RESIDENCY_POLICY_SCRIPT.is_position_within_cluster_import_radius(
+			transit_group.global_position,
+			preferred_target
+	):
+		transit_group.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING
+	else:
+		transit_group.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE
+
+static func _find_best_non_source_transit_target_cluster_for_position(
 		galaxy_state: GalaxyState,
-		transit_state) -> ClusterState:
-	if galaxy_state == null or transit_state == null:
+		global_position: Vector2,
+		source_cluster_id: int) -> ClusterState:
+	if galaxy_state == null:
 		return null
 	var matched_cluster: ClusterState = null
 	var best_score: float = INF
 	for cluster_state in galaxy_state.get_clusters():
-		if cluster_state.cluster_id == transit_state.source_cluster_id:
+		if cluster_state.cluster_id == source_cluster_id:
 			continue
-		var claim_score: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_cluster_claim_score(
-			transit_state,
+		var claim_score: float = OBJECT_RESIDENCY_POLICY_SCRIPT.cluster_claim_score_for_position(
+			global_position,
 			cluster_state
 		)
 		if claim_score < best_score:
