@@ -196,18 +196,22 @@ func _update_runtime_focus_context() -> void:
 		return
 	galaxy_runtime.update_focus_context(
 		_camera_focus_global_position(),
-		_sim_camera.get_visible_world_radius()
+		_sim_camera.get_visible_world_radius() / max(SimConstants.SIM_TO_SCREEN, 0.001)
 	)
 
 func _camera_focus_global_position() -> Vector2:
 	if _sim_camera == null or active_cluster_session == null:
 		return Vector2.ZERO
-	return active_cluster_session.to_global(_sim_camera.get_focus_world_position())
+	return active_cluster_session.to_global(
+		_sim_camera.get_focus_world_position() / max(SimConstants.SIM_TO_SCREEN, 0.001)
+	)
 
 func _restore_camera_focus_global_position(global_focus_position: Vector2) -> void:
 	if _sim_camera == null or active_cluster_session == null:
 		return
-	_sim_camera.set_focus_world_position(active_cluster_session.to_local(global_focus_position))
+	_sim_camera.set_focus_world_position(
+		active_cluster_session.to_local(global_focus_position) * SimConstants.SIM_TO_SCREEN
+	)
 
 func _release_runtime_references() -> void:
 	_disconnect_world_signals(sim_world)

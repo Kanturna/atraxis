@@ -6,6 +6,8 @@ class_name WorldRenderer
 extends Node2D
 
 const GRAVITY_DEBUG_RENDERER_SCRIPT := preload("res://rendering/gravity_debug_renderer.gd")
+const CLUSTER_PREVIEW_RENDERER_SCRIPT := preload("res://rendering/cluster_preview_renderer.gd")
+const CLUSTER_MARKER_RENDERER_SCRIPT := preload("res://rendering/cluster_marker_renderer.gd")
 
 @onready var _zone_layer: Node2D = $ZoneLayer
 @onready var _gravity_debug_layer: Node2D = $GravityDebugLayer
@@ -13,11 +15,15 @@ const GRAVITY_DEBUG_RENDERER_SCRIPT := preload("res://rendering/gravity_debug_re
 @onready var _body_layer: Node2D = $BodyLayer
 @onready var _debris_layer: Node2D = $DebrisLayer
 
+var _preview_layer: Node2D = null
+var _marker_layer: Node2D = null
 var _body_renderer: BodyRenderer
 var _trail_renderer: TrailRenderer
 var _zone_renderers: Dictionary = {}
 var _gravity_debug_renderer: Node2D
 var _debris_renderer: DebrisRenderer
+var _preview_renderer: Node2D = null
+var _cluster_marker_renderer: Node2D = null
 var _galaxy_state: GalaxyState = null
 var _active_cluster_session: ActiveClusterSession = null
 var _worldgen = null
@@ -28,12 +34,15 @@ func initialize(
 		zones_by_star: Dictionary,
 		galaxy_state: GalaxyState = null,
 		active_cluster_session: ActiveClusterSession = null) -> void:
+	_ensure_overlay_layers()
 	_clear_layer(_zone_layer)
 	_zone_renderers.clear()
 	_clear_layer(_gravity_debug_layer)
 	_clear_layer(_trail_layer)
 	_clear_layer(_body_layer)
 	_clear_layer(_debris_layer)
+	_clear_layer(_preview_layer)
+	_clear_layer(_marker_layer)
 	_galaxy_state = galaxy_state
 	_active_cluster_session = active_cluster_session
 	_worldgen = GalaxyWorldgen.new(galaxy_state.worldgen_config) \
@@ -43,6 +52,8 @@ func initialize(
 	_trail_renderer = TrailRenderer.new()
 	_gravity_debug_renderer = GRAVITY_DEBUG_RENDERER_SCRIPT.new()
 	_debris_renderer = DebrisRenderer.new()
+	_preview_renderer = CLUSTER_PREVIEW_RENDERER_SCRIPT.new()
+	_cluster_marker_renderer = CLUSTER_MARKER_RENDERER_SCRIPT.new()
 
 	for star_id in zones_by_star:
 		var zr := ZoneRenderer.new()
@@ -52,12 +63,13 @@ func initialize(
 
 	_gravity_debug_layer.add_child(_gravity_debug_renderer)
 	_trail_layer.add_child(_trail_renderer)
+	_preview_layer.add_child(_preview_renderer)
 	_body_layer.add_child(_body_renderer)
 	_debris_layer.add_child(_debris_renderer)
+	_marker_layer.add_child(_cluster_marker_renderer)
 
 	set_debug_overlays_visible(false)
 
-	# Create visuals for bodies already in the world
 	for body in world.bodies:
 		_on_body_added(body)
 
@@ -73,6 +85,15 @@ func render_frame(world: SimWorld) -> void:
 		_trail_renderer.update_all(world.bodies)
 	if _debris_renderer != null:
 		_debris_renderer.update_all(world.debris_fields)
+	if _preview_renderer != null:
+		_preview_renderer.update_preview_specs(
+			build_remote_cluster_preview_specs(_galaxy_state, _active_cluster_session)
+		)
+	if _cluster_marker_renderer != null:
+		_cluster_marker_renderer.update_marker_payload(
+			build_registered_cluster_debug_markers(_galaxy_state, _active_cluster_session),
+			_debug_marker_canvas_scale()
+		)
 	if _debug_overlays_visible:
 		queue_redraw()
 
@@ -80,6 +101,8 @@ func set_debug_overlays_visible(enabled: bool) -> void:
 	_debug_overlays_visible = enabled
 	if _gravity_debug_renderer != null:
 		_gravity_debug_renderer.visible = enabled
+	if _cluster_marker_renderer != null:
+		_cluster_marker_renderer.visible = enabled
 	queue_redraw()
 
 func set_gravity_debug_visible(enabled: bool) -> void:
@@ -94,8 +117,22 @@ func _on_body_removed(body_id: int) -> void:
 	_trail_renderer.remove_trail(body_id)
 
 func _clear_layer(layer: Node2D) -> void:
+	if layer == null:
+		return
 	for child in layer.get_children():
 		child.free()
+
+func _ensure_overlay_layers() -> void:
+	if _preview_layer == null:
+		_preview_layer = Node2D.new()
+		_preview_layer.name = "PreviewLayer"
+		add_child(_preview_layer)
+		move_child(_preview_layer, _body_layer.get_index())
+	if _marker_layer == null:
+		_marker_layer = Node2D.new()
+		_marker_layer.name = "MarkerLayer"
+		add_child(_marker_layer)
+		move_child(_marker_layer, get_child_count() - 1)
 
 func _draw() -> void:
 	if not _debug_overlays_visible \
@@ -104,7 +141,6 @@ func _draw() -> void:
 			or _worldgen == null:
 		return
 	_draw_discovered_sectors()
-	_draw_registered_clusters()
 
 func _draw_discovered_sectors() -> void:
 	var active_sector_coord_variant = _active_cluster_session.active_cluster_state.simulation_profile.get(
@@ -114,101 +150,22 @@ func _draw_discovered_sectors() -> void:
 	var active_sector_coord: Vector2i = active_sector_coord_variant \
 		if active_sector_coord_variant is Vector2i \
 		else Vector2i.ZERO
-	var sector_size: Vector2 = Vector2.ONE * float(_worldgen.config.sector_scale)
+	var sector_size_screen: Vector2 = Vector2.ONE * BodyRenderer.sim_dist_to_screen(
+		float(_worldgen.config.sector_scale)
+	)
 	for sector_coord in _galaxy_state.get_discovered_sector_coords():
 		var sector_origin_local: Vector2 = _active_cluster_session.to_local(_worldgen.sector_origin(sector_coord))
+		var sector_origin_screen: Vector2 = BodyRenderer.snap_screen_point(
+			BodyRenderer.sim_to_screen(sector_origin_local)
+		)
 		var is_active_sector: bool = sector_coord == active_sector_coord
 		var sector_color: Color = Color(0.36, 0.56, 0.90, 0.32) if is_active_sector else Color(0.36, 0.56, 0.90, 0.12)
-		draw_rect(Rect2(sector_origin_local, sector_size), sector_color, false, 1.5 if is_active_sector else 1.0)
-
-func _draw_registered_clusters() -> void:
-	var cluster_payload: Dictionary = build_registered_cluster_debug_markers(
-		_galaxy_state,
-		_active_cluster_session
-	)
-	var marker_radius_scale: float = _debug_marker_canvas_scale()
-	for marker in cluster_payload.get("markers", []):
-		var cluster_id: int = int(marker.get("cluster_id", -1))
-		var cluster_state: ClusterState = _galaxy_state.get_cluster(cluster_id)
-		if cluster_state == null:
-			continue
-		var cluster_local_center: Vector2 = Vector2(marker.get("local_center", Vector2.ZERO))
-		var cluster_color: Color = _cluster_debug_color(cluster_state)
-		var is_active: bool = bool(marker.get("is_active", false))
-		var line_width: float = 2.6 if is_active else 1.5
-		var marker_radius: float = cluster_debug_marker_world_radius(
-			float(marker.get("radius", cluster_state.get_authoritative_radius())),
-			marker_radius_scale,
-			is_active
+		draw_rect(
+			Rect2(sector_origin_screen, sector_size_screen),
+			sector_color,
+			false,
+			1.5 / _debug_marker_canvas_scale() if is_active_sector else 1.0 / _debug_marker_canvas_scale()
 		)
-		draw_arc(
-			cluster_local_center,
-			cluster_state.get_authoritative_radius(),
-			0.0,
-			TAU,
-			64,
-			cluster_color,
-			line_width
-		)
-		draw_circle(
-			cluster_local_center,
-			marker_radius,
-			Color(cluster_color.r, cluster_color.g, cluster_color.b, 0.16 if is_active else 0.11)
-		)
-		draw_arc(
-			cluster_local_center,
-			marker_radius,
-			0.0,
-			TAU,
-			32,
-			cluster_color,
-			2.0 if is_active else 1.2
-		)
-		var cross_half_extent: float = marker_radius * 0.75
-		draw_line(
-			cluster_local_center + Vector2(-cross_half_extent, 0.0),
-			cluster_local_center + Vector2(cross_half_extent, 0.0),
-			cluster_color,
-			2.0 if is_active else 1.4
-		)
-		draw_line(
-			cluster_local_center + Vector2(0.0, -cross_half_extent),
-			cluster_local_center + Vector2(0.0, cross_half_extent),
-			cluster_color,
-			2.0 if is_active else 1.4
-		)
-	_draw_cluster_label(_active_cluster_session.active_cluster_state, "ACTIVE")
-	var nearest_remote_cluster: ClusterState = _galaxy_state.get_cluster(
-		int(cluster_payload.get("nearest_remote_cluster_id", -1))
-	)
-	if nearest_remote_cluster != null:
-		_draw_cluster_label(nearest_remote_cluster, "GHOST")
-
-func _draw_cluster_label(cluster_state: ClusterState, label_prefix: String) -> void:
-	if cluster_state == null or ThemeDB.fallback_font == null:
-		return
-	var label_position: Vector2 = _active_cluster_session.to_local(cluster_state.global_center)
-	label_position += Vector2(12.0, -10.0)
-	draw_string(
-		ThemeDB.fallback_font,
-		label_position,
-		"%s C%d" % [label_prefix, cluster_state.cluster_id],
-		HORIZONTAL_ALIGNMENT_LEFT,
-		-1.0,
-		ThemeDB.fallback_font_size,
-		_cluster_debug_color(cluster_state)
-	)
-
-func _cluster_debug_color(cluster_state: ClusterState) -> Color:
-	if cluster_state == null:
-		return Color(1.0, 1.0, 1.0, 0.3)
-	match cluster_state.activation_state:
-		ClusterActivationState.State.ACTIVE:
-			return Color(0.98, 0.90, 0.34, 0.82)
-		ClusterActivationState.State.SIMPLIFIED:
-			return Color(0.36, 0.92, 0.86, 0.60)
-		_:
-			return Color(0.86, 0.89, 0.98, 0.44)
 
 func _debug_marker_canvas_scale() -> float:
 	var canvas_scale: Vector2 = get_canvas_transform().get_scale()
@@ -236,16 +193,85 @@ static func build_registered_cluster_debug_markers(
 			"radius": cluster_state.get_authoritative_radius(),
 			"is_active": is_active,
 			"state": activation_state_debug_name(cluster_state.activation_state),
+			"color": cluster_debug_color(cluster_state.activation_state),
 		})
 		if not is_active:
 			var center_distance: float = local_center.length()
 			if center_distance < nearest_remote_distance:
 				nearest_remote_distance = center_distance
 				nearest_remote_cluster_id = cluster_state.cluster_id
+	for marker in markers:
+		var marker_cluster_id: int = int(marker.get("cluster_id", -1))
+		var marker_state: String = str(marker.get("state", ""))
+		var label_prefix: String = ""
+		if bool(marker.get("is_active", false)):
+			label_prefix = "ACTIVE"
+		elif marker_cluster_id == nearest_remote_cluster_id:
+			label_prefix = "PREVIEW" if marker_state == "simplified" else "UNLOADED"
+		marker["label_prefix"] = label_prefix
 	return {
 		"markers": markers,
 		"nearest_remote_cluster_id": nearest_remote_cluster_id,
 	}
+
+static func build_remote_cluster_preview_specs(
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession) -> Array:
+	var preview_specs: Array = []
+	if galaxy_state == null or active_cluster_session == null:
+		return preview_specs
+	for cluster_state in galaxy_state.get_clusters():
+		if cluster_state == null or cluster_state.cluster_id == active_cluster_session.cluster_id:
+			continue
+		var source_specs: Array = _remote_cluster_preview_source_specs(cluster_state)
+		for source_spec in source_specs:
+			var source_local_position: Vector2 = Vector2(source_spec.get("local_position", Vector2.ZERO))
+			var source_global_position: Vector2 = cluster_state.global_center + source_local_position
+			var local_position: Vector2 = active_cluster_session.to_local(source_global_position)
+			var preview_spec: Dictionary = source_spec.duplicate(true)
+			preview_spec["local_position"] = local_position
+			preview_spec["cluster_id"] = cluster_state.cluster_id
+			preview_spec["state"] = activation_state_debug_name(cluster_state.activation_state)
+			preview_specs.append(preview_spec)
+	return preview_specs
+
+static func _remote_cluster_preview_source_specs(cluster_state: ClusterState) -> Array:
+	var preview_specs: Array = []
+	if cluster_state == null:
+		return preview_specs
+	var use_runtime_snapshot: bool = cluster_state.activation_state == ClusterActivationState.State.SIMPLIFIED \
+		and bool(cluster_state.simulation_profile.get("has_runtime_snapshot", false))
+	if use_runtime_snapshot:
+		for object_state in cluster_state.object_registry.values():
+			if object_state == null or object_state.residency_state == ObjectResidencyState.State.IN_TRANSIT:
+				continue
+			var body_type: int = int(object_state.descriptor.get("body_type", -1))
+			if body_type not in [
+				SimBody.BodyType.BLACK_HOLE,
+				SimBody.BodyType.STAR,
+				SimBody.BodyType.PLANET,
+			]:
+				continue
+			preview_specs.append({
+				"object_id": object_state.object_id,
+				"kind": object_state.kind,
+				"body_type": body_type,
+				"material_type": int(object_state.descriptor.get("material_type", SimBody.MaterialType.MIXED)),
+				"local_position": object_state.local_position,
+				"radius": float(object_state.descriptor.get("radius", 1.0)),
+				"seed": int(object_state.seed),
+				"descriptor": object_state.descriptor.duplicate(true),
+			})
+		return preview_specs
+	for source_spec in cluster_state.cluster_blueprint.get("preview_object_specs", []):
+		if int(source_spec.get("body_type", -1)) not in [
+			SimBody.BodyType.BLACK_HOLE,
+			SimBody.BodyType.STAR,
+			SimBody.BodyType.PLANET,
+		]:
+			continue
+		preview_specs.append(source_spec.duplicate(true))
+	return preview_specs
 
 static func cluster_debug_marker_world_radius(
 		cluster_radius: float,
@@ -260,6 +286,13 @@ static func cluster_debug_marker_world_radius(
 	)
 	return clampf(target_marker_radius, min_marker_radius, max_marker_radius)
 
+static func should_draw_cluster_extent_ring(cluster_screen_radius: float, viewport_diagonal: float) -> bool:
+	if cluster_screen_radius < 2.0:
+		return false
+	if viewport_diagonal <= 0.0:
+		return true
+	return cluster_screen_radius <= viewport_diagonal * 1.5
+
 static func activation_state_debug_name(activation_state: int) -> String:
 	match activation_state:
 		ClusterActivationState.State.ACTIVE:
@@ -268,3 +301,12 @@ static func activation_state_debug_name(activation_state: int) -> String:
 			return "simplified"
 		_:
 			return "unloaded"
+
+static func cluster_debug_color(activation_state: int) -> Color:
+	match activation_state:
+		ClusterActivationState.State.ACTIVE:
+			return Color(0.98, 0.90, 0.34, 0.82)
+		ClusterActivationState.State.SIMPLIFIED:
+			return Color(0.36, 0.92, 0.86, 0.60)
+		_:
+			return Color(0.86, 0.89, 0.98, 0.44)

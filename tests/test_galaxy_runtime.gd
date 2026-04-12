@@ -226,6 +226,32 @@ func test_focus_relevance_switches_active_cluster_to_nearest_focus_cluster() -> 
 		"focus relevance should promote the cluster nearest the focus position into the active bubble"
 	)
 
+func test_focus_relevance_keeps_remote_cluster_in_preview_state_until_zoom_or_entry_threshold() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
+	var focus_position: Vector2 = second_cluster.global_center + Vector2(second_cluster.get_authoritative_radius() * 1.1, 0.0)
+	var wide_visible_radius: float = second_cluster.get_authoritative_radius() * 2.0
+
+	runtime.update_focus_context(focus_position, wide_visible_radius)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		first_cluster_id,
+		"wide zoom and outside-cluster focus should keep the nearest remote cluster in preview instead of switching immediately"
+	)
+
 func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays_relevant() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR

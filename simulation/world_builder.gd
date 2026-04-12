@@ -96,6 +96,113 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 		)
 	_materialize_registered_cluster_objects(world, cluster_state)
 
+static func build_cluster_preview_specs(
+		cluster_id: int,
+		local_black_hole_specs: Array,
+		profile: Dictionary,
+		cluster_seed: int) -> Array:
+	var preview_specs: Array = []
+	if local_black_hole_specs.is_empty():
+		return preview_specs
+
+	for spec in local_black_hole_specs:
+		var black_hole_object_id: String = _make_cluster_object_id(
+			cluster_id,
+			"black_hole",
+			int(spec.get("id", 0))
+		)
+		preview_specs.append({
+			"object_id": black_hole_object_id,
+			"kind": "black_hole",
+			"body_type": SimBody.BodyType.BLACK_HOLE,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"local_position": Vector2(spec.get("local_position", Vector2.ZERO)),
+			"radius": SimConstants.BLACK_HOLE_RADIUS,
+			"seed": _derive_runtime_object_seed(cluster_seed, black_hole_object_id),
+			"descriptor": {
+				"mass": float(spec.get("mass", profile.get("black_hole_mass", SimConstants.BLACK_HOLE_MASS))),
+				"is_primary": bool(spec.get("is_primary", false)),
+			},
+		})
+
+	var host_entries: Array = _build_preview_dynamic_star_host_entries(local_black_hole_specs, cluster_id)
+	if host_entries.is_empty():
+		return preview_specs
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = cluster_seed
+	var layout_plan: Dictionary = _build_dynamic_star_layout_plan_from_host_entries(host_entries, profile, rng)
+	var star_layouts: Array = layout_plan.get("assignments", [])
+	for star_index in range(star_layouts.size()):
+		var layout: Dictionary = star_layouts[star_index]
+		var host_entry: Dictionary = host_entries[int(layout["host_index"])]
+		var star_object_id: String = _make_cluster_object_id(cluster_id, "star", star_index)
+		var star_position: Vector2 = Vector2(host_entry["local_position"]) \
+			+ Vector2.RIGHT.rotated(float(layout["phase"])) * float(layout["orbit_radius"])
+		var star_radius: float = SimConstants.STAR_RADIUS * sqrt(float(layout["mass_scale"]))
+		var star_descriptor := {
+			"host_object_id": str(layout["host_object_id"]),
+			"host_index": int(layout["host_index"]),
+			"shell_index": int(layout["shell_index"]),
+			"orbit_radius": float(layout["orbit_radius"]),
+			"phase": float(layout["phase"]),
+			"planet_envelope_radius": float(layout["planet_envelope_radius"]),
+			"mass": SimConstants.STAR_MASS * float(layout["mass_scale"]),
+			"parent_object_id": str(layout["host_object_id"]),
+		}
+		preview_specs.append({
+			"object_id": star_object_id,
+			"kind": "star",
+			"body_type": SimBody.BodyType.STAR,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"local_position": star_position,
+			"radius": star_radius,
+			"seed": _derive_runtime_object_seed(cluster_seed, star_object_id),
+			"descriptor": star_descriptor,
+		})
+
+		var planet_count: int = int(profile.get("planets_per_star", 0))
+		for planet_index in range(planet_count):
+			var planet_layout: Dictionary = _core_planet_layout_data(planet_index, planet_count)
+			var planet_angle: float = (float(planet_index) / maxf(1.0, float(planet_count))) * TAU
+			var orbit_radius: float = float(planet_layout["orbit_radius_au"]) * SimConstants.AU
+			var planet_position: Vector2 = star_position + Vector2.RIGHT.rotated(planet_angle) * orbit_radius
+			var planet_object_id: String = _make_child_object_id(star_object_id, "planet", planet_index)
+			var planet_rng := RandomNumberGenerator.new()
+			planet_rng.seed = _derive_runtime_object_seed(cluster_seed, planet_object_id)
+			var planet_material: int = _pick_material_from_profile(
+				profile.get("planet_material_profile", {}),
+				planet_rng,
+				SimBody.MaterialType.MIXED
+			)
+			var planet_mass: float = float(planet_layout["mass"])
+			var planet_radius: float = clamp(
+				SimConstants.PLANET_RADIUS_MIN + log(planet_mass / SimConstants.PLANET_MASS_MIN + 1.0),
+				SimConstants.PLANET_RADIUS_MIN,
+				SimConstants.PLANET_RADIUS_MAX
+			)
+			preview_specs.append({
+				"object_id": planet_object_id,
+				"kind": "planet",
+				"body_type": SimBody.BodyType.PLANET,
+				"material_type": planet_material,
+				"local_position": planet_position,
+				"radius": planet_radius,
+				"seed": _derive_runtime_object_seed(cluster_seed, planet_object_id),
+				"descriptor": {
+					"parent_object_id": star_object_id,
+					"orbit_radius": orbit_radius,
+					"orbit_angle": planet_angle,
+				},
+			})
+
+	return preview_specs
+
+static func dynamic_star_safe_capacity(local_black_hole_count: int, profile: Dictionary) -> int:
+	if local_black_hole_count <= 0:
+		return 0
+	return maxi(local_black_hole_count, 0) * _dynamic_star_host_capacity(profile)
+
 static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	var mass_factor: float = star.mass / SimConstants.STAR_MASS
 	var bounds := ZoneBoundaries.new()
@@ -664,22 +771,20 @@ static func _place_dynamic_stars(spawned_black_holes: Array, profile: Dictionary
 	if host_entries.is_empty():
 		return stars
 
-	var star_specs: Array = _build_dynamic_star_specs(profile, rng)
-	var assignments: Array = _assign_dynamic_star_specs_to_hosts(star_specs, host_entries)
-	for assignment in assignments:
+	var layout_plan: Dictionary = _build_dynamic_star_layout_plan_from_host_entries(host_entries, profile, rng)
+	for assignment in layout_plan.get("assignments", []):
 		var host_entry: Dictionary = host_entries[int(assignment["host_index"])]
-		var spec: Dictionary = assignment["spec"]
 		var star := _make_star()
-		star.mass = SimConstants.STAR_MASS * spec["mass_scale"]
-		star.radius = SimConstants.STAR_RADIUS * sqrt(spec["mass_scale"])
+		star.mass = SimConstants.STAR_MASS * float(assignment["mass_scale"])
+		star.radius = SimConstants.STAR_RADIUS * sqrt(float(assignment["mass_scale"]))
 		star.kinematic = false
 		star.scripted_orbit_enabled = false
 		star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
 		_place_in_orbit(
 			star,
 			host_entry["body"],
-			_resolve_dynamic_star_orbit_radius(profile, int(assignment["slot_index"])),
-			_resolve_dynamic_star_phase(host_entry, int(assignment["slot_index"])),
+			float(assignment["orbit_radius"]),
+			float(assignment["phase"]),
 			0.0
 		)
 		stars.append(star)
@@ -693,12 +798,36 @@ static func _build_dynamic_star_host_entries(spawned_black_holes: Array, rng: Ra
 			continue
 		host_entries.append({
 			"body": black_hole,
+			"local_position": black_hole.position,
 			"object_id": str(entry.get("object_id", "")),
 			"is_primary": bool(entry.get("is_primary", false)),
-			"nearest_other_distance": _nearest_other_black_hole_distance(black_hole, spawned_black_holes),
-			"assigned_count": 0,
+			"nearest_other_distance": 0.0,
 			"base_phase": 0.0,
+			"capacity": 0,
+			"planned_count": 0,
 		})
+	return _finalize_dynamic_star_host_entries(host_entries, rng)
+
+static func _build_preview_dynamic_star_host_entries(local_black_hole_specs: Array, cluster_id: int) -> Array:
+	var host_entries: Array = []
+	for spec in local_black_hole_specs:
+		host_entries.append({
+			"body": null,
+			"local_position": Vector2(spec.get("local_position", Vector2.ZERO)),
+			"object_id": _make_cluster_object_id(cluster_id, "black_hole", int(spec.get("id", 0))),
+			"is_primary": bool(spec.get("is_primary", false)),
+			"nearest_other_distance": 0.0,
+			"base_phase": 0.0,
+			"capacity": 0,
+			"planned_count": 0,
+		})
+	var rng := RandomNumberGenerator.new()
+	rng.seed = cluster_id
+	return _finalize_dynamic_star_host_entries(host_entries, rng)
+
+static func _finalize_dynamic_star_host_entries(host_entries: Array, rng: RandomNumberGenerator) -> Array:
+	for entry in host_entries:
+		entry["nearest_other_distance"] = _nearest_other_black_hole_distance_for_entry(entry, host_entries)
 	host_entries.sort_custom(func(a, b):
 		if bool(a["is_primary"]) != bool(b["is_primary"]):
 			return bool(a["is_primary"])
@@ -709,72 +838,148 @@ static func _build_dynamic_star_host_entries(spawned_black_holes: Array, rng: Ra
 		return str(a["object_id"]) < str(b["object_id"])
 	)
 	for entry in host_entries:
-		entry["base_phase"] = _resolve_dynamic_star_host_base_phase(entry["body"], host_entries, rng)
+		entry["base_phase"] = _resolve_dynamic_star_host_base_phase_for_entry(entry, host_entries, rng)
 	return host_entries
 
-static func _nearest_other_black_hole_distance(host_black_hole: SimBody, spawned_black_holes: Array) -> float:
+static func _nearest_other_black_hole_distance_for_entry(host_entry: Dictionary, host_entries: Array) -> float:
 	var nearest_distance: float = INF
-	for entry in spawned_black_holes:
-		var other_black_hole: SimBody = entry.get("body", null)
-		if other_black_hole == null or other_black_hole.id == host_black_hole.id:
+	var host_position: Vector2 = Vector2(host_entry.get("local_position", Vector2.ZERO))
+	var host_object_id: String = str(host_entry.get("object_id", ""))
+	for entry in host_entries:
+		if str(entry.get("object_id", "")) == host_object_id:
 			continue
+		var other_position: Vector2 = Vector2(entry.get("local_position", Vector2.ZERO))
 		nearest_distance = minf(
 			nearest_distance,
-			host_black_hole.position.distance_to(other_black_hole.position)
+			host_position.distance_to(other_position)
 		)
 	return nearest_distance
 
-static func _resolve_dynamic_star_host_base_phase(
-		host_black_hole: SimBody,
+static func _resolve_dynamic_star_host_base_phase_for_entry(
+		host_entry: Dictionary,
 		host_entries: Array,
 		rng: RandomNumberGenerator) -> float:
-	var nearest_other_black_hole: SimBody = null
+	var nearest_other_position: Vector2 = Vector2.ZERO
+	var host_position: Vector2 = Vector2(host_entry.get("local_position", Vector2.ZERO))
+	var host_object_id: String = str(host_entry.get("object_id", ""))
 	var nearest_distance_sq: float = INF
 	for entry in host_entries:
-		var other_black_hole: SimBody = entry.get("body", null)
-		if other_black_hole == null or other_black_hole.id == host_black_hole.id:
+		if str(entry.get("object_id", "")) == host_object_id:
 			continue
-		var distance_sq: float = host_black_hole.position.distance_squared_to(other_black_hole.position)
+		var other_position: Vector2 = Vector2(entry.get("local_position", Vector2.ZERO))
+		var distance_sq: float = host_position.distance_squared_to(other_position)
 		if distance_sq < nearest_distance_sq:
 			nearest_distance_sq = distance_sq
-			nearest_other_black_hole = other_black_hole
-	if nearest_other_black_hole == null:
+			nearest_other_position = other_position
+	if nearest_distance_sq == INF:
 		return rng.randf_range(0.0, TAU)
-	return (host_black_hole.position - nearest_other_black_hole.position).angle()
+	return (host_position - nearest_other_position).angle()
 
-static func _assign_dynamic_star_specs_to_hosts(star_specs: Array, host_entries: Array) -> Array:
-	var assignments: Array = []
-	if star_specs.is_empty() or host_entries.is_empty():
-		return assignments
-	for spec in star_specs:
-		var best_host_index: int = 0
-		var best_assigned_count: int = int(host_entries[0]["assigned_count"])
-		for host_index in range(1, host_entries.size()):
-			var assigned_count: int = int(host_entries[host_index]["assigned_count"])
-			if assigned_count < best_assigned_count:
-				best_host_index = host_index
-				best_assigned_count = assigned_count
-		host_entries[best_host_index]["assigned_count"] = best_assigned_count + 1
-		assignments.append({
-			"host_index": best_host_index,
-			"slot_index": best_assigned_count,
-			"spec": spec,
-		})
-	return assignments
-
-static func _resolve_dynamic_star_orbit_radius(profile: Dictionary, slot_index: int) -> float:
+static func _resolve_dynamic_star_orbit_band(profile: Dictionary) -> Dictionary:
 	var inner_orbit_radius: float = float(profile.get("star_inner_orbit_au", 0.0)) * SimConstants.AU
 	var outer_orbit_radius: float = maxf(
 		inner_orbit_radius,
 		float(profile.get("star_outer_orbit_au", 0.0)) * SimConstants.AU
 	)
-	var lane_spacing: float = maxf(0.35 * SimConstants.AU, 12.0 * SimConstants.STAR_RADIUS)
-	return minf(inner_orbit_radius + float(slot_index) * lane_spacing, outer_orbit_radius)
+	return {
+		"inner": inner_orbit_radius,
+		"outer": outer_orbit_radius,
+	}
 
-static func _resolve_dynamic_star_phase(host_entry: Dictionary, slot_index: int) -> float:
-	var assigned_count: int = int(host_entry.get("assigned_count", 1))
-	var centered_slot: float = float(slot_index) - (float(assigned_count - 1) * 0.5)
-	return wrapf(float(host_entry.get("base_phase", 0.0)) + centered_slot * 0.42, 0.0, TAU)
+static func _resolve_dynamic_star_shell_spacing(profile: Dictionary) -> float:
+	return maxf(
+		2.0 * _dynamic_star_planet_envelope_radius(profile) + 0.75 * SimConstants.AU,
+		0.75 * SimConstants.AU
+	)
+
+static func _dynamic_star_planet_envelope_radius(profile: Dictionary) -> float:
+	return _max_core_planet_orbit_radius(int(profile.get("planets_per_star", 0))) * SimConstants.AU
+
+static func _dynamic_star_host_capacity(profile: Dictionary) -> int:
+	var orbit_band: Dictionary = _resolve_dynamic_star_orbit_band(profile)
+	var inner_orbit_radius: float = float(orbit_band.get("inner", 0.0))
+	var outer_orbit_radius: float = float(orbit_band.get("outer", inner_orbit_radius))
+	if outer_orbit_radius + 0.001 < inner_orbit_radius:
+		return 0
+	var shell_spacing: float = _resolve_dynamic_star_shell_spacing(profile)
+	return maxi(int(floor((outer_orbit_radius - inner_orbit_radius) / shell_spacing)) + 1, 1)
+
+static func _build_dynamic_star_layout_plan_from_host_entries(
+		host_entries: Array,
+		profile: Dictionary,
+		rng: RandomNumberGenerator) -> Dictionary:
+	var assignments: Array = []
+	if host_entries.is_empty():
+		return {
+			"assignments": assignments,
+			"dropped_star_count": 0,
+		}
+
+	var star_specs: Array = _build_dynamic_star_specs(profile, rng)
+	var orbit_band: Dictionary = _resolve_dynamic_star_orbit_band(profile)
+	var inner_orbit_radius: float = float(orbit_band.get("inner", 0.0))
+	var shell_spacing: float = _resolve_dynamic_star_shell_spacing(profile)
+	var planet_envelope_radius: float = _dynamic_star_planet_envelope_radius(profile)
+	for host_entry in host_entries:
+		host_entry["planned_count"] = 0
+		host_entry["capacity"] = _dynamic_star_host_capacity(profile)
+
+	for spec in star_specs:
+		var best_host_index: int = _pick_dynamic_star_host_with_capacity(host_entries)
+		if best_host_index < 0:
+			break
+		var shell_index: int = int(host_entries[best_host_index]["planned_count"])
+		host_entries[best_host_index]["planned_count"] = shell_index + 1
+		assignments.append({
+			"host_object_id": str(host_entries[best_host_index]["object_id"]),
+			"host_index": best_host_index,
+			"shell_index": shell_index,
+			"orbit_radius": inner_orbit_radius + float(shell_index) * shell_spacing,
+			"mass_scale": float(spec["mass_scale"]),
+			"planet_envelope_radius": planet_envelope_radius,
+		})
+
+	var host_star_counts: Dictionary = {}
+	for host_index in range(host_entries.size()):
+		host_star_counts[host_index] = int(host_entries[host_index]["planned_count"])
+	for assignment in assignments:
+		var host_index: int = int(assignment["host_index"])
+		assignment["phase"] = _resolve_dynamic_star_phase(
+			host_entries[host_index],
+			int(assignment["shell_index"]),
+			int(host_star_counts.get(host_index, 1))
+		)
+
+	return {
+		"assignments": assignments,
+		"dropped_star_count": maxi(star_specs.size() - assignments.size(), 0),
+	}
+
+static func _pick_dynamic_star_host_with_capacity(host_entries: Array) -> int:
+	var best_host_index: int = -1
+	var best_planned_count: int = INF
+	for host_index in range(host_entries.size()):
+		var planned_count: int = int(host_entries[host_index].get("planned_count", 0))
+		var capacity: int = int(host_entries[host_index].get("capacity", 0))
+		if planned_count >= capacity:
+			continue
+		if best_host_index < 0 or planned_count < best_planned_count:
+			best_host_index = host_index
+			best_planned_count = planned_count
+	return best_host_index
+
+static func _resolve_dynamic_star_phase(host_entry: Dictionary, shell_index: int, host_star_count: int) -> float:
+	if host_star_count <= 1:
+		return wrapf(float(host_entry.get("base_phase", 0.0)), 0.0, TAU)
+	var base_phase: float = float(host_entry.get("base_phase", 0.0))
+	var nearest_other_distance: float = float(host_entry.get("nearest_other_distance", INF))
+	if nearest_other_distance == INF:
+		var phase_step: float = TAU / float(host_star_count)
+		return wrapf(base_phase + float(shell_index) * phase_step, 0.0, TAU)
+	var phase_span: float = PI
+	var centered_index: float = float(shell_index) - (float(host_star_count - 1) * 0.5)
+	var phase_step: float = phase_span / maxf(float(host_star_count - 1), 1.0)
+	return wrapf(base_phase + centered_index * phase_step, 0.0, TAU)
 
 static func _place_analytic_stars(black_hole: SimBody, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []
@@ -790,31 +995,45 @@ static func _place_analytic_stars(black_hole: SimBody, profile: Dictionary, rng:
 		stars.append(star)
 	return stars
 
+static func _core_planet_layout_data(index: int, total_count: int) -> Dictionary:
+	var orbit_radii_au := [0.38, 1.0, 2.2, 3.0]
+	var masses := [800.0, 1100.0, 2800.0, 1900.0]
+	var temperatures := [400.0, 280.0, 120.0, 90.0]
+	if index < orbit_radii_au.size():
+		return {
+			"orbit_radius_au": orbit_radii_au[index],
+			"mass": masses[index],
+			"temperature": temperatures[index],
+		}
+	var extra_index: int = index - orbit_radii_au.size() + 1
+	var progression: float = float(extra_index) / maxf(1.0, float(total_count - orbit_radii_au.size() + 1))
+	return {
+		"orbit_radius_au": orbit_radii_au[orbit_radii_au.size() - 1] + 1.35 * float(extra_index),
+		"mass": lerpf(1900.0, 850.0, progression),
+		"temperature": maxf(35.0, 90.0 - 12.0 * float(extra_index)),
+	}
+
+static func _max_core_planet_orbit_radius(total_count: int) -> float:
+	var max_orbit_radius_au: float = 0.0
+	for index in range(maxi(total_count, 0)):
+		max_orbit_radius_au = maxf(
+			max_orbit_radius_au,
+			float(_core_planet_layout_data(index, total_count)["orbit_radius_au"])
+		)
+	return max_orbit_radius_au
+
 static func _make_core_planet(
 		star: SimBody,
 		index: int,
 		total_count: int,
 		profile: Dictionary,
 		rng: RandomNumberGenerator) -> SimBody:
-	var orbit_radii_au := [0.38, 1.0, 2.2, 3.0]
-	var masses := [800.0, 1100.0, 2800.0, 1900.0]
-	var temperatures := [400.0, 280.0, 120.0, 90.0]
+	var layout: Dictionary = _core_planet_layout_data(index, total_count)
 	var angle: float = (float(index) / maxf(1.0, float(total_count))) * TAU
-	var orbit_radius_au: float = 0.0
-	var mass: float = 0.0
+	var orbit_radius_au: float = float(layout["orbit_radius_au"])
+	var mass: float = float(layout["mass"])
 	var material: int = SimBody.MaterialType.MIXED
-	var temperature: float = 0.0
-
-	if index < orbit_radii_au.size():
-		orbit_radius_au = orbit_radii_au[index]
-		mass = masses[index]
-		temperature = temperatures[index]
-	else:
-		var extra_index: int = index - orbit_radii_au.size() + 1
-		var progression: float = float(extra_index) / maxf(1.0, float(total_count - orbit_radii_au.size() + 1))
-		orbit_radius_au = orbit_radii_au[orbit_radii_au.size() - 1] + 1.35 * float(extra_index)
-		mass = lerpf(1900.0, 850.0, progression)
-		temperature = maxf(35.0, 90.0 - 12.0 * float(extra_index))
+	var temperature: float = float(layout["temperature"])
 	var temperature_offset: float = float(profile.get("planet_temperature_offset", 0.0))
 	var material_profile: Dictionary = profile.get("planet_material_profile", {})
 	material = _pick_material_from_profile(material_profile, rng, SimBody.MaterialType.MIXED)

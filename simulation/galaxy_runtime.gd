@@ -267,6 +267,7 @@ func _apply_focus_relevance_policy() -> void:
 		return
 	var desired_active_cluster_id: int = _determine_focus_active_cluster_id(
 		ranked_clusters,
+		context["focus_global_position"],
 		float(context["visible_world_radius"])
 	)
 	if desired_active_cluster_id >= 0:
@@ -325,7 +326,10 @@ func _rank_clusters_by_focus_distance(target_focus_global_position: Vector2) -> 
 	ranked_clusters.sort_custom(func(a, b): return a["distance"] < b["distance"])
 	return ranked_clusters
 
-func _determine_focus_active_cluster_id(ranked_clusters: Array, visible_world_radius: float) -> int:
+func _determine_focus_active_cluster_id(
+		ranked_clusters: Array,
+		target_focus_global_position: Vector2,
+		visible_world_radius: float) -> int:
 	if ranked_clusters.is_empty():
 		return -1
 	var forced_cluster_id: int = _forced_active_cluster_id()
@@ -339,6 +343,12 @@ func _determine_focus_active_cluster_id(ranked_clusters: Array, visible_world_ra
 	var active_cluster_id: int = active_cluster_session.cluster_id
 	if active_cluster_id == nearest_cluster.cluster_id:
 		return nearest_cluster.cluster_id
+	if not _should_auto_activate_focus_cluster(
+			nearest_cluster,
+			target_focus_global_position,
+			visible_world_radius
+	):
+		return active_cluster_id
 	var active_distance: float = _find_ranked_cluster_distance(ranked_clusters, active_cluster_id)
 	if active_distance == INF:
 		return nearest_cluster.cluster_id
@@ -356,6 +366,19 @@ func _find_ranked_cluster_distance(ranked_clusters: Array, cluster_id: int) -> f
 
 func _simplified_relevance_radius(visible_world_radius: float) -> float:
 	return visible_world_radius * SimConstants.CLUSTER_SIMPLIFIED_RANGE_FACTOR
+
+func _should_auto_activate_focus_cluster(
+		target_cluster: ClusterState,
+		target_focus_global_position: Vector2,
+		visible_world_radius: float) -> bool:
+	if target_cluster == null:
+		return false
+	var authoritative_radius: float = maxf(target_cluster.get_authoritative_radius(), 0.0)
+	if authoritative_radius <= 0.0:
+		return true
+	if target_cluster.global_center.distance_to(target_focus_global_position) <= authoritative_radius:
+		return true
+	return visible_world_radius <= authoritative_radius * 1.25
 
 func _is_cluster_simplified_relevant(
 		cluster_state: ClusterState,

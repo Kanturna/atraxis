@@ -48,3 +48,36 @@ func test_cluster_debug_marker_radius_stays_visible_across_zoom_scales() -> void
 	assert_gt(default_radius, zoomed_in_radius, "ghost markers should shrink in world units when zoomed in instead of ballooning")
 	assert_gt(active_radius, default_radius, "the active cluster marker should stay more prominent than remote ghost markers")
 	assert_gt(zoomed_in_radius, 0.0, "marker radius should remain positive at tight zoom levels")
+
+func test_remote_cluster_preview_payload_uses_blueprint_specs_for_unloaded_clusters() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1888
+	config.cluster_density = 0.92
+	config.void_strength = 0.16
+	config.bh_richness = 0.55
+	config.star_richness = 0.62
+	config.rare_zone_frequency = 1.0
+
+	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state)
+	var preview_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(galaxy_state, session)
+	var preview_kinds: Array = preview_specs.map(func(spec): return str(spec.get("kind", "")))
+
+	assert_false(preview_specs.is_empty(), "remote preview payload should include read-only bodies for non-active clusters")
+	assert_true(preview_kinds.has("black_hole"), "remote previews should include black holes for unloaded clusters")
+	assert_true(preview_kinds.has("star"), "remote previews should include stars for unloaded clusters")
+	assert_true(preview_kinds.has("planet"), "remote previews should include planets for unloaded clusters")
+
+func test_cluster_extent_ring_guard_skips_tiny_and_pathological_radii() -> void:
+	assert_false(
+		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(1.5, 2_000.0),
+		"extent rings below two screen pixels should be skipped to avoid dotted flicker"
+	)
+	assert_false(
+		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(4_000.0, 2_000.0),
+		"extent rings that dwarf the viewport should be skipped to avoid unstable giant arcs"
+	)
+	assert_true(
+		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(240.0, 2_000.0),
+		"mid-scale extent rings should remain visible"
+	)

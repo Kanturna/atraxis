@@ -85,14 +85,20 @@ func _apply_visual_state(node: Node2D, body: SimBody) -> void:
 	node.set("visual_body_type", body.body_type)
 
 static func screen_radius_for_body(body: SimBody) -> float:
-	var scaled_radius: float = body.radius * _visual_scale_for_body(body) * SimConstants.SIM_TO_SCREEN
-	return max(scaled_radius, _min_screen_radius_for_body(body))
+	return screen_radius_for_body_traits(body.body_type, body.radius)
+
+static func screen_radius_for_body_traits(body_type: int, body_radius: float) -> float:
+	var scaled_radius: float = body_radius * _visual_scale_for_body_type(body_type) * SimConstants.SIM_TO_SCREEN
+	return max(scaled_radius, _min_screen_radius_for_body_type(body_type))
 
 static func selection_radius_in_sim(body: SimBody) -> float:
 	return screen_radius_for_body(body) / max(SimConstants.SIM_TO_SCREEN, 0.001)
 
 static func _visual_scale_for_body(body: SimBody) -> float:
-	match body.body_type:
+	return _visual_scale_for_body_type(body.body_type)
+
+static func _visual_scale_for_body_type(body_type: int) -> float:
+	match body_type:
 		SimBody.BodyType.STAR:
 			return SimConstants.STAR_VISUAL_SCALE
 		SimBody.BodyType.BLACK_HOLE:
@@ -107,7 +113,10 @@ static func _visual_scale_for_body(body: SimBody) -> float:
 			return 1.0
 
 static func _min_screen_radius_for_body(body: SimBody) -> float:
-	match body.body_type:
+	return _min_screen_radius_for_body_type(body.body_type)
+
+static func _min_screen_radius_for_body_type(body_type: int) -> float:
+	match body_type:
 		SimBody.BodyType.STAR:
 			return SimConstants.STAR_MIN_SCREEN_RADIUS
 		SimBody.BodyType.BLACK_HOLE:

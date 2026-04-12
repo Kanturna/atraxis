@@ -137,6 +137,10 @@ func test_worldgen_active_cluster_keeps_sector_metadata_for_runtime_and_debug() 
 		session.active_cluster_state.cluster_blueprint.get("layout_diagnostics", null) is Dictionary,
 		"active worldgen clusters should keep their layout diagnostics in the blueprint for debug rendering"
 	)
+	assert_true(
+		session.active_cluster_state.cluster_blueprint.get("preview_object_specs", null) is Array,
+		"active worldgen clusters should store deterministic remote-preview specs in the blueprint"
+	)
 	assert_eq(
 		profile.get("topology_role", ""),
 		"sector_worldgen_cluster",
@@ -206,6 +210,83 @@ func test_dynamic_star_spawn_distributes_hosts_across_available_black_holes() ->
 		)
 
 	assert_gt(distinct_host_ids.size(), 1, "dynamic stars should no longer all spawn around the primary black hole")
+
+func test_dynamic_star_spawn_uses_distinct_safe_shells_for_multi_star_single_host_systems() -> void:
+	var host_bh := WorldBuilder._make_black_hole(12_000_000.0)
+	host_bh.position = Vector2.ZERO
+	var spawned_black_holes: Array = [
+		{"object_id": "cluster_0:black_hole_0", "is_primary": true, "body": host_bh},
+	]
+	var profile := {
+		"star_count": 4,
+		"planets_per_star": 3,
+		"star_inner_orbit_au": 4.0,
+		"star_outer_orbit_au": 20.0,
+		"star_mass_scale_min": 1.0,
+		"star_mass_scale_max": 1.0,
+	}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+
+	var stars: Array = WorldBuilder._place_dynamic_stars(spawned_black_holes, profile, rng)
+	var shell_spacing: float = 2.0 * WorldBuilder._max_core_planet_orbit_radius(3) * SimConstants.AU + 0.75 * SimConstants.AU
+	var orbit_radii: Array = []
+	var phases: Array = []
+
+	assert_eq(stars.size(), 4, "the single-host shell test should keep all four requested stars")
+	for star in stars:
+		orbit_radii.append(star.position.distance_to(host_bh.position))
+		phases.append(wrapf((star.position - host_bh.position).angle(), 0.0, TAU))
+
+	orbit_radii.sort()
+	phases.sort()
+
+	for index in range(1, orbit_radii.size()):
+		assert_gt(
+			float(orbit_radii[index]) - float(orbit_radii[index - 1]),
+			shell_spacing - 0.01,
+			"each star should occupy a distinct shell with enough room for neighboring planetary envelopes"
+		)
+
+	var expected_phase_step: float = TAU / 4.0
+	for index in range(1, phases.size()):
+		assert_almost_eq(
+			float(phases[index]) - float(phases[index - 1]),
+			expected_phase_step,
+			0.01,
+			"same-host stars should be spread evenly around the host instead of bunching into one wedge"
+		)
+
+func test_dynamic_star_spawn_uses_other_hosts_before_capping_overflow() -> void:
+	var world := SimWorld.new()
+	var primary_bh := WorldBuilder._make_black_hole(12_000_000.0)
+	primary_bh.position = Vector2.ZERO
+	world.add_body(primary_bh)
+	var secondary_bh := WorldBuilder._make_black_hole(12_000_000.0)
+	secondary_bh.position = Vector2(12.0 * SimConstants.AU, 0.0)
+	world.add_body(secondary_bh)
+	var spawned_black_holes: Array = [
+		{"object_id": "cluster_0:black_hole_0", "is_primary": true, "body": primary_bh},
+		{"object_id": "cluster_0:black_hole_1", "is_primary": false, "body": secondary_bh},
+	]
+	var profile := {
+		"star_count": 5,
+		"planets_per_star": 5,
+		"star_inner_orbit_au": 4.0,
+		"star_outer_orbit_au": 20.0,
+		"star_mass_scale_min": 1.0,
+		"star_mass_scale_max": 1.0,
+	}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 27
+
+	var stars: Array = WorldBuilder._place_dynamic_stars(spawned_black_holes, profile, rng)
+	var distinct_host_ids: Dictionary = {}
+
+	assert_eq(stars.size(), 4, "overflow should cap to the combined safe host capacity instead of spawning overlapping shells")
+	for star in stars:
+		distinct_host_ids[star.orbit_parent_id] = true
+	assert_eq(distinct_host_ids.size(), 2, "overflow should redistribute stars across other hosts before dropping the excess")
 
 func test_public_worldgen_cluster_can_materialize_more_than_four_planets_per_star_when_legacy_hint_requests_it() -> void:
 	var world := SimWorld.new()

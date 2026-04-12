@@ -279,6 +279,13 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 		if spec["is_primary"]:
 			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
 
+	cluster_state.cluster_blueprint["preview_object_specs"] = WorldBuilder.build_cluster_preview_specs(
+		cluster_state.cluster_id,
+		local_black_hole_specs,
+		cluster_state.simulation_profile,
+		cluster_state.cluster_seed
+	)
+
 	return cluster_state
 
 static func _build_cluster_state_from_candidate(
@@ -373,6 +380,13 @@ static func _build_cluster_state_from_candidate(
 		if spec["is_primary"]:
 			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
 
+	cluster_state.cluster_blueprint["preview_object_specs"] = WorldBuilder.build_cluster_preview_specs(
+		cluster_state.cluster_id,
+		local_black_hole_specs,
+		cluster_state.simulation_profile,
+		cluster_state.cluster_seed
+	)
+
 	return cluster_state
 
 static func _build_worldgen_simulation_profile(
@@ -430,6 +444,10 @@ static func _build_worldgen_simulation_profile(
 	}
 	for key in layout_diagnostics.keys():
 		profile[key] = layout_diagnostics[key]
+	profile["star_count"] = mini(
+		int(profile.get("star_count", 0)),
+		WorldBuilder.dynamic_star_safe_capacity(local_black_hole_count, profile)
+	)
 	return profile
 
 static func _build_simulation_profile(
@@ -467,6 +485,10 @@ static func _build_simulation_profile(
 	}
 	for key in overrides.keys():
 		simulation_profile[key] = overrides[key]
+	simulation_profile["star_count"] = mini(
+		int(simulation_profile.get("star_count", 0)),
+		WorldBuilder.dynamic_star_safe_capacity(local_black_hole_count, simulation_profile)
+	)
 	return simulation_profile
 
 static func _estimate_cluster_radius(local_black_hole_specs: Array, simulation_profile: Dictionary) -> float:
