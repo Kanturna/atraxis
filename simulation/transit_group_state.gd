@@ -7,6 +7,9 @@ extends RefCounted
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
 
 var group_id: String = ""
+var group_kind: String = ""
+var primary_object_id: String = ""
+var anchor_object_id: String = ""
 var source_cluster_id: int = -1
 var target_cluster_id: int = -1
 var arrival_phase: int = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.UNASSIGNED
@@ -18,6 +21,9 @@ var descriptor: Dictionary = {}
 func copy():
 	var duplicate_state = get_script().new()
 	duplicate_state.group_id = group_id
+	duplicate_state.group_kind = group_kind
+	duplicate_state.primary_object_id = primary_object_id
+	duplicate_state.anchor_object_id = anchor_object_id
 	duplicate_state.source_cluster_id = source_cluster_id
 	duplicate_state.target_cluster_id = target_cluster_id
 	duplicate_state.arrival_phase = arrival_phase

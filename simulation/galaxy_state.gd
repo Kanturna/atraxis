@@ -124,19 +124,38 @@ func sync_transit_groups_from_objects() -> void:
 		if group_state == null:
 			group_state = TRANSIT_GROUP_STATE_SCRIPT.new()
 			group_state.group_id = group_id
+		group_state.group_kind = _resolve_transit_group_kind(group_members, group_state)
+		group_state.primary_object_id = _resolve_transit_group_primary_object_id(group_members, group_state)
+		group_state.anchor_object_id = _resolve_transit_group_anchor_object_id(
+			group_members,
+			group_state,
+			group_state.primary_object_id
+		)
 		group_state.member_object_ids.clear()
 		group_state.global_position = Vector2.ZERO
 		group_state.global_velocity = Vector2.ZERO
 		group_state.source_cluster_id = int(group_members[0].source_cluster_id) if not group_members.is_empty() else -1
+		var anchor_member = _find_transit_group_member_by_id(group_members, group_state.anchor_object_id)
 		for transit_state in group_members:
 			group_state.member_object_ids.append(transit_state.object_id)
+			transit_state.transfer_group_id = group_id
+			transit_state.descriptor["transfer_group_id"] = group_id
+			transit_state.descriptor["group_kind"] = group_state.group_kind
+			transit_state.descriptor["group_primary"] = transit_state.object_id == group_state.primary_object_id
+			transit_state.descriptor["group_anchor"] = transit_state.object_id == group_state.anchor_object_id
 			group_state.global_position += transit_state.global_position
 			group_state.global_velocity += transit_state.global_velocity
-		if not group_members.is_empty():
+		if anchor_member != null:
+			group_state.global_position = anchor_member.global_position
+			group_state.global_velocity = anchor_member.global_velocity
+		elif not group_members.is_empty():
 			var member_count: float = float(group_members.size())
 			group_state.global_position /= member_count
 			group_state.global_velocity /= member_count
 		group_state.descriptor["member_count"] = group_members.size()
+		group_state.descriptor["group_kind"] = group_state.group_kind
+		group_state.descriptor["primary_object_id"] = group_state.primary_object_id
+		group_state.descriptor["anchor_object_id"] = group_state.anchor_object_id
 		next_groups_by_id[group_id] = group_state
 
 	transit_group_order = next_group_order
@@ -166,3 +185,41 @@ func find_nearest_cluster(global_position: Vector2, excluded_cluster_id: int = -
 			best_distance = distance
 			matched_cluster = cluster_state
 	return matched_cluster
+
+func _resolve_transit_group_kind(group_members: Array, previous_group) -> String:
+	if previous_group != null and str(previous_group.group_kind) != "":
+		return str(previous_group.group_kind)
+	for transit_state in group_members:
+		var group_kind: String = str(transit_state.descriptor.get("group_kind", ""))
+		if group_kind != "":
+			return group_kind
+	return "group"
+
+func _resolve_transit_group_primary_object_id(group_members: Array, previous_group) -> String:
+	if previous_group != null and _transit_group_members_include_object(group_members, str(previous_group.primary_object_id)):
+		return str(previous_group.primary_object_id)
+	for transit_state in group_members:
+		if bool(transit_state.descriptor.get("group_primary", false)):
+			return transit_state.object_id
+	if group_members.is_empty():
+		return ""
+	return str(group_members[0].object_id)
+
+func _resolve_transit_group_anchor_object_id(group_members: Array, previous_group, fallback_primary_object_id: String) -> String:
+	if previous_group != null and _transit_group_members_include_object(group_members, str(previous_group.anchor_object_id)):
+		return str(previous_group.anchor_object_id)
+	for transit_state in group_members:
+		if bool(transit_state.descriptor.get("group_anchor", false)):
+			return transit_state.object_id
+	return fallback_primary_object_id
+
+func _find_transit_group_member_by_id(group_members: Array, object_id: String):
+	if object_id == "":
+		return null
+	for transit_state in group_members:
+		if transit_state.object_id == object_id:
+			return transit_state
+	return null
+
+func _transit_group_members_include_object(group_members: Array, object_id: String) -> bool:
+	return _find_transit_group_member_by_id(group_members, object_id) != null

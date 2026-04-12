@@ -552,7 +552,7 @@ func test_transit_routing_keeps_current_target_until_a_competitor_wins_by_clear_
 		"clear retargets should still remain en route until the new target is actually reached"
 	)
 
-func test_grouped_transit_objects_share_one_group_target_and_centroid_routing() -> void:
+func test_grouped_transit_objects_share_one_group_target_and_anchor_routing() -> void:
 	var galaxy_state := GalaxyState.new()
 	galaxy_state.add_cluster(_make_manual_cluster(0, Vector2.ZERO, 100.0))
 	galaxy_state.add_cluster(_make_manual_cluster(1, Vector2(1000.0, 0.0), 100.0))
@@ -563,14 +563,18 @@ func test_grouped_transit_objects_share_one_group_target_and_centroid_routing() 
 		0,
 		Vector2(1080.0, 0.0),
 		Vector2.ZERO,
-		"convoy:test"
+		"convoy:test",
+		"convoy",
+		true,
+		true
 	)
 	var right_member = _make_test_transit_asteroid(
 		"transit:group_right",
 		0,
 		Vector2(1420.0, 0.0),
 		Vector2.ZERO,
-		"convoy:test"
+		"convoy:test",
+		"convoy"
 	)
 	galaxy_state.register_transit_object(left_member)
 	galaxy_state.register_transit_object(right_member)
@@ -584,21 +588,24 @@ func test_grouped_transit_objects_share_one_group_target_and_centroid_routing() 
 		1,
 		"two grouped transit objects should be represented by one transit group"
 	)
+	assert_eq(transit_group.primary_object_id, left_member.object_id, "the explicit group primary should persist into the transit group state")
+	assert_eq(transit_group.anchor_object_id, left_member.object_id, "the explicit group anchor should persist into the transit group state")
+	assert_eq(transit_group.group_kind, "convoy", "the grouped transfer should preserve its declared group kind")
 	assert_true(
-		transit_group.global_position.is_equal_approx(Vector2(1250.0, 0.0)),
-		"group routing should use the centroid of all grouped member positions"
+		transit_group.global_position.is_equal_approx(left_member.global_position),
+		"group routing should use the declared anchor member instead of falling back to the centroid"
 	)
 	assert_eq(
 		transit_group.target_cluster_id,
-		2,
-		"the grouped convoy should choose one shared target from its centroid instead of splitting per member"
+		1,
+		"the grouped convoy should choose one shared target from its anchor/primary member instead of splitting per member"
 	)
-	assert_eq(left_member.target_cluster_id, 2, "every group member should inherit the shared group target")
-	assert_eq(right_member.target_cluster_id, 2, "every group member should inherit the shared group target")
+	assert_eq(left_member.target_cluster_id, 1, "every group member should inherit the shared group target")
+	assert_eq(right_member.target_cluster_id, 1, "every group member should inherit the shared group target")
 	assert_eq(
 		left_member.arrival_phase,
-		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE,
-		"grouped routing should keep members en route until the shared group centroid reaches the target"
+		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING,
+		"grouped routing should mark every member as arriving once the shared group anchor reaches the target cluster"
 	)
 
 func test_arriving_transit_object_settles_into_unloaded_target_cluster_as_resident() -> void:
@@ -736,14 +743,18 @@ func test_grouped_arrival_imports_all_members_into_active_cluster_together() -> 
 		-1,
 		active_cluster.global_center + Vector2(import_radius * 0.50, 0.0),
 		Vector2.ZERO,
-		"convoy:active_import"
+		"convoy:active_import",
+		"convoy",
+		true,
+		true
 	)
 	var second_transit = _make_test_transit_asteroid(
 		"transit:group_import_b",
 		-1,
 		active_cluster.global_center + Vector2(import_radius * 1.05, 0.0),
 		Vector2.ZERO,
-		"convoy:active_import"
+		"convoy:active_import",
+		"convoy"
 	)
 	runtime.galaxy_state.register_transit_object(first_transit)
 	runtime.galaxy_state.register_transit_object(second_transit)
@@ -754,10 +765,12 @@ func test_grouped_arrival_imports_all_members_into_active_cluster_together() -> 
 	var second_body: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(second_transit.object_id)
 	var first_object: ClusterObjectState = active_cluster.get_object(first_transit.object_id)
 	var second_object: ClusterObjectState = active_cluster.get_object(second_transit.object_id)
+	var imported_group = active_cluster.get_group("convoy:active_import")
 	assert_not_null(first_body, "group arrival should import the first member into the active cluster")
 	assert_not_null(second_body, "group arrival should import the second member with the same shared handoff")
 	assert_not_null(first_object, "group arrival should persist the first imported member in the active cluster")
 	assert_not_null(second_object, "group arrival should persist the second imported member in the active cluster")
+	assert_not_null(imported_group, "group arrival should create a persistent cluster group record for the imported convoy")
 	assert_eq(
 		runtime.get_transit_object_count(),
 		0,
@@ -772,6 +785,80 @@ func test_grouped_arrival_imports_all_members_into_active_cluster_together() -> 
 		str(second_object.descriptor.get("transfer_group_id", "")),
 		"convoy:active_import",
 		"every imported group member should preserve the shared transfer-group identity"
+	)
+	assert_eq(imported_group.primary_object_id, first_transit.object_id, "the imported cluster group should preserve the explicit primary object id")
+	assert_eq(imported_group.anchor_object_id, first_transit.object_id, "the imported cluster group should preserve the explicit anchor object id")
+	assert_eq(imported_group.group_kind, "convoy", "the imported cluster group should preserve its declared group kind")
+
+func test_group_identity_survives_cluster_switch_and_reload() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 6
+	config.galaxy_cluster_count = 2
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var source_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var source_cluster: ClusterState = runtime.galaxy_state.get_cluster(source_cluster_id)
+	var other_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, source_cluster_id)
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(source_cluster)
+	var first_transit = _make_test_transit_asteroid(
+		"transit:group_persist_a",
+		-1,
+		source_cluster.global_center + Vector2(import_radius * 0.35, 0.0),
+		Vector2.ZERO,
+		"convoy:persist",
+		"convoy",
+		true,
+		true
+	)
+	var second_transit = _make_test_transit_asteroid(
+		"transit:group_persist_b",
+		-1,
+		source_cluster.global_center + Vector2(import_radius * 0.90, 0.0),
+		Vector2.ZERO,
+		"convoy:persist",
+		"convoy"
+	)
+	runtime.galaxy_state.register_transit_object(first_transit)
+	runtime.galaxy_state.register_transit_object(second_transit)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var imported_group = source_cluster.get_group("convoy:persist")
+	assert_not_null(imported_group, "the persistence test needs the grouped convoy to exist in the source cluster before switching")
+
+	runtime.activate_cluster(other_cluster_id)
+
+	var persisted_group = source_cluster.get_group("convoy:persist")
+	assert_not_null(persisted_group, "switching away should keep the grouped ownership record in the previous cluster")
+	assert_eq(persisted_group.primary_object_id, first_transit.object_id, "the simplified cluster should preserve the group's primary id")
+	assert_eq(persisted_group.anchor_object_id, first_transit.object_id, "the simplified cluster should preserve the group's anchor id")
+	assert_eq(persisted_group.group_kind, "convoy", "the simplified cluster should preserve the group's kind")
+	assert_eq(
+		persisted_group.residency_state,
+		ObjectResidencyState.State.SIMPLIFIED,
+		"switching away should demote the persisted group residency alongside its member objects"
+	)
+
+	runtime.activate_cluster(source_cluster_id)
+
+	var reloaded_group = runtime.active_cluster_session.active_cluster_state.get_group("convoy:persist")
+	var reloaded_primary: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(first_transit.object_id)
+	var reloaded_secondary: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(second_transit.object_id)
+	assert_not_null(reloaded_group, "reactivating the cluster should restore the persistent group identity from source-of-truth")
+	assert_not_null(reloaded_primary, "reactivating the cluster should restore the primary group member")
+	assert_not_null(reloaded_secondary, "reactivating the cluster should restore the follower group member")
+	assert_eq(reloaded_group.primary_object_id, first_transit.object_id, "reload should keep the same group primary")
+	assert_eq(reloaded_group.anchor_object_id, first_transit.object_id, "reload should keep the same group anchor")
+	assert_eq(reloaded_group.group_kind, "convoy", "reload should keep the same group kind")
+	assert_eq(
+		reloaded_group.member_object_ids.size(),
+		2,
+		"reload should preserve the full grouped membership set"
 	)
 
 func test_transit_object_reacquires_its_source_cluster_when_it_returns_inside_source_space() -> void:
@@ -977,7 +1064,10 @@ func _make_test_transit_asteroid(
 		source_cluster_id: int,
 		global_position: Vector2,
 		global_velocity: Vector2,
-		transfer_group_id: String = ""):
+		transfer_group_id: String = "",
+		group_kind: String = "",
+		group_primary: bool = false,
+		group_anchor: bool = false):
 	var transit_state = TRANSIT_OBJECT_STATE_SCRIPT.new()
 	transit_state.object_id = object_id
 	transit_state.kind = "asteroid"
@@ -1004,5 +1094,8 @@ func _make_test_transit_asteroid(
 		"active": true,
 		"parent_object_id": "",
 		"transfer_group_id": transfer_group_id,
+		"group_kind": group_kind,
+		"group_primary": group_primary,
+		"group_anchor": group_anchor,
 	}
 	return transit_state
