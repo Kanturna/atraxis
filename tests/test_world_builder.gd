@@ -115,6 +115,24 @@ func test_live_black_hole_mass_updates_every_field_patch_anchor() -> void:
 	for black_hole in world.get_black_holes():
 		assert_almost_eq(black_hole.mass, config.black_hole_mass * 1.25, 0.001, "live BH mass changes should affect all anchors in the field patch")
 
+func test_public_anchor_cluster_can_materialize_more_than_four_planets_per_star() -> void:
+	var world := SimWorld.new()
+	var config = START_CONFIG_SCRIPT.new()
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	config.black_hole_count = 5
+	config.star_count = 1
+	config.planets_per_star = 6
+	config.disturbance_body_count = 0
+
+	WorldBuilder.build_from_config(world, config)
+
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 1, "test setup should create one local spawn star")
+	assert_eq(
+		world.count_bodies_by_type(SimBody.BodyType.PLANET),
+		6,
+		"planet generation should no longer be capped by the old four-slot orbit template"
+	)
+
 func _build_fixture_world(configure: Callable) -> SimWorld:
 	var config = START_CONFIG_SCRIPT.new()
 	configure.call(config)

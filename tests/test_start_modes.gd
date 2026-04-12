@@ -8,9 +8,30 @@ func test_default_config_starts_on_the_public_main_universe_path() -> void:
 
 	assert_eq(
 		config.anchor_topology,
-		START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH,
-		"the public bootstrap should start on the canonical central-anchor universe path"
+		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER,
+		"the public bootstrap should start on the canonical galaxy-cluster universe path"
 	)
+
+func test_public_generation_config_uses_expanded_spawn_ranges() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.star_count = 99
+	config.planets_per_star = 99
+	config.disturbance_body_count = 99
+	config.field_spacing_au = 999.0
+	config.galaxy_cluster_radius_au = 999.0
+	config.galaxy_void_scale = 999.0
+	config.black_hole_count = 9_999
+	config.galaxy_cluster_count = 9_999
+	config.clamp_values()
+
+	assert_eq(config.star_count, SimConstants.MAX_START_STAR_COUNT, "star count should clamp to the expanded public cap")
+	assert_eq(config.planets_per_star, SimConstants.MAX_PLANETS_PER_STAR, "planets per star should clamp to the expanded public cap")
+	assert_eq(config.disturbance_body_count, SimConstants.MAX_DISTURBANCE_BODY_COUNT, "disturbances should clamp to the expanded public cap")
+	assert_eq(config.field_spacing_au, SimConstants.MAX_FIELD_PATCH_SPACING_AU, "field patch spacing should clamp to the expanded public cap")
+	assert_eq(config.galaxy_cluster_radius_au, SimConstants.MAX_GALAXY_CLUSTER_RADIUS_AU, "galaxy cluster radius should clamp to the expanded public cap")
+	assert_eq(config.galaxy_void_scale, SimConstants.MAX_GALAXY_VOID_SCALE, "galaxy void scale should clamp to the expanded public cap")
+	assert_eq(config.black_hole_count, SimConstants.MAX_GALAXY_BLACK_HOLES, "galaxy BH totals should clamp to the expanded public cap")
+	assert_eq(config.galaxy_cluster_count, SimConstants.MAX_GALAXY_CLUSTER_COUNT, "macro cluster count should clamp to the expanded public cap")
 
 func test_public_builder_ignores_internal_fixture_profile_selection() -> void:
 	var sandbox_config = START_CONFIG_SCRIPT.new()

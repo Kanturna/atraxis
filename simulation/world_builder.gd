@@ -659,15 +659,36 @@ static func _make_core_planet(star: SimBody, index: int, total_count: int) -> Si
 		SimBody.MaterialType.MIXED,
 	]
 	var temperatures := [400.0, 280.0, 120.0, 90.0]
-	var clamped_index: int = clampi(index, 0, orbit_radii_au.size() - 1)
 	var angle: float = (float(index) / maxf(1.0, float(total_count))) * TAU
+	var orbit_radius_au: float = 0.0
+	var mass: float = 0.0
+	var material: int = SimBody.MaterialType.MIXED
+	var temperature: float = 0.0
+
+	if index < orbit_radii_au.size():
+		orbit_radius_au = orbit_radii_au[index]
+		mass = masses[index]
+		material = materials[index]
+		temperature = temperatures[index]
+	else:
+		var extra_index: int = index - orbit_radii_au.size() + 1
+		var progression: float = float(extra_index) / maxf(1.0, float(total_count - orbit_radii_au.size() + 1))
+		orbit_radius_au = orbit_radii_au[orbit_radii_au.size() - 1] + 1.35 * float(extra_index)
+		mass = lerpf(1900.0, 850.0, progression)
+		temperature = maxf(35.0, 90.0 - 12.0 * float(extra_index))
+		var outer_materials := [
+			SimBody.MaterialType.MIXED,
+			SimBody.MaterialType.ICY,
+			SimBody.MaterialType.METALLIC,
+		]
+		material = outer_materials[(extra_index - 1) % outer_materials.size()]
 
 	return _make_planet(
 		star,
-		orbit_radii_au[clamped_index] * SimConstants.AU,
-		masses[clamped_index],
-		materials[clamped_index],
-		temperatures[clamped_index],
+		orbit_radius_au * SimConstants.AU,
+		mass,
+		material,
+		temperature,
 		angle
 	)
 

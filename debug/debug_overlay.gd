@@ -44,6 +44,7 @@ var _galaxy_hint_label: Label = null
 @onready var _stats_panel: PanelContainer = $StatsPanel
 @onready var _right_panel_scroll: ScrollContainer = $RightPanelScroll
 @onready var _start_panel: PanelContainer = $RightPanelScroll/RightPanelVBox/StartPanel
+@onready var _start_title_label: Label = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/TitleLabel
 @onready var _anchor_panel: PanelContainer = $RightPanelScroll/RightPanelVBox/AnchorPanel
 @onready var _live_bh_mass_spin: SpinBox = $RightPanelScroll/RightPanelVBox/AnchorPanel/VBox/SettingsGrid/LiveBHMassSpin
 @onready var _anchor_diagnostics_panel: PanelContainer = $RightPanelScroll/RightPanelVBox/AnchorDiagnosticsPanel
@@ -85,16 +86,26 @@ var _galaxy_hint_label: Label = null
 @onready var _restart_button: Button = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/RestartButton
 
 func _ready() -> void:
+	_start_title_label.text = "Universe Builder"
 	_mode_label.visible = false
 	_mode_option.visible = false
+	_anchor_topology_label.text = "Universe layout"
+	_bh_mass_label.text = "Black hole mass"
+	_black_hole_count_label.text = "Total black holes"
+	_star_count_label.text = "Spawn stars in active cluster"
+	_planets_per_star_label.text = "Planets / spawn star"
+	_disturbance_count_label.text = "Spawn disturbances"
+	_star_inner_orbit_label.text = "Star inner orbit (AU)"
+	_star_outer_orbit_label.text = "Star outer orbit (AU)"
+	_field_spacing_label.text = "Local BH spacing (AU)"
+	_restart_button.text = "Rebuild Universe"
 	_anchor_topology_option.clear()
-	_anchor_topology_option.add_item("Central BH", START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
 	_anchor_topology_option.add_item("Galaxy Cluster", START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER)
 	# BH dominance radius ≈ sqrt(G*M/10). For a 12M BH that is ~11 AU, so the
 	# field spacing must exceed ~11 AU to avoid gravity-field overlap. Widen the
 	# spinbox range to 60 AU so the user can actually reach sensible values.
-	_field_spacing_spin.max_value = 60.0
+	_field_spacing_spin.max_value = SimConstants.MAX_FIELD_PATCH_SPACING_AU
 	# Update the hint label text with useful spacing guidance.
 	_field_patch_hint_label.text = (
 		"Field Patch: multiple BHs shape the gravity field. "
@@ -102,9 +113,25 @@ func _ready() -> void:
 		+ "Dominance radius ≈ sqrt(G·M/10) ≈ 11 AU for 12M BH — "
 		+ "set spacing above that value to keep gravity fields separate."
 	)
+	_black_hole_count_spin.min_value = 2.0
+	_black_hole_count_spin.max_value = SimConstants.MAX_FIELD_PATCH_BLACK_HOLES
+	_star_count_spin.min_value = 0.0
+	_star_count_spin.max_value = SimConstants.MAX_START_STAR_COUNT
+	_planets_per_star_spin.min_value = 0.0
+	_planets_per_star_spin.max_value = SimConstants.MAX_PLANETS_PER_STAR
+	_disturbance_count_spin.min_value = 0.0
+	_disturbance_count_spin.max_value = SimConstants.MAX_DISTURBANCE_BODY_COUNT
+	_star_inner_orbit_spin.max_value = SimConstants.MAX_STAR_INNER_ORBIT_AU
+	_star_outer_orbit_spin.max_value = SimConstants.MAX_STAR_OUTER_ORBIT_AU
 	_create_galaxy_controls()
+	_galaxy_cluster_count_spin.max_value = SimConstants.MAX_GALAXY_CLUSTER_COUNT
+	_galaxy_cluster_radius_spin.max_value = SimConstants.MAX_GALAXY_CLUSTER_RADIUS_AU
+	_galaxy_void_scale_spin.max_value = SimConstants.MAX_GALAXY_VOID_SCALE
+	_set_topology_hint_texts()
 	if not _anchor_topology_option.item_selected.is_connected(_on_anchor_topology_selected):
 		_anchor_topology_option.item_selected.connect(_on_anchor_topology_selected)
+	if not _black_hole_count_spin.value_changed.is_connected(_on_generation_control_changed):
+		_black_hole_count_spin.value_changed.connect(_on_generation_control_changed)
 	if not _restart_button.pressed.is_connected(_on_restart_button_pressed):
 		_restart_button.pressed.connect(_on_restart_button_pressed)
 	if not _live_bh_mass_spin.value_changed.is_connected(_on_live_bh_mass_changed):
@@ -276,8 +303,25 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 func _build_cluster_diagnostics_lines() -> String:
 	if _galaxy_state == null or _active_cluster_session == null:
 		return ""
+	var active_cluster: ClusterState = _active_cluster_session.active_cluster_state
+	var profile: Dictionary = active_cluster.simulation_profile if active_cluster != null else {}
+	var topology_role: String = str(profile.get("topology_role", ""))
+	var requested_black_hole_count: int = int(profile.get("requested_black_hole_count", _count_total_galaxy_black_holes()))
+	var requested_cluster_count: int = (
+		int(profile.get("requested_galaxy_cluster_count", _galaxy_state.get_cluster_count()))
+		if topology_role == "galaxy_cluster_map"
+		else 1
+	)
+	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
+	var visible_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
+		+ "Layout         %s\n" % _describe_topology_role(profile)
+		+ "Requested BHs  %d\n" % requested_black_hole_count
+		+ "Galaxy BHs     %d\n" % _count_total_galaxy_black_holes()
+		+ "Active BHs     %d\n" % active_cluster_black_holes
+		+ "Visible BHs    %d\n" % visible_black_holes
+		+ "Macro clusters %d\n" % requested_cluster_count
 		+ "Clusters total  %d\n" % _galaxy_state.get_cluster_count()
 		+ "Clusters simp   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
 		+ "Clusters idle   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED)
@@ -302,7 +346,7 @@ func _create_galaxy_controls() -> void:
 	var settings_grid: GridContainer = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid
 
 	_galaxy_cluster_count_label = Label.new()
-	_galaxy_cluster_count_label.text = "Cluster count"
+	_galaxy_cluster_count_label.text = "Macro clusters"
 	settings_grid.add_child(_galaxy_cluster_count_label)
 	_galaxy_cluster_count_spin = SpinBox.new()
 	_galaxy_cluster_count_spin.min_value = 2
@@ -312,7 +356,7 @@ func _create_galaxy_controls() -> void:
 	settings_grid.add_child(_galaxy_cluster_count_spin)
 
 	_galaxy_cluster_radius_label = Label.new()
-	_galaxy_cluster_radius_label.text = "Cluster radius AU"
+	_galaxy_cluster_radius_label.text = "Local cluster radius AU"
 	settings_grid.add_child(_galaxy_cluster_radius_label)
 	_galaxy_cluster_radius_spin = SpinBox.new()
 	_galaxy_cluster_radius_spin.min_value = 1.0
@@ -322,7 +366,7 @@ func _create_galaxy_controls() -> void:
 	settings_grid.add_child(_galaxy_cluster_radius_spin)
 
 	_galaxy_void_scale_label = Label.new()
-	_galaxy_void_scale_label.text = "Void scale"
+	_galaxy_void_scale_label.text = "Void spacing scale"
 	settings_grid.add_child(_galaxy_void_scale_label)
 	_galaxy_void_scale_spin = SpinBox.new()
 	_galaxy_void_scale_spin.min_value = 2.0
@@ -333,7 +377,7 @@ func _create_galaxy_controls() -> void:
 
 	# Hint label sits below the grid in the VBox, before the restart button.
 	_galaxy_hint_label = Label.new()
-	_galaxy_hint_label.text = "BHs in compact clusters with large voids between them."
+	_galaxy_hint_label.text = ""
 	_galaxy_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var vbox: VBoxContainer = _restart_button.get_parent()
 	vbox.add_child(_galaxy_hint_label)
@@ -344,7 +388,12 @@ func _sync_start_controls(config) -> void:
 		return
 	var safe_config = config.copy()
 	safe_config.clamp_values()
-	_anchor_topology_option.select(safe_config.anchor_topology)
+	_select_option_button_id(
+		_anchor_topology_option,
+		_effective_public_anchor_topology(safe_config.anchor_topology),
+		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	)
+	_apply_topology_control_ranges(_anchor_topology_option.get_selected_id())
 	_seed_spin.value = safe_config.seed
 	_bh_mass_spin.value = safe_config.black_hole_mass
 	_black_hole_count_spin.value = safe_config.black_hole_count
@@ -400,6 +449,11 @@ func _update_start_inputs() -> void:
 	var field_patch_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	var galaxy_cluster_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	var multi_black_hole_enabled: bool = field_patch_enabled or galaxy_cluster_enabled
+	_apply_topology_control_ranges(selected_topology)
+	_black_hole_count_label.text = "Local black holes" if field_patch_enabled else "Total black holes"
+	_star_count_label.text = "Spawn stars in active cluster"
+	_planets_per_star_label.text = "Planets / spawn star"
+	_field_spacing_label.text = "Local BH spacing (AU)"
 	var shared_anchor_nodes: Array[CanvasItem] = [
 		_bh_mass_label,
 		_bh_mass_spin,
@@ -466,6 +520,9 @@ func _update_start_inputs() -> void:
 	_update_panel_group_visibility()
 
 func _on_anchor_topology_selected(_index: int) -> void:
+	_update_start_inputs()
+
+func _on_generation_control_changed(_value: float) -> void:
 	_update_start_inputs()
 
 func _on_live_bh_mass_changed(value: float) -> void:
@@ -537,3 +594,84 @@ func _update_panel_group_visibility() -> void:
 		_left_toggle_button.text = ">" if _left_panels_collapsed else "<"
 	if _right_toggle_button != null:
 		_right_toggle_button.text = "<" if _right_panels_collapsed else ">"
+
+func _set_topology_hint_texts() -> void:
+	_field_patch_hint_label.text = (
+		"Field Patch: local multi-BH system. "
+		+ "Requested black holes are all spawned inside the active cluster. "
+		+ "Increase local BH spacing to keep gravity wells more separated."
+	)
+	if _galaxy_hint_label != null:
+		_galaxy_hint_label.text = (
+			"Galaxy Cluster: large map layout with compact BH clusters separated by voids. "
+			+ "The total black-hole count is distributed across the galaxy, but only the active cluster is materialized in the live sim."
+		)
+
+func _effective_public_anchor_topology(anchor_topology: int) -> int:
+	if anchor_topology == START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH:
+		return START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	return anchor_topology
+
+func _select_option_button_id(option_button: OptionButton, item_id: int, fallback_item_id: int) -> void:
+	if option_button == null:
+		return
+	var resolved_index: int = -1
+	var fallback_index: int = -1
+	for index in range(option_button.get_item_count()):
+		var current_item_id: int = option_button.get_item_id(index)
+		if current_item_id == item_id:
+			resolved_index = index
+			break
+		if current_item_id == fallback_item_id:
+			fallback_index = index
+	if resolved_index < 0:
+		resolved_index = fallback_index
+	if resolved_index < 0 and option_button.get_item_count() > 0:
+		resolved_index = 0
+	if resolved_index >= 0:
+		option_button.select(resolved_index)
+
+func _apply_topology_control_ranges(selected_topology: int) -> void:
+	var galaxy_cluster_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	_black_hole_count_spin.min_value = 2.0
+	_black_hole_count_spin.max_value = (
+		SimConstants.MAX_GALAXY_BLACK_HOLES
+		if galaxy_cluster_enabled
+		else SimConstants.MAX_FIELD_PATCH_BLACK_HOLES
+	)
+	if _black_hole_count_spin.value < _black_hole_count_spin.min_value:
+		_black_hole_count_spin.set_value_no_signal(_black_hole_count_spin.min_value)
+	if _black_hole_count_spin.value > _black_hole_count_spin.max_value:
+		_black_hole_count_spin.set_value_no_signal(_black_hole_count_spin.max_value)
+	if _galaxy_cluster_count_spin == null:
+		return
+	var requested_black_holes: int = maxi(2, int(round(_black_hole_count_spin.value)))
+	var max_cluster_count: int = maxi(2, mini(requested_black_holes, SimConstants.MAX_GALAXY_CLUSTER_COUNT))
+	_galaxy_cluster_count_spin.max_value = max_cluster_count
+	if _galaxy_cluster_count_spin.value > max_cluster_count:
+		_galaxy_cluster_count_spin.set_value_no_signal(max_cluster_count)
+
+func _describe_topology_role(profile: Dictionary) -> String:
+	var topology_role: String = str(profile.get("topology_role", ""))
+	match topology_role:
+		"field_patch_local_system":
+			return "Field Patch"
+		"galaxy_cluster_map":
+			return "Galaxy Cluster"
+		"central_anchor_dev":
+			return "Central BH (dev)"
+		_:
+			return "Universe"
+
+func _count_total_galaxy_black_holes() -> int:
+	if _galaxy_state == null:
+		return 0
+	var total_black_holes: int = 0
+	for cluster_state in _galaxy_state.get_clusters():
+		total_black_holes += cluster_state.get_objects_by_kind("black_hole").size()
+	return total_black_holes
+
+func _count_active_cluster_black_holes() -> int:
+	if _active_cluster_session == null or _active_cluster_session.active_cluster_state == null:
+		return 0
+	return _active_cluster_session.active_cluster_state.get_objects_by_kind("black_hole").size()

@@ -48,7 +48,10 @@ static func _build_main_universe_galaxy(galaxy_state: GalaxyState, config) -> vo
 				Vector2.ZERO,
 				"field_patch_cluster",
 				local_specs,
-				true
+				true,
+				{
+					"topology_role": "field_patch_local_system",
+				}
 			)
 			galaxy_state.add_cluster(cluster_state)
 		START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER:
@@ -64,7 +67,10 @@ static func _build_main_universe_galaxy(galaxy_state: GalaxyState, config) -> vo
 					cluster_spec["global_center"],
 					"galaxy_cluster_primary" if cluster_spec["is_primary"] else "galaxy_cluster_remote",
 					cluster_spec["local_black_hole_specs"],
-					cluster_spec["is_primary"]
+					cluster_spec["is_primary"],
+					{
+						"topology_role": "galaxy_cluster_map",
+					}
 				)
 				galaxy_state.add_cluster(cluster_state)
 				if cluster_spec["is_primary"]:
@@ -84,6 +90,7 @@ static func _build_main_universe_galaxy(galaxy_state: GalaxyState, config) -> vo
 				true,
 				{
 					"fixture_profile": "main_universe",
+					"topology_role": "central_anchor_dev",
 				}
 			)
 			galaxy_state.add_cluster(cluster_state)
@@ -104,6 +111,7 @@ static func _build_reference_fixture_galaxy(galaxy_state: GalaxyState, config) -
 		{
 			"analytic_star_carriers": true,
 			"fixture_profile": "orbital_reference",
+			"topology_role": "central_anchor_dev",
 		}
 	)
 	galaxy_state.add_cluster(cluster_state)
@@ -136,6 +144,7 @@ static func _build_inflow_lab_fixture_galaxy(galaxy_state: GalaxyState, config) 
 		{
 			"content_archetype": "inflow_lab",
 			"fixture_profile": "inflow_lab",
+			"topology_role": "central_anchor_dev",
 		}
 	)
 	cluster_state.radius = _estimate_cluster_radius([], cluster_state.simulation_profile)
@@ -203,7 +212,10 @@ static func _build_simulation_profile(
 		"content_archetype": "anchor_orbital",
 		"analytic_star_carriers": false,
 		"fixture_profile": "main_universe",
+		"topology_role": "field_patch_local_system",
 		"anchor_topology": config.anchor_topology,
+		"requested_black_hole_count": config.black_hole_count,
+		"requested_galaxy_cluster_count": config.galaxy_cluster_count,
 		"has_runtime_snapshot": false,
 		"spawn_anchor_content": spawn_anchor_content,
 		"seed": config.seed,

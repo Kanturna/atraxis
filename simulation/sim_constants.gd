@@ -75,7 +75,7 @@ const ZONE_RENDER_LINE_WIDTH: float = 1.5
 # Practical dominance threshold used for BH field layout and diagnostics.
 # This is a read-only helper value, not a hard gravity cutoff.
 const ANCHOR_DOMINANCE_THRESHOLD: float = 10.0
-const MAX_FIELD_PATCH_BLACK_HOLES: int = 61
+const MAX_FIELD_PATCH_BLACK_HOLES: int = 181
 const ANCHOR_FIELD_RING_SLOT_SCALE: int = 6
 
 # --- Galaxy Cluster layout ---
@@ -85,7 +85,18 @@ const ANCHOR_FIELD_RING_SLOT_SCALE: int = 6
 const DEFAULT_GALAXY_CLUSTER_COUNT: int = 7         # 1 centre + 6 in ring 1
 const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = 5.0 # BH spread within each cluster
 const DEFAULT_GALAXY_VOID_SCALE: float = 4.0        # inter-cluster spacing as multiple of cluster radius
-const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy topology
+const MAX_GALAXY_CLUSTER_COUNT: int = 32
+const MAX_GALAXY_CLUSTER_RADIUS_AU: float = 12.0
+const MAX_GALAXY_VOID_SCALE: float = 10.0
+const MAX_GALAXY_BLACK_HOLES: int = 1200            # separate cap for galaxy topology
+
+# --- Public generation ranges ---
+const MAX_START_STAR_COUNT: int = 12
+const MAX_PLANETS_PER_STAR: int = 8
+const MAX_DISTURBANCE_BODY_COUNT: int = 24
+const MAX_FIELD_PATCH_SPACING_AU: float = 120.0
+const MAX_STAR_INNER_ORBIT_AU: float = 16.0
+const MAX_STAR_OUTER_ORBIT_AU: float = 120.0
 
 # --- Cluster runtime lifecycle ---
 # Simplified remote clusters continue ticking for a short while after they leave

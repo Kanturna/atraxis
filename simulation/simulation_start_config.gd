@@ -33,11 +33,11 @@ const DEFAULT_SPAWN_SPREAD_AU: float = 0.8
 const DEFAULT_INFLOW_SPEED_SCALE: float = 0.85
 const DEFAULT_TANGENTIAL_BIAS: float = 0.65
 const DEFAULT_CHAOS_BODY_COUNT: int = 4
-const DEFAULT_STAR_COUNT: int = 2
+const DEFAULT_STAR_COUNT: int = 3
 const DEFAULT_PLANETS_PER_STAR: int = 2
 const DEFAULT_STAR_INNER_ORBIT_AU: float = 4.0
 const DEFAULT_STAR_OUTER_ORBIT_AU: float = 20.0
-const DEFAULT_BLACK_HOLE_COUNT: int = 5
+const DEFAULT_BLACK_HOLE_COUNT: int = 21
 const DEFAULT_FIELD_SPACING_AU: float = 9.0
 const DEFAULT_GALAXY_CLUSTER_COUNT: int = SimConstants.DEFAULT_GALAXY_CLUSTER_COUNT
 const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = SimConstants.DEFAULT_GALAXY_CLUSTER_RADIUS_AU
@@ -49,7 +49,7 @@ var mode: int:
 		return world_profile
 	set(value):
 		world_profile = value
-var anchor_topology: int = AnchorTopology.CENTRAL_BH
+var anchor_topology: int = AnchorTopology.GALAXY_CLUSTER
 var seed: int = DEFAULT_SEED
 var black_hole_mass: float = DEFAULT_BLACK_HOLE_MASS
 var disturbance_body_count: int = DEFAULT_DISTURBANCE_BODY_COUNT
@@ -96,27 +96,26 @@ func clamp_values() -> void:
 	world_profile = clampi(world_profile, WorldProfile.ORBITAL_SANDBOX, WorldProfile.INFLOW_LAB)
 	anchor_topology = clampi(anchor_topology, AnchorTopology.CENTRAL_BH, AnchorTopology.GALAXY_CLUSTER)
 	black_hole_mass = clampf(black_hole_mass, 2_000_000.0, 30_000_000.0)
-	disturbance_body_count = clampi(disturbance_body_count, 0, 8)
+	disturbance_body_count = clampi(disturbance_body_count, 0, SimConstants.MAX_DISTURBANCE_BODY_COUNT)
 	spawn_radius_au = clampf(spawn_radius_au, 2.5, 12.0)
 	spawn_spread_au = clampf(spawn_spread_au, 0.0, 4.0)
 	inflow_speed_scale = clampf(inflow_speed_scale, 0.05, 3.0)
 	tangential_bias = clampf(tangential_bias, 0.0, 1.0)
 	chaos_body_count = clampi(chaos_body_count, 1, 12)
-	star_count = clampi(star_count, 1, 4)
-	planets_per_star = clampi(planets_per_star, 1, 3)
-	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, 8.0)
-	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, 40.0)
+	star_count = clampi(star_count, 0, SimConstants.MAX_START_STAR_COUNT)
+	planets_per_star = clampi(planets_per_star, 0, SimConstants.MAX_PLANETS_PER_STAR)
+	star_inner_orbit_au = clampf(star_inner_orbit_au, 3.5, SimConstants.MAX_STAR_INNER_ORBIT_AU)
+	star_outer_orbit_au = clampf(star_outer_orbit_au, 6.0, SimConstants.MAX_STAR_OUTER_ORBIT_AU)
 	star_outer_orbit_au = maxf(star_outer_orbit_au, star_inner_orbit_au + 0.5)
 	var max_bh: int = SimConstants.MAX_GALAXY_BLACK_HOLES \
 		if anchor_topology == AnchorTopology.GALAXY_CLUSTER \
 		else SimConstants.MAX_FIELD_PATCH_BLACK_HOLES
 	black_hole_count = clampi(black_hole_count, 1, max_bh)
-	# Upper bound raised to 60 AU so users can spread BHs beyond the dominance
-	# radius (~11 AU for a 12M BH) and avoid gravity-field overlap.
-	field_spacing_au = clampf(field_spacing_au, 6.0, 60.0)
-	galaxy_cluster_count = clampi(galaxy_cluster_count, 2, 12)
-	galaxy_cluster_radius_au = clampf(galaxy_cluster_radius_au, 1.0, 8.0)
-	galaxy_void_scale = clampf(galaxy_void_scale, 2.0, 6.0)
+	field_spacing_au = clampf(field_spacing_au, 6.0, SimConstants.MAX_FIELD_PATCH_SPACING_AU)
+	var max_cluster_count: int = maxi(1, mini(black_hole_count, SimConstants.MAX_GALAXY_CLUSTER_COUNT))
+	galaxy_cluster_count = clampi(galaxy_cluster_count, 1, max_cluster_count)
+	galaxy_cluster_radius_au = clampf(galaxy_cluster_radius_au, 1.0, SimConstants.MAX_GALAXY_CLUSTER_RADIUS_AU)
+	galaxy_void_scale = clampf(galaxy_void_scale, 2.0, SimConstants.MAX_GALAXY_VOID_SCALE)
 
 func uses_inflow_lab_profile() -> bool:
 	return world_profile == WorldProfile.INFLOW_LAB

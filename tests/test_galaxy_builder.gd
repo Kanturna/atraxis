@@ -216,6 +216,27 @@ func test_active_cluster_session_activates_primary_cluster_and_maps_local_to_glo
 			"non-active clusters should remain unloaded until explicitly activated"
 		)
 
+func test_galaxy_cluster_keeps_total_bh_count_above_the_currently_materialized_share() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 21
+	config.galaxy_cluster_count = 7
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state)
+	var total_black_holes: int = 0
+	for cluster_state in galaxy_state.get_clusters():
+		total_black_holes += cluster_state.get_objects_by_kind("black_hole").size()
+	var active_cluster_black_holes: int = session.active_cluster_state.get_objects_by_kind("black_hole").size()
+	var visible_black_holes: int = session.sim_world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE)
+
+	assert_eq(total_black_holes, config.black_hole_count, "galaxy cluster should still describe the full requested BH total across all clusters")
+	assert_eq(visible_black_holes, active_cluster_black_holes, "the live sim should materialize exactly the active cluster share of black holes")
+	assert_lt(visible_black_holes, total_black_holes, "the active cluster view should expose only part of the galaxy-wide BH total at once")
+
 func test_active_cluster_session_switch_marks_previous_cluster_simplified() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
