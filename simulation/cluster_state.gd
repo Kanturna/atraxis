@@ -23,6 +23,12 @@ func register_object(object_state: ClusterObjectState) -> void:
 func get_object(object_id: String) -> ClusterObjectState:
 	return object_registry.get(object_id, null)
 
+func has_object(object_id: String) -> bool:
+	return object_registry.has(object_id)
+
+func unregister_object(object_id: String) -> void:
+	object_registry.erase(object_id)
+
 func get_objects_by_kind(kind: String) -> Array:
 	var matches: Array = []
 	for object_state in object_registry.values():

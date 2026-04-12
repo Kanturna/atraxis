@@ -95,6 +95,8 @@ const CLUSTER_SIMPLIFIED_UNLOAD_DELAY: float = 2.0
 const CLUSTER_ACTIVE_SWITCH_HYSTERESIS_FACTOR: float = 0.5
 const CLUSTER_SIMPLIFIED_RANGE_FACTOR: float = 2.5
 const CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD: float = 1.5
+const CLUSTER_TRANSIT_EXPORT_RADIUS_FACTOR: float = 1.05
+const CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR: float = 1.0
 
 # --- Dominant BH adaptive integration ---
 # Dynamic bodies keep the raw inverse-square gravity law. We only adapt the

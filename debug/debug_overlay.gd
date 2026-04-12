@@ -284,6 +284,7 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Clusters total  %d\n" % _galaxy_state.get_cluster_count()
 		+ "Clusters simp   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
 		+ "Clusters idle   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED)
+		+ "Transit objs    %d\n" % _galaxy_state.get_transit_object_count()
 		+ "Cluster active  %d\n" % _active_cluster_session.cluster_id
 		+ "Cluster global  %.0f, %.0f\n" % [
 			_active_cluster_session.cluster_global_origin.x,

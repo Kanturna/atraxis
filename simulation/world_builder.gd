@@ -6,6 +6,8 @@ extends RefCounted
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
+const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
+const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
 
 class ZoneBoundaries:
 	var inner_max: float
@@ -144,36 +146,13 @@ static func writeback_world_into_cluster(
 	active_bodies.sort_custom(func(a, b): return a.persistent_object_id < b.persistent_object_id)
 
 	for body in active_bodies:
-		var object_state := ClusterObjectState.new()
-		object_state.object_id = persistent_id_by_sim_id[body.id]
-		object_state.kind = _kind_for_body_type(body.body_type)
-		object_state.residency_state = residency_state
-		object_state.local_position = body.position
-		object_state.local_velocity = body.velocity
-		object_state.age = body.age
-		var previous_state: ClusterObjectState = cluster_state.get_object(object_state.object_id)
-		if previous_state != null:
-			object_state.seed = previous_state.seed
-			object_state.descriptor = previous_state.descriptor.duplicate(true)
-		else:
-			object_state.seed = _derive_runtime_object_seed(cluster_state.cluster_seed, object_state.object_id)
-			object_state.descriptor = {}
-		object_state.descriptor["body_type"] = body.body_type
-		object_state.descriptor["material_type"] = body.material_type
-		object_state.descriptor["influence_level"] = body.influence_level
-		object_state.descriptor["mass"] = body.mass
-		object_state.descriptor["radius"] = body.radius
-		object_state.descriptor["temperature"] = body.temperature
-		object_state.descriptor["kinematic"] = body.kinematic
-		object_state.descriptor["scripted_orbit_enabled"] = body.scripted_orbit_enabled
-		object_state.descriptor["orbit_binding_state"] = body.orbit_binding_state
-		object_state.descriptor["orbit_radius"] = body.orbit_radius
-		object_state.descriptor["orbit_angle"] = body.orbit_angle
-		object_state.descriptor["orbit_angular_speed"] = body.orbit_angular_speed
-		object_state.descriptor["debris_mass"] = body.debris_mass
-		object_state.descriptor["sleeping"] = body.sleeping
-		object_state.descriptor["active"] = body.active
-		object_state.descriptor["parent_object_id"] = _resolve_parent_object_id(body, persistent_id_by_sim_id)
+		var object_state: ClusterObjectState = _build_object_state_from_body(
+			cluster_state,
+			body,
+			persistent_id_by_sim_id[body.id],
+			residency_state,
+			persistent_id_by_sim_id
+		)
 		next_object_registry[object_state.object_id] = object_state
 
 	cluster_state.replace_object_registry(next_object_registry)
@@ -186,6 +165,88 @@ static func writeback_world_into_cluster(
 			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
 			object_state.descriptor["is_primary"] = true
 			break
+
+static func extract_outbound_transit_objects_from_active_session(
+		active_cluster_session: ActiveClusterSession) -> Array:
+	var exported: Array = []
+	if active_cluster_session == null \
+			or active_cluster_session.sim_world == null \
+			or active_cluster_session.active_cluster_state == null:
+		return exported
+
+	var cluster_state: ClusterState = active_cluster_session.active_cluster_state
+	var world: SimWorld = active_cluster_session.sim_world
+	var kind_indices: Dictionary = {}
+	var used_object_ids: Dictionary = {}
+	for object_id in cluster_state.object_registry.keys():
+		used_object_ids[object_id] = true
+
+	for body in world.bodies:
+		if not OBJECT_RESIDENCY_POLICY_SCRIPT.should_export_body_from_active_cluster(body, cluster_state):
+			continue
+		var object_id: String = _ensure_body_object_id(
+			cluster_state.cluster_id,
+			body,
+			kind_indices,
+			used_object_ids
+		)
+		var transit_state = _build_transit_object_state_from_body(
+			cluster_state,
+			body,
+			object_id,
+			active_cluster_session.to_global(body.position)
+		)
+		exported.append(transit_state)
+		body.active = false
+		body.marked_for_removal = true
+
+	if not exported.is_empty():
+		world.flush_marked_removals()
+	return exported
+
+static func step_transit_objects(galaxy_state: GalaxyState, dt: float) -> void:
+	if galaxy_state == null or dt <= 0.0:
+		return
+	for transit_state in galaxy_state.get_transit_objects():
+		transit_state.global_position += transit_state.global_velocity * dt
+		transit_state.age += dt
+		var target_cluster: ClusterState = galaxy_state.find_cluster_containing_global_position(
+			transit_state.global_position,
+			SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
+		)
+		transit_state.target_cluster_id = target_cluster.cluster_id if target_cluster != null else -1
+
+static func import_transit_objects_into_active_session(
+		active_cluster_session: ActiveClusterSession) -> Array:
+	var imported_object_ids: Array = []
+	if active_cluster_session == null \
+			or active_cluster_session.galaxy_state == null \
+			or active_cluster_session.active_cluster_state == null \
+			or active_cluster_session.sim_world == null:
+		return imported_object_ids
+
+	var galaxy_state: GalaxyState = active_cluster_session.galaxy_state
+	var cluster_state: ClusterState = active_cluster_session.active_cluster_state
+	var sim_world: SimWorld = active_cluster_session.sim_world
+	for transit_state in galaxy_state.get_transit_objects():
+		if not OBJECT_RESIDENCY_POLICY_SCRIPT.can_import_transit_object_into_cluster(transit_state, cluster_state):
+			continue
+		if sim_world.get_body_by_persistent_object_id(transit_state.object_id) != null:
+			galaxy_state.remove_transit_object(transit_state.object_id)
+			continue
+		var cluster_local_position: Vector2 = active_cluster_session.to_local(transit_state.global_position)
+		cluster_state.register_object(_build_cluster_object_state_from_transit(
+			transit_state,
+			cluster_local_position,
+			ObjectResidencyState.State.ACTIVE
+		))
+		var body: SimBody = _make_body_from_transit_state(transit_state, cluster_local_position)
+		if body == null:
+			continue
+		sim_world.add_body(body)
+		galaxy_state.remove_transit_object(transit_state.object_id)
+		imported_object_ids.append(transit_state.object_id)
+	return imported_object_ids
 
 static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> void:
 	if cluster_state == null or dt <= 0.0:
@@ -282,6 +343,8 @@ static func _materialize_runtime_snapshot(world: SimWorld, cluster_state: Cluste
 	var body_by_object_id: Dictionary = {}
 	var pending_parent_links: Array = []
 	for object_state in object_states:
+		if object_state.residency_state == ObjectResidencyState.State.IN_TRANSIT:
+			continue
 		var body: SimBody = _make_body_from_object_state(object_state)
 		if body == null or not body.active:
 			continue
@@ -327,6 +390,22 @@ static func _make_body_from_object_state(object_state: ClusterObjectState) -> Si
 	body.active = bool(object_state.descriptor.get("active", true))
 	body.age = object_state.age
 	return body
+
+static func _make_body_from_transit_state(
+		transit_state,
+		cluster_local_position: Vector2) -> SimBody:
+	if transit_state == null:
+		return null
+	var object_state := ClusterObjectState.new()
+	object_state.object_id = transit_state.object_id
+	object_state.kind = transit_state.kind
+	object_state.residency_state = ObjectResidencyState.State.ACTIVE
+	object_state.local_position = cluster_local_position
+	object_state.local_velocity = transit_state.global_velocity
+	object_state.age = transit_state.age
+	object_state.seed = transit_state.seed
+	object_state.descriptor = transit_state.descriptor.duplicate(true)
+	return _make_body_from_object_state(object_state)
 
 static func _spawn_black_holes_from_cluster(world: SimWorld, cluster_state: ClusterState) -> Array:
 	var spawned: Array = []
@@ -699,6 +778,84 @@ static func _resolve_parent_object_id(body: SimBody, persistent_id_by_sim_id: Di
 
 static func _derive_runtime_object_seed(cluster_seed: int, object_id: String) -> int:
 	return absi((cluster_seed + 1) * 8_191 + object_id.hash())
+
+static func _build_object_state_from_body(
+		cluster_state: ClusterState,
+		body: SimBody,
+		object_id: String,
+		residency_state: int,
+		persistent_id_by_sim_id: Dictionary = {}) -> ClusterObjectState:
+	var object_state := ClusterObjectState.new()
+	object_state.object_id = object_id
+	object_state.kind = _kind_for_body_type(body.body_type)
+	object_state.residency_state = residency_state
+	object_state.local_position = body.position
+	object_state.local_velocity = body.velocity
+	object_state.age = body.age
+	var previous_state: ClusterObjectState = cluster_state.get_object(object_id)
+	if previous_state != null:
+		object_state.seed = previous_state.seed
+		object_state.descriptor = previous_state.descriptor.duplicate(true)
+	else:
+		object_state.seed = _derive_runtime_object_seed(cluster_state.cluster_seed, object_id)
+		object_state.descriptor = {}
+	object_state.descriptor["body_type"] = body.body_type
+	object_state.descriptor["material_type"] = body.material_type
+	object_state.descriptor["influence_level"] = body.influence_level
+	object_state.descriptor["mass"] = body.mass
+	object_state.descriptor["radius"] = body.radius
+	object_state.descriptor["temperature"] = body.temperature
+	object_state.descriptor["kinematic"] = body.kinematic
+	object_state.descriptor["scripted_orbit_enabled"] = body.scripted_orbit_enabled
+	object_state.descriptor["orbit_binding_state"] = body.orbit_binding_state
+	object_state.descriptor["orbit_radius"] = body.orbit_radius
+	object_state.descriptor["orbit_angle"] = body.orbit_angle
+	object_state.descriptor["orbit_angular_speed"] = body.orbit_angular_speed
+	object_state.descriptor["debris_mass"] = body.debris_mass
+	object_state.descriptor["sleeping"] = body.sleeping
+	object_state.descriptor["active"] = body.active
+	object_state.descriptor["parent_object_id"] = _resolve_parent_object_id(body, persistent_id_by_sim_id)
+	return object_state
+
+static func _build_transit_object_state_from_body(
+		cluster_state: ClusterState,
+		body: SimBody,
+		object_id: String,
+		global_position: Vector2):
+	var object_state: ClusterObjectState = _build_object_state_from_body(
+		cluster_state,
+		body,
+		object_id,
+		ObjectResidencyState.State.IN_TRANSIT
+	)
+	var transit_state = TRANSIT_OBJECT_STATE_SCRIPT.new()
+	transit_state.object_id = object_state.object_id
+	transit_state.kind = object_state.kind
+	transit_state.residency_state = ObjectResidencyState.State.IN_TRANSIT
+	transit_state.source_cluster_id = cluster_state.cluster_id
+	transit_state.global_position = global_position
+	transit_state.global_velocity = body.velocity
+	transit_state.age = object_state.age
+	transit_state.seed = object_state.seed
+	transit_state.descriptor = object_state.descriptor.duplicate(true)
+	return transit_state
+
+static func _build_cluster_object_state_from_transit(
+		transit_state,
+		cluster_local_position: Vector2,
+		residency_state: int) -> ClusterObjectState:
+	var object_state := ClusterObjectState.new()
+	object_state.object_id = transit_state.object_id
+	object_state.kind = transit_state.kind
+	object_state.residency_state = residency_state
+	object_state.local_position = cluster_local_position
+	object_state.local_velocity = transit_state.global_velocity
+	object_state.age = transit_state.age
+	object_state.seed = transit_state.seed
+	object_state.descriptor = transit_state.descriptor.duplicate(true)
+	object_state.descriptor["active"] = residency_state == ObjectResidencyState.State.ACTIVE
+	object_state.descriptor["sleeping"] = false
+	return object_state
 
 static func _is_simplified_analytic_orbiter(object_state: ClusterObjectState) -> bool:
 	return bool(object_state.descriptor.get("scripted_orbit_enabled", false)) \

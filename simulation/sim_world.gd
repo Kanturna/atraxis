@@ -121,6 +121,12 @@ func get_stars() -> Array:
 func get_body_by_id(body_id: int) -> SimBody:
 	return _find_body_by_id(body_id)
 
+func get_body_by_persistent_object_id(object_id: String) -> SimBody:
+	for body in bodies:
+		if body.active and body.persistent_object_id == object_id:
+			return body
+	return null
+
 func get_black_hole() -> SimBody:
 	# Legacy helper for callers that still expect a single dominant BH.
 	# In field-patch setups this intentionally returns the first active BH only.
@@ -151,6 +157,9 @@ func set_black_hole_mass(new_mass: float) -> void:
 			var parent_black_hole: SimBody = get_body_by_id(body.orbit_parent_id)
 			var orbit_speed: float = sqrt(SimConstants.G * parent_black_hole.mass / body.orbit_radius)
 			body.orbit_angular_speed = orbit_speed / body.orbit_radius
+
+func flush_marked_removals() -> void:
+	_flush_removals()
 
 func _integrate_dynamic_bodies(sub_dt: float) -> void:
 	var black_holes: Array = get_black_holes()

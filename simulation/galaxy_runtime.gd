@@ -40,14 +40,17 @@ func step(dt: float) -> void:
 	_apply_focus_relevance_policy()
 	_flush_pending_activation_request()
 	_apply_focus_relevance_policy()
+	WorldBuilder.step_transit_objects(galaxy_state, dt)
 	if active_cluster_session != null and active_cluster_session.sim_world != null:
 		active_cluster_session.sim_world.step_sim(dt)
+		_export_outbound_active_cluster_objects_to_transit()
 		WorldBuilder.writeback_world_into_cluster(
 			active_cluster_session.sim_world,
 			active_cluster_session.active_cluster_state,
 			ObjectResidencyState.State.ACTIVE
 		)
 	_step_simplified_clusters(dt)
+	_import_transit_objects_into_active_cluster()
 	runtime_time_elapsed += dt
 	_apply_simplified_unload_policy()
 
@@ -129,6 +132,11 @@ func set_black_hole_mass(new_mass: float) -> void:
 func get_active_sim_world() -> SimWorld:
 	return active_cluster_session.sim_world if active_cluster_session != null else null
 
+func get_transit_object_count() -> int:
+	if galaxy_state == null:
+		return 0
+	return galaxy_state.get_transit_object_count()
+
 func _activate_cluster_internal(target_cluster_id: int) -> void:
 	active_cluster_session = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state, target_cluster_id)
 	if active_cluster_session == null or active_cluster_session.active_cluster_state == null:
@@ -167,6 +175,29 @@ func _demote_active_cluster_to_simplified() -> void:
 		ObjectResidencyState.State.SIMPLIFIED
 	)
 	active_cluster_session.active_cluster_state.mark_simplified(runtime_time_elapsed)
+
+func _export_outbound_active_cluster_objects_to_transit() -> void:
+	if galaxy_state == null or active_cluster_session == null:
+		return
+	for transit_state in WorldBuilder.extract_outbound_transit_objects_from_active_session(active_cluster_session):
+		var target_cluster: ClusterState = galaxy_state.find_cluster_containing_global_position(
+			transit_state.global_position,
+			SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
+		)
+		transit_state.target_cluster_id = target_cluster.cluster_id if target_cluster != null else -1
+		galaxy_state.register_transit_object(transit_state)
+
+func _import_transit_objects_into_active_cluster() -> void:
+	if active_cluster_session == null or active_cluster_session.active_cluster_state == null:
+		return
+	var imported_object_ids: Array = WorldBuilder.import_transit_objects_into_active_session(active_cluster_session)
+	if imported_object_ids.is_empty():
+		return
+	WorldBuilder.writeback_world_into_cluster(
+		active_cluster_session.sim_world,
+		active_cluster_session.active_cluster_state,
+		ObjectResidencyState.State.ACTIVE
+	)
 
 func _apply_simplified_unload_policy() -> void:
 	if galaxy_state == null:

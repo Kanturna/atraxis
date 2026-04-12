@@ -1,6 +1,8 @@
 extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
+const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
 
 func test_runtime_step_writes_active_cluster_back_into_source_of_truth() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -445,6 +447,119 @@ func test_pending_manual_target_is_not_unloaded_before_activation() -> void:
 		"queued manual targets should remain activatable instead of being lost to auto unload pressure"
 	)
 
+func test_active_dynamic_asteroid_exports_into_galaxy_transit_registry() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 1
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var asteroid: SimBody = _find_active_body_of_type(runtime.get_active_sim_world(), SimBody.BodyType.ASTEROID)
+	assert_not_null(asteroid, "the export test needs one free dynamic asteroid in the active cluster")
+
+	var export_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_export_radius(active_cluster)
+	asteroid.position = Vector2(export_radius + SimConstants.AU, 0.0)
+	asteroid.velocity = Vector2(0.0, 0.0)
+	var exported_object_id: String = asteroid.persistent_object_id
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var transit_state = runtime.galaxy_state.get_transit_object(exported_object_id)
+	assert_not_null(transit_state, "free dynamic asteroids beyond cluster ownership range should become transit records")
+	assert_eq(
+		runtime.get_transit_object_count(),
+		1,
+		"exporting a single asteroid should create exactly one transit record"
+	)
+	assert_false(
+		active_cluster.has_object(exported_object_id),
+		"objects exported into transit should leave the source cluster registry instead of remaining cluster-owned"
+	)
+	assert_null(
+		runtime.get_active_sim_world().get_body_by_persistent_object_id(exported_object_id),
+		"exported transit objects should no longer stay materialized in the active SimWorld"
+	)
+	assert_eq(
+		transit_state.residency_state,
+		ObjectResidencyState.State.IN_TRANSIT,
+		"exported objects should explicitly move into IN_TRANSIT residency"
+	)
+	assert_eq(
+		transit_state.source_cluster_id,
+		active_cluster.cluster_id,
+		"transit records should remember which cluster most recently owned the object"
+	)
+
+func test_in_transit_asteroid_imports_into_active_cluster_when_it_enters_cluster_space() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(active_cluster)
+	var transit_state = _make_test_transit_asteroid(
+		"transit:test_asteroid",
+		active_cluster.cluster_id,
+		active_cluster.global_center + Vector2(import_radius * 0.5, 0.0),
+		Vector2.ZERO
+	)
+	runtime.galaxy_state.register_transit_object(transit_state)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var imported_body: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(transit_state.object_id)
+	var persisted_object: ClusterObjectState = active_cluster.get_object(transit_state.object_id)
+	assert_not_null(imported_body, "transit objects entering the active cluster should be re-materialized into SimWorld")
+	assert_not_null(persisted_object, "imported transit objects should be written back into the active cluster registry")
+	assert_eq(
+		runtime.get_transit_object_count(),
+		0,
+		"importing a transit object should consume it from the galaxy transit registry"
+	)
+	assert_eq(
+		persisted_object.residency_state,
+		ObjectResidencyState.State.ACTIVE,
+		"re-imported transit objects should become ACTIVE again once the local cluster owns them"
+	)
+	assert_true(
+		imported_body.position.is_equal_approx(runtime.active_cluster_session.to_local(transit_state.global_position)),
+		"transit import should convert the stored global position back into the active cluster's local space"
+	)
+
+func test_dynamic_stars_do_not_enter_transit_in_the_first_narrow_pipeline() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var star: SimBody = runtime.get_active_sim_world().get_star()
+	var export_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_export_radius(active_cluster)
+	star.position = Vector2(export_radius + SimConstants.AU, 0.0)
+	star.velocity = Vector2.ZERO
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_transit_object_count(),
+		0,
+		"the first transit pipeline should stay narrow and avoid exporting dynamic stars yet"
+	)
+	assert_not_null(
+		runtime.get_active_sim_world().get_body_by_persistent_object_id(star.persistent_object_id),
+		"unsupported object types should remain owned by the active cluster for now"
+	)
+
 func test_unloaded_cluster_reloads_from_persisted_snapshot() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -539,6 +654,12 @@ func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: in
 			return cluster_state.cluster_id
 	return -1
 
+func _find_active_body_of_type(world: SimWorld, body_type: int) -> SimBody:
+	for body in world.bodies:
+		if body.active and body.body_type == body_type:
+			return body
+	return null
+
 func _compute_black_hole_only_acceleration(object_state: ClusterObjectState, black_hole_states: Array) -> Vector2:
 	var acceleration: Vector2 = Vector2.ZERO
 	for black_hole_state in black_hole_states:
@@ -552,3 +673,35 @@ func _compute_black_hole_only_acceleration(object_state: ClusterObjectState, bla
 			/ dist_sq
 		acceleration += delta * inv_dist * accel_scale
 	return acceleration
+
+func _make_test_transit_asteroid(
+		object_id: String,
+		source_cluster_id: int,
+		global_position: Vector2,
+		global_velocity: Vector2):
+	var transit_state = TRANSIT_OBJECT_STATE_SCRIPT.new()
+	transit_state.object_id = object_id
+	transit_state.kind = "asteroid"
+	transit_state.source_cluster_id = source_cluster_id
+	transit_state.global_position = global_position
+	transit_state.global_velocity = global_velocity
+	transit_state.seed = 12345
+	transit_state.descriptor = {
+		"body_type": SimBody.BodyType.ASTEROID,
+		"material_type": SimBody.MaterialType.ROCKY,
+		"influence_level": SimBody.InfluenceLevel.B,
+		"mass": 8.0,
+		"radius": 3.0,
+		"temperature": 200.0,
+		"kinematic": false,
+		"scripted_orbit_enabled": false,
+		"orbit_binding_state": SimBody.OrbitBindingState.FREE_DYNAMIC,
+		"orbit_radius": 0.0,
+		"orbit_angle": 0.0,
+		"orbit_angular_speed": 0.0,
+		"debris_mass": 0.0,
+		"sleeping": false,
+		"active": true,
+		"parent_object_id": "",
+	}
+	return transit_state
