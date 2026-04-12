@@ -3,9 +3,16 @@ class_name ClusterPreviewRenderer
 extends Node2D
 
 var _preview_specs: Array = []
+var _canvas_scale: float = 1.0
 
-func update_preview_specs(preview_specs: Array) -> void:
+## Minimum on-screen pixel sizes for preview bodies (matches marker-renderer convention).
+const MIN_PREVIEW_SCREEN_PX_STAR: float = 4.0
+const MIN_PREVIEW_SCREEN_PX_BH: float = 3.5
+const MIN_PREVIEW_SCREEN_PX_PLANET: float = 2.5
+
+func update_preview_specs(preview_specs: Array, canvas_scale: float = 1.0) -> void:
 	_preview_specs = preview_specs
+	_canvas_scale = maxf(canvas_scale, 0.001)
 	queue_redraw()
 
 func _draw() -> void:
@@ -15,7 +22,11 @@ func _draw() -> void:
 		var screen_position: Vector2 = BodyRenderer.sim_to_screen(
 			Vector2(spec.get("local_position", Vector2.ZERO))
 		)
-		var screen_radius: float = BodyRenderer.screen_radius_for_body_traits(body_type, body_radius)
+		var min_px: float = _min_preview_screen_px(body_type) / _canvas_scale
+		var screen_radius: float = maxf(
+			BodyRenderer.screen_radius_for_body_traits(body_type, body_radius),
+			min_px
+		)
 		var color: Color = _preview_color(spec)
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
@@ -57,18 +68,27 @@ func _preview_color(spec: Dictionary) -> Color:
 	var material_type: int = int(spec.get("material_type", SimBody.MaterialType.MIXED))
 	match body_type:
 		SimBody.BodyType.BLACK_HOLE:
-			return Color(0.88, 0.94, 1.0, 0.26)
+			return Color(0.88, 0.94, 1.0, 0.50)
 		SimBody.BodyType.STAR:
-			return Color(1.0, 0.92, 0.50, 0.28)
+			return Color(1.0, 0.92, 0.50, 0.60)
 		SimBody.BodyType.PLANET:
 			match material_type:
 				SimBody.MaterialType.ROCKY:
-					return Color(0.72, 0.58, 0.44, 0.24)
+					return Color(0.72, 0.58, 0.44, 0.45)
 				SimBody.MaterialType.ICY:
-					return Color(0.74, 0.90, 1.0, 0.24)
+					return Color(0.74, 0.90, 1.0, 0.45)
 				SimBody.MaterialType.METALLIC:
-					return Color(0.72, 0.76, 0.82, 0.24)
+					return Color(0.72, 0.76, 0.82, 0.45)
 				_:
-					return Color(0.68, 0.68, 0.78, 0.24)
+					return Color(0.68, 0.68, 0.78, 0.45)
 		_:
-			return Color(0.70, 0.72, 0.78, 0.18)
+			return Color(0.70, 0.72, 0.78, 0.35)
+
+static func _min_preview_screen_px(body_type: int) -> float:
+	match body_type:
+		SimBody.BodyType.STAR:
+			return MIN_PREVIEW_SCREEN_PX_STAR
+		SimBody.BodyType.BLACK_HOLE:
+			return MIN_PREVIEW_SCREEN_PX_BH
+		_:
+			return MIN_PREVIEW_SCREEN_PX_PLANET

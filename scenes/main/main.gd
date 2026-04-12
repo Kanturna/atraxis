@@ -264,7 +264,10 @@ func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
 	var target_visible_radius_sim: float = current_visible_radius_sim
 	var authoritative_radius: float = maxf(float(cluster_pick.get("authoritative_radius", 0.0)), 0.0)
 	if authoritative_radius > 0.0:
-		target_visible_radius_sim = minf(current_visible_radius_sim, authoritative_radius * 1.1)
+		# Land at 1.5× the target cluster radius regardless of current zoom:
+		# zooms in from a wide galaxy view and zooms out when already close up,
+		# so the destination cluster is always properly framed on arrival.
+		target_visible_radius_sim = authoritative_radius * 1.5
 	_pending_click_activation_cluster_id = cluster_id
 	_pending_click_activation_focus_global_position = target_global_position
 	_pending_click_activation_initial_focus_global_position = _camera_focus_global_position()

@@ -92,7 +92,7 @@ func render_frame(world: SimWorld) -> void:
 	_cached_remote_preview_specs = build_remote_cluster_preview_specs(_galaxy_state, _active_cluster_session)
 	_cached_marker_payload = build_registered_cluster_debug_markers(_galaxy_state, _active_cluster_session)
 	if _preview_renderer != null:
-		_preview_renderer.update_preview_specs(_cached_remote_preview_specs)
+		_preview_renderer.update_preview_specs(_cached_remote_preview_specs, _debug_marker_canvas_scale())
 	if _cluster_marker_renderer != null:
 		_cluster_marker_renderer.update_marker_payload(
 			_cached_marker_payload,
@@ -423,7 +423,7 @@ static func cluster_debug_marker_world_radius(
 	return clampf(target_marker_radius, min_marker_radius, max_marker_radius)
 
 static func should_draw_cluster_extent_ring(cluster_screen_radius: float, viewport_diagonal: float) -> bool:
-	if cluster_screen_radius < 2.0:
+	if cluster_screen_radius < 0.5:
 		return false
 	if viewport_diagonal <= 0.0:
 		return true

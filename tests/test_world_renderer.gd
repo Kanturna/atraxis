@@ -175,8 +175,12 @@ func test_remote_cluster_pick_uses_markers_when_no_preview_body_is_hit() -> void
 
 func test_cluster_extent_ring_guard_skips_tiny_and_pathological_radii() -> void:
 	assert_false(
+		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(0.3, 2_000.0),
+		"extent rings below 0.5 screen pixels should be skipped to avoid sub-pixel noise"
+	)
+	assert_true(
 		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(1.5, 2_000.0),
-		"extent rings below two screen pixels should be skipped to avoid dotted flicker"
+		"extent rings at 1.5 screen pixels should now be visible at galaxy-scale zoom"
 	)
 	assert_false(
 		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(4_000.0, 2_000.0),
