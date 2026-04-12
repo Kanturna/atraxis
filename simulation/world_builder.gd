@@ -105,6 +105,7 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 				cluster_state.cluster_id,
 				false
 			)
+	_materialize_registered_cluster_objects(world, cluster_state)
 
 static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	var mass_factor: float = star.mass / SimConstants.STAR_MASS
@@ -210,11 +211,26 @@ static func step_transit_objects(galaxy_state: GalaxyState, dt: float) -> void:
 	for transit_state in galaxy_state.get_transit_objects():
 		transit_state.global_position += transit_state.global_velocity * dt
 		transit_state.age += dt
-		var target_cluster: ClusterState = galaxy_state.find_cluster_containing_global_position(
-			transit_state.global_position,
-			SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
-		)
-		transit_state.target_cluster_id = target_cluster.cluster_id if target_cluster != null else -1
+		_refresh_transit_target_assignment(galaxy_state, transit_state)
+
+static func settle_arrived_transit_objects_into_inactive_clusters(
+		galaxy_state: GalaxyState,
+		active_cluster_id: int = -1) -> Array:
+	var settled_object_ids: Array = []
+	if galaxy_state == null:
+		return settled_object_ids
+	for transit_state in galaxy_state.get_transit_objects():
+		if transit_state.arrival_phase != TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING:
+			continue
+		if transit_state.target_cluster_id < 0 or transit_state.target_cluster_id == active_cluster_id:
+			continue
+		var target_cluster: ClusterState = galaxy_state.get_cluster(transit_state.target_cluster_id)
+		if target_cluster == null:
+			continue
+		_accept_transit_object_into_cluster(target_cluster, transit_state)
+		galaxy_state.remove_transit_object(transit_state.object_id)
+		settled_object_ids.append(transit_state.object_id)
+	return settled_object_ids
 
 static func import_transit_objects_into_active_session(
 		active_cluster_session: ActiveClusterSession) -> Array:
@@ -229,6 +245,10 @@ static func import_transit_objects_into_active_session(
 	var cluster_state: ClusterState = active_cluster_session.active_cluster_state
 	var sim_world: SimWorld = active_cluster_session.sim_world
 	for transit_state in galaxy_state.get_transit_objects():
+		if transit_state.arrival_phase != TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING:
+			continue
+		if transit_state.target_cluster_id != cluster_state.cluster_id:
+			continue
 		if not OBJECT_RESIDENCY_POLICY_SCRIPT.can_import_transit_object_into_cluster(transit_state, cluster_state):
 			continue
 		if sim_world.get_body_by_persistent_object_id(transit_state.object_id) != null:
@@ -364,6 +384,25 @@ static func _materialize_runtime_snapshot(world: SimWorld, cluster_state: Cluste
 			continue
 		body.orbit_parent_id = parent_body.id
 		body.orbit_center = parent_body.position
+
+static func _materialize_registered_cluster_objects(world: SimWorld, cluster_state: ClusterState) -> void:
+	if world == null or cluster_state == null:
+		return
+	var registered_states: Array = cluster_state.object_registry.values()
+	registered_states.sort_custom(func(a, b): return a.object_id < b.object_id)
+	for object_state in registered_states:
+		if object_state == null:
+			continue
+		if object_state.kind == "black_hole":
+			continue
+		if object_state.residency_state == ObjectResidencyState.State.IN_TRANSIT:
+			continue
+		if world.get_body_by_persistent_object_id(object_state.object_id) != null:
+			continue
+		var body: SimBody = _make_body_from_object_state(object_state)
+		if body == null or not body.active:
+			continue
+		world.add_body(body)
 
 static func _make_body_from_object_state(object_state: ClusterObjectState) -> SimBody:
 	var body := SimBody.new()
@@ -853,9 +892,42 @@ static func _build_cluster_object_state_from_transit(
 	object_state.age = transit_state.age
 	object_state.seed = transit_state.seed
 	object_state.descriptor = transit_state.descriptor.duplicate(true)
-	object_state.descriptor["active"] = residency_state == ObjectResidencyState.State.ACTIVE
+	object_state.descriptor["active"] = true
 	object_state.descriptor["sleeping"] = false
 	return object_state
+
+static func _refresh_transit_target_assignment(galaxy_state: GalaxyState, transit_state) -> void:
+	if galaxy_state == null or transit_state == null:
+		return
+	var assigned_cluster: ClusterState = galaxy_state.find_nearest_cluster(
+		transit_state.global_position,
+		transit_state.source_cluster_id
+	)
+	if assigned_cluster == null:
+		transit_state.target_cluster_id = -1
+		transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.UNASSIGNED
+		return
+	transit_state.target_cluster_id = assigned_cluster.cluster_id
+	if OBJECT_RESIDENCY_POLICY_SCRIPT.can_import_transit_object_into_cluster(transit_state, assigned_cluster):
+		transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING
+	else:
+		transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE
+
+static func _accept_transit_object_into_cluster(cluster_state: ClusterState, transit_state) -> void:
+	if cluster_state == null or transit_state == null:
+		return
+	var residency_state: int = OBJECT_RESIDENCY_POLICY_SCRIPT.residency_state_for_cluster_activation(
+		cluster_state.activation_state
+	)
+	var cluster_local_position: Vector2 = transit_state.global_position - cluster_state.global_center
+	var object_state: ClusterObjectState = _build_cluster_object_state_from_transit(
+		transit_state,
+		cluster_local_position,
+		residency_state
+	)
+	cluster_state.register_object(object_state)
+	var object_radius: float = float(object_state.descriptor.get("radius", 0.0))
+	cluster_state.radius = maxf(cluster_state.radius, cluster_local_position.length() + object_radius)
 
 static func _is_simplified_analytic_orbiter(object_state: ClusterObjectState) -> bool:
 	return bool(object_state.descriptor.get("scripted_orbit_enabled", false)) \

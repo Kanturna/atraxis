@@ -450,18 +450,24 @@ func test_pending_manual_target_is_not_unloaded_before_activation() -> void:
 func test_active_dynamic_asteroid_exports_into_galaxy_transit_registry() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 6
+	config.galaxy_cluster_count = 2
 	config.star_count = 1
 	config.planets_per_star = 0
 	config.disturbance_body_count = 1
 
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
 	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var target_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, active_cluster.cluster_id)
+	var target_cluster: ClusterState = runtime.galaxy_state.get_cluster(target_cluster_id)
 	var asteroid: SimBody = _find_active_body_of_type(runtime.get_active_sim_world(), SimBody.BodyType.ASTEROID)
 	assert_not_null(asteroid, "the export test needs one free dynamic asteroid in the active cluster")
 
 	var export_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_export_radius(active_cluster)
-	asteroid.position = Vector2(export_radius + SimConstants.AU, 0.0)
+	var to_target_dir: Vector2 = (target_cluster.global_center - active_cluster.global_center).normalized()
+	var outbound_dir: Vector2 = Vector2(-to_target_dir.y, to_target_dir.x)
+	asteroid.position = outbound_dir * (export_radius + SimConstants.AU)
 	asteroid.velocity = Vector2(0.0, 0.0)
 	var exported_object_id: String = asteroid.persistent_object_id
 
@@ -492,6 +498,95 @@ func test_active_dynamic_asteroid_exports_into_galaxy_transit_registry() -> void
 		active_cluster.cluster_id,
 		"transit records should remember which cluster most recently owned the object"
 	)
+	assert_eq(
+		transit_state.target_cluster_id,
+		target_cluster_id,
+		"exported objects should be assigned to the nearest non-source cluster as their first transfer target"
+	)
+	assert_eq(
+		transit_state.arrival_phase,
+		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE,
+		"objects outside the target cluster radius should remain en route until they actually enter the target cluster"
+	)
+
+func test_arriving_transit_object_settles_into_unloaded_target_cluster_as_resident() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 6
+	config.galaxy_cluster_count = 2
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var source_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var target_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, source_cluster.cluster_id)
+	var target_cluster: ClusterState = runtime.galaxy_state.get_cluster(target_cluster_id)
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(target_cluster)
+	var transit_state = _make_test_transit_asteroid(
+		"transit:resident_arrival",
+		source_cluster.cluster_id,
+		target_cluster.global_center + Vector2(import_radius * 0.5, 0.0),
+		Vector2.ZERO
+	)
+	runtime.galaxy_state.register_transit_object(transit_state)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var arrived_object: ClusterObjectState = target_cluster.get_object(transit_state.object_id)
+	assert_eq(
+		target_cluster.activation_state,
+		ClusterActivationState.State.UNLOADED,
+		"the resident arrival test expects the target cluster to stay unloaded during the handoff"
+	)
+	assert_not_null(arrived_object, "arriving transit objects should be written into their unloaded target cluster")
+	assert_eq(
+		arrived_object.residency_state,
+		ObjectResidencyState.State.RESIDENT,
+		"arrival into an unloaded target cluster should hand the object back as RESIDENT data"
+	)
+	assert_eq(
+		runtime.get_transit_object_count(),
+		0,
+		"once a transit object is handed into an unloaded cluster it should leave the global transit registry"
+	)
+
+func test_resident_arrival_reappears_when_target_cluster_becomes_active() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 6
+	config.galaxy_cluster_count = 2
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var source_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var target_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, source_cluster.cluster_id)
+	var target_cluster: ClusterState = runtime.galaxy_state.get_cluster(target_cluster_id)
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(target_cluster)
+	var transit_state = _make_test_transit_asteroid(
+		"transit:reactivation_arrival",
+		source_cluster.cluster_id,
+		target_cluster.global_center + Vector2(import_radius * 0.5, 0.0),
+		Vector2.ZERO
+	)
+	runtime.galaxy_state.register_transit_object(transit_state)
+
+	runtime.step(SimConstants.FIXED_DT)
+	runtime.activate_cluster(target_cluster_id)
+
+	var imported_body: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(transit_state.object_id)
+	assert_not_null(
+		imported_body,
+		"resident arrivals stored on an unloaded target cluster should re-materialize once that cluster becomes active"
+	)
+	assert_true(
+		imported_body.position.is_equal_approx(runtime.active_cluster_session.to_local(transit_state.global_position)),
+		"reactivating the target cluster should restore the resident arrival at the stored local arrival position"
+	)
 
 func test_in_transit_asteroid_imports_into_active_cluster_when_it_enters_cluster_space() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -506,7 +601,7 @@ func test_in_transit_asteroid_imports_into_active_cluster_when_it_enters_cluster
 	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(active_cluster)
 	var transit_state = _make_test_transit_asteroid(
 		"transit:test_asteroid",
-		active_cluster.cluster_id,
+		-1,
 		active_cluster.global_center + Vector2(import_radius * 0.5, 0.0),
 		Vector2.ZERO
 	)

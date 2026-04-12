@@ -90,3 +90,15 @@ func find_cluster_containing_global_position(global_position: Vector2, radius_fa
 			best_distance = distance
 			matched_cluster = cluster_state
 	return matched_cluster
+
+func find_nearest_cluster(global_position: Vector2, excluded_cluster_id: int = -1) -> ClusterState:
+	var matched_cluster: ClusterState = null
+	var best_distance: float = INF
+	for cluster_state in get_clusters():
+		if cluster_state.cluster_id == excluded_cluster_id:
+			continue
+		var distance: float = cluster_state.global_center.distance_to(global_position)
+		if distance < best_distance:
+			best_distance = distance
+			matched_cluster = cluster_state
+	return matched_cluster

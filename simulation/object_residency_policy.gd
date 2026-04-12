@@ -30,6 +30,15 @@ static func transit_import_radius(cluster_state: ClusterState) -> float:
 		return 0.0
 	return cluster_state.radius * SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
 
+static func residency_state_for_cluster_activation(activation_state: int) -> int:
+	match activation_state:
+		ClusterActivationState.State.ACTIVE:
+			return ObjectResidencyState.State.ACTIVE
+		ClusterActivationState.State.SIMPLIFIED:
+			return ObjectResidencyState.State.SIMPLIFIED
+		_:
+			return ObjectResidencyState.State.RESIDENT
+
 static func should_export_body_from_active_cluster(body: SimBody, cluster_state: ClusterState) -> bool:
 	if not supports_active_transit_export(body) or cluster_state == null:
 		return false

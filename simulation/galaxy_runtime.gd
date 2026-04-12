@@ -4,6 +4,9 @@
 class_name GalaxyRuntime
 extends RefCounted
 
+const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
+const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
+
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
 var runtime_time_elapsed: float = 0.0
@@ -41,6 +44,7 @@ func step(dt: float) -> void:
 	_flush_pending_activation_request()
 	_apply_focus_relevance_policy()
 	WorldBuilder.step_transit_objects(galaxy_state, dt)
+	_settle_arrived_transit_objects_into_inactive_clusters()
 	if active_cluster_session != null and active_cluster_session.sim_world != null:
 		active_cluster_session.sim_world.step_sim(dt)
 		_export_outbound_active_cluster_objects_to_transit()
@@ -180,11 +184,17 @@ func _export_outbound_active_cluster_objects_to_transit() -> void:
 	if galaxy_state == null or active_cluster_session == null:
 		return
 	for transit_state in WorldBuilder.extract_outbound_transit_objects_from_active_session(active_cluster_session):
-		var target_cluster: ClusterState = galaxy_state.find_cluster_containing_global_position(
+		var target_cluster: ClusterState = galaxy_state.find_nearest_cluster(
 			transit_state.global_position,
-			SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
+			transit_state.source_cluster_id
 		)
 		transit_state.target_cluster_id = target_cluster.cluster_id if target_cluster != null else -1
+		if target_cluster != null and OBJECT_RESIDENCY_POLICY_SCRIPT.can_import_transit_object_into_cluster(transit_state, target_cluster):
+			transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.ARRIVING
+		elif target_cluster != null:
+			transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE
+		else:
+			transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.UNASSIGNED
 		galaxy_state.register_transit_object(transit_state)
 
 func _import_transit_objects_into_active_cluster() -> void:
@@ -198,6 +208,12 @@ func _import_transit_objects_into_active_cluster() -> void:
 		active_cluster_session.active_cluster_state,
 		ObjectResidencyState.State.ACTIVE
 	)
+
+func _settle_arrived_transit_objects_into_inactive_clusters() -> void:
+	if galaxy_state == null:
+		return
+	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
+	WorldBuilder.settle_arrived_transit_objects_into_inactive_clusters(galaxy_state, active_cluster_id)
 
 func _apply_simplified_unload_policy() -> void:
 	if galaxy_state == null:
