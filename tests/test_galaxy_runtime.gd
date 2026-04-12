@@ -258,6 +258,112 @@ func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays
 		"relevant simplified clusters should keep refreshing their relevance timestamp"
 	)
 
+func test_manual_activation_request_overrides_focus_temporarily_then_releases_back_to_auto() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+
+	runtime.update_focus_context(first_cluster.global_center, 0.0)
+	assert_true(
+		runtime.request_cluster_activation(second_cluster_id),
+		"manual activation requests should be accepted for non-active clusters"
+	)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"manual activation requests should beat automatic focus selection on the next runtime step"
+	)
+
+	var grace_steps: int = int(ceil(
+		SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD / SimConstants.FIXED_DT
+	)) - 1
+	for _i in range(maxi(grace_steps, 0)):
+		runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"manual activation should hold the requested cluster briefly before auto focus takes back over"
+	)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		first_cluster_id,
+		"after the grace window ends, automatic focus relevance should regain control"
+	)
+
+func test_activation_override_pins_cluster_until_cleared() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+
+	runtime.update_focus_context(first_cluster.global_center, 0.0)
+	assert_true(
+		runtime.request_cluster_activation_override(second_cluster_id),
+		"override requests should be accepted for valid clusters"
+	)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"override requests should switch the active cluster even against the current focus"
+	)
+	assert_true(runtime.has_cluster_activation_override(), "override state should stay active until explicitly cleared")
+	assert_eq(
+		runtime.get_cluster_activation_override_id(),
+		second_cluster_id,
+		"runtime should expose which cluster is currently pinned by override"
+	)
+
+	var steps_past_grace: int = int(ceil(
+		(SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD + SimConstants.FIXED_DT) / SimConstants.FIXED_DT
+	)) + 2
+	for _i in range(steps_past_grace):
+		runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"persistent overrides should keep the pinned cluster active after the temporary manual grace period"
+	)
+
+	runtime.clear_cluster_activation_override()
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_false(runtime.has_cluster_activation_override(), "override state should clear cleanly")
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		first_cluster_id,
+		"after clearing the override, automatic focus relevance should take control again"
+	)
+
 func test_simplified_cluster_unloads_after_idle_delay() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -298,6 +404,45 @@ func test_simplified_cluster_unloads_after_idle_delay() -> void:
 		first_cluster.last_unloaded_runtime_time - first_cluster.last_deactivated_runtime_time
 			>= SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY,
 		"unload policy should wait at least the configured simplified idle delay"
+	)
+
+func test_pending_manual_target_is_not_unloaded_before_activation() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
+
+	assert_eq(
+		second_cluster.activation_state,
+		ClusterActivationState.State.UNLOADED,
+		"secondary clusters should start unloaded before they become relevant or targeted"
+	)
+	assert_true(
+		runtime.request_cluster_activation(second_cluster_id),
+		"manual activation requests should be queueable before the next runtime step"
+	)
+
+	var steps_past_unload_delay: int = int(ceil(
+		(SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY + SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD) / SimConstants.FIXED_DT
+	))
+	for _i in range(steps_past_unload_delay):
+		runtime.step(SimConstants.FIXED_DT)
+		if runtime.active_cluster_session.cluster_id == second_cluster_id:
+			break
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"queued manual targets should remain activatable instead of being lost to auto unload pressure"
 	)
 
 func test_unloaded_cluster_reloads_from_persisted_snapshot() -> void:

@@ -562,15 +562,17 @@ static func _make_disturbance_body(star: SimBody, rng: RandomNumberGenerator, in
 
 static func _place_in_orbit(body: SimBody, parent: SimBody,
 		orbital_radius: float, angle: float, eccentricity: float) -> void:
-	body.position = parent.position + Vector2(
-		cos(angle) * orbital_radius,
-		sin(angle) * orbital_radius
-	)
+	var radial: Vector2 = Vector2(cos(angle), sin(angle))
+	body.position = parent.position + radial * orbital_radius
+	var orbit_offset: Vector2 = body.position - parent.position
 	var semi_major: float = orbital_radius / (1.0 - eccentricity) \
 			if eccentricity > 0.0 else orbital_radius
 	var speed: float = sqrt(SimConstants.G * parent.mass * (2.0 / orbital_radius - 1.0 / semi_major))
-	var tangent: Vector2 = Vector2(-sin(angle), cos(angle))
-	body.velocity = parent.velocity + tangent * speed
+	# Derive tangent from the stored orbit offset so position and velocity remain
+	# numerically orthogonal even after float rounding in the placed position.
+	var tangent: Vector2 = Vector2(-orbit_offset.y, orbit_offset.x)
+	var tangential_scale: float = speed / orbital_radius if orbital_radius > 0.0 else 0.0
+	body.velocity = parent.velocity + tangent * tangential_scale
 	body.orbit_parent_id = parent.id
 	body.orbit_center = parent.position
 	body.orbit_radius = orbital_radius

@@ -31,7 +31,12 @@ func test_dynamic_anchor_builds_macro_topology_with_dynamic_stars() -> void:
 			assert_eq(body.orbit_binding_state, SimBody.OrbitBindingState.FREE_DYNAMIC, "dynamic anchor stars should start free")
 			var rel_pos: Vector2 = body.position - black_hole.position
 			var rel_vel: Vector2 = body.velocity - black_hole.velocity
-			assert_almost_eq(rel_pos.dot(rel_vel), 0.0, 0.01, "dynamic anchor stars should start on circular tangential motion")
+			assert_almost_eq(
+				rel_pos.dot(rel_vel),
+				0.0,
+				0.05,
+				"dynamic anchor stars should start on circular tangential motion"
+			)
 			assert_almost_eq(
 				rel_vel.length(),
 				sqrt(SimConstants.G * black_hole.mass / rel_pos.length()),

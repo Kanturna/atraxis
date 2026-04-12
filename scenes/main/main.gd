@@ -43,6 +43,10 @@ func _ready() -> void:
 		_debug_overlay.black_hole_mass_changed.connect(_on_black_hole_mass_changed)
 	if not _debug_overlay.cluster_activation_requested.is_connected(_on_cluster_activation_requested):
 		_debug_overlay.cluster_activation_requested.connect(_on_cluster_activation_requested)
+	if not _debug_overlay.cluster_activation_override_requested.is_connected(_on_cluster_activation_override_requested):
+		_debug_overlay.cluster_activation_override_requested.connect(_on_cluster_activation_override_requested)
+	if not _debug_overlay.cluster_activation_override_cleared.is_connected(_on_cluster_activation_override_cleared):
+		_debug_overlay.cluster_activation_override_cleared.connect(_on_cluster_activation_override_cleared)
 	restart_simulation(_current_start_config)
 
 # -------------------------------------------------------------------------
@@ -131,8 +135,24 @@ func request_cluster_activation(cluster_id: int) -> void:
 		return
 	galaxy_runtime.request_cluster_activation(cluster_id)
 
+func request_cluster_activation_override(cluster_id: int) -> void:
+	if galaxy_runtime == null:
+		return
+	galaxy_runtime.request_cluster_activation_override(cluster_id)
+
+func clear_cluster_activation_override() -> void:
+	if galaxy_runtime == null:
+		return
+	galaxy_runtime.clear_cluster_activation_override()
+
 func _on_cluster_activation_requested(cluster_id: int) -> void:
 	request_cluster_activation(cluster_id)
+
+func _on_cluster_activation_override_requested(cluster_id: int) -> void:
+	request_cluster_activation_override(cluster_id)
+
+func _on_cluster_activation_override_cleared() -> void:
+	clear_cluster_activation_override()
 
 func _sync_runtime_aliases() -> bool:
 	var previous_world: SimWorld = sim_world

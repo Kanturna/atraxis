@@ -12,6 +12,8 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 signal restart_requested(start_config)
 signal black_hole_mass_changed(new_mass: float)
 signal cluster_activation_requested(cluster_id: int)
+signal cluster_activation_override_requested(cluster_id: int)
+signal cluster_activation_override_cleared()
 
 var _sim: SimWorld = null
 var _galaxy_state: GalaxyState = null
@@ -147,6 +149,12 @@ func toggle() -> void:
 
 func request_cluster_activation(cluster_id: int) -> void:
 	cluster_activation_requested.emit(cluster_id)
+
+func request_cluster_activation_override(cluster_id: int) -> void:
+	cluster_activation_override_requested.emit(cluster_id)
+
+func clear_cluster_activation_override() -> void:
+	cluster_activation_override_cleared.emit()
 
 func update_runtime_metrics(frame_delta: float, steps_this_frame: int) -> void:
 	_last_frame_delta = frame_delta

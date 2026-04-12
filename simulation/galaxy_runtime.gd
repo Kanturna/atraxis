@@ -7,7 +7,11 @@ extends RefCounted
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
 var runtime_time_elapsed: float = 0.0
-var pending_activation_cluster_id: int = -1
+var pending_manual_activation_cluster_id: int = -1
+var pending_auto_activation_cluster_id: int = -1
+var activation_override_cluster_id: int = -1
+var manual_activation_hold_cluster_id: int = -1
+var manual_activation_hold_until_runtime_time: float = -1.0
 var focus_global_position: Vector2 = Vector2.ZERO
 var focus_visible_world_radius: float = 0.0
 var has_focus_context: bool = false
@@ -16,7 +20,11 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 	galaxy_state = next_galaxy_state
 	active_cluster_session = null
 	runtime_time_elapsed = 0.0
-	pending_activation_cluster_id = -1
+	pending_manual_activation_cluster_id = -1
+	pending_auto_activation_cluster_id = -1
+	activation_override_cluster_id = -1
+	manual_activation_hold_cluster_id = -1
+	manual_activation_hold_until_runtime_time = -1.0
 	has_focus_context = false
 	focus_global_position = Vector2.ZERO
 	focus_visible_world_radius = 0.0
@@ -55,26 +63,53 @@ func activate_cluster(target_cluster_id: int) -> void:
 	if target_cluster == null:
 		return
 	if active_cluster_session != null and active_cluster_session.cluster_id == target_cluster_id:
-		pending_activation_cluster_id = -1
+		_clear_pending_activation_target(target_cluster_id)
 		return
 
 	_demote_active_cluster_to_simplified()
 	_activate_cluster_internal(target_cluster_id)
-	pending_activation_cluster_id = -1
+	_clear_pending_activation_target(target_cluster_id)
 
 func request_cluster_activation(target_cluster_id: int) -> bool:
 	if galaxy_state == null or not galaxy_state.has_cluster(target_cluster_id):
 		return false
 	if active_cluster_session != null and active_cluster_session.cluster_id == target_cluster_id:
 		return false
-	pending_activation_cluster_id = target_cluster_id
+	pending_manual_activation_cluster_id = target_cluster_id
+	pending_auto_activation_cluster_id = -1
+	manual_activation_hold_cluster_id = target_cluster_id
+	manual_activation_hold_until_runtime_time = runtime_time_elapsed + SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD
 	return true
 
+func request_cluster_activation_override(target_cluster_id: int) -> bool:
+	if galaxy_state == null or not galaxy_state.has_cluster(target_cluster_id):
+		return false
+	activation_override_cluster_id = target_cluster_id
+	manual_activation_hold_cluster_id = target_cluster_id
+	manual_activation_hold_until_runtime_time = runtime_time_elapsed + SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD
+	if active_cluster_session != null and active_cluster_session.cluster_id == target_cluster_id:
+		_clear_pending_activation_target(target_cluster_id)
+		return true
+	pending_manual_activation_cluster_id = target_cluster_id
+	pending_auto_activation_cluster_id = -1
+	return true
+
+func clear_cluster_activation_override() -> void:
+	activation_override_cluster_id = -1
+
+func has_cluster_activation_override() -> bool:
+	return activation_override_cluster_id >= 0 and galaxy_state != null and galaxy_state.has_cluster(activation_override_cluster_id)
+
+func get_cluster_activation_override_id() -> int:
+	return activation_override_cluster_id
+
 func has_pending_activation_request() -> bool:
-	return pending_activation_cluster_id >= 0
+	return pending_manual_activation_cluster_id >= 0 or pending_auto_activation_cluster_id >= 0
 
 func get_pending_activation_cluster_id() -> int:
-	return pending_activation_cluster_id
+	if pending_manual_activation_cluster_id >= 0:
+		return pending_manual_activation_cluster_id
+	return pending_auto_activation_cluster_id
 
 func writeback_active_cluster() -> void:
 	if active_cluster_session == null or active_cluster_session.sim_world == null:
@@ -118,10 +153,9 @@ func _step_simplified_clusters(dt: float) -> void:
 		WorldBuilder.step_simplified_cluster(cluster_state, dt)
 
 func _flush_pending_activation_request() -> void:
-	if pending_activation_cluster_id < 0:
+	var target_cluster_id: int = get_pending_activation_cluster_id()
+	if target_cluster_id < 0:
 		return
-	var target_cluster_id: int = pending_activation_cluster_id
-	pending_activation_cluster_id = -1
 	activate_cluster(target_cluster_id)
 
 func _demote_active_cluster_to_simplified() -> void:
@@ -143,7 +177,11 @@ func _apply_simplified_unload_policy() -> void:
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state.cluster_id == active_cluster_id:
 			continue
-		if _is_cluster_simplified_relevant(cluster_state, context["focus_global_position"], relevance_radius):
+		if _should_keep_cluster_simplified(
+			cluster_state,
+			context["focus_global_position"],
+			relevance_radius
+		):
 			continue
 		if not cluster_state.can_unload_from_simplified(
 			runtime_time_elapsed,
@@ -164,20 +202,22 @@ func _apply_focus_relevance_policy() -> void:
 		float(context["visible_world_radius"])
 	)
 	if desired_active_cluster_id >= 0:
-		request_cluster_activation(desired_active_cluster_id)
+		_queue_auto_activation_request(desired_active_cluster_id)
 
 	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
 	var relevance_radius: float = _simplified_relevance_radius(float(context["visible_world_radius"]))
-	for rank_index in range(ranked_clusters.size()):
-		var entry: Dictionary = ranked_clusters[rank_index]
+	for entry in ranked_clusters:
 		var cluster_state: ClusterState = entry["cluster_state"]
 		if cluster_state == null:
 			continue
 		if cluster_state.cluster_id == active_cluster_id:
 			cluster_state.mark_relevant(runtime_time_elapsed)
 			continue
-		if not _is_cluster_simplified_relevant(cluster_state, context["focus_global_position"], relevance_radius) \
-				and rank_index > SimConstants.CLUSTER_SIMPLIFIED_NEAREST_COUNT:
+		if not _should_keep_cluster_simplified(
+			cluster_state,
+			context["focus_global_position"],
+			relevance_radius
+		):
 			continue
 		if cluster_state.activation_state == ClusterActivationState.State.UNLOADED:
 			cluster_state.mark_simplified(runtime_time_elapsed)
@@ -213,6 +253,9 @@ func _rank_clusters_by_focus_distance(target_focus_global_position: Vector2) -> 
 func _determine_focus_active_cluster_id(ranked_clusters: Array, visible_world_radius: float) -> int:
 	if ranked_clusters.is_empty():
 		return -1
+	var forced_cluster_id: int = _forced_active_cluster_id()
+	if forced_cluster_id >= 0:
+		return forced_cluster_id
 	var nearest_cluster: ClusterState = ranked_clusters[0]["cluster_state"]
 	if nearest_cluster == null:
 		return -1
@@ -246,3 +289,51 @@ func _is_cluster_simplified_relevant(
 	if cluster_state == null:
 		return false
 	return cluster_state.global_center.distance_to(target_focus_global_position) <= relevance_radius
+
+func _queue_auto_activation_request(target_cluster_id: int) -> void:
+	if target_cluster_id < 0:
+		return
+	if pending_manual_activation_cluster_id >= 0:
+		return
+	if active_cluster_session != null and active_cluster_session.cluster_id == target_cluster_id:
+		pending_auto_activation_cluster_id = -1
+		return
+	pending_auto_activation_cluster_id = target_cluster_id
+
+func _forced_active_cluster_id() -> int:
+	if has_cluster_activation_override():
+		return activation_override_cluster_id
+	if _is_manual_activation_hold_active():
+		return manual_activation_hold_cluster_id
+	return -1
+
+func _is_manual_activation_hold_active() -> bool:
+	if manual_activation_hold_cluster_id < 0 or galaxy_state == null:
+		return false
+	if not galaxy_state.has_cluster(manual_activation_hold_cluster_id):
+		return false
+	return runtime_time_elapsed + (SimConstants.FIXED_DT * 0.5) < manual_activation_hold_until_runtime_time
+
+func _should_keep_cluster_simplified(
+		cluster_state: ClusterState,
+		target_focus_global_position: Vector2,
+		relevance_radius: float) -> bool:
+	if cluster_state == null:
+		return false
+	if cluster_state.cluster_id == activation_override_cluster_id:
+		return true
+	if cluster_state.cluster_id == pending_manual_activation_cluster_id:
+		return true
+	if cluster_state.cluster_id == pending_auto_activation_cluster_id:
+		return true
+	if cluster_state.cluster_id == manual_activation_hold_cluster_id and _is_manual_activation_hold_active():
+		return true
+	if _is_cluster_simplified_relevant(cluster_state, target_focus_global_position, relevance_radius):
+		return true
+	return false
+
+func _clear_pending_activation_target(target_cluster_id: int) -> void:
+	if pending_manual_activation_cluster_id == target_cluster_id:
+		pending_manual_activation_cluster_id = -1
+	if pending_auto_activation_cluster_id == target_cluster_id:
+		pending_auto_activation_cluster_id = -1

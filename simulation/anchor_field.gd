@@ -79,7 +79,10 @@ static func build_galaxy_cluster_cluster_specs(
 		mass: float) -> Array:
 	var safe_total: int = maxi(total_count, 1)
 	var safe_clusters: int = clampi(cluster_count, 1, safe_total)
-	var cluster_spacing_au: float = cluster_radius_au * void_scale
+	# Macro spacing includes one extra local cluster radius so the requested
+	# void survives after both clusters spend part of that distance on their own
+	# internal BH spread.
+	var cluster_spacing_au: float = cluster_radius_au * (void_scale + 1.0) + 0.001
 	var center_specs: Array = build_cluster_center_specs(safe_clusters, cluster_spacing_au)
 	var counts: Array = distribute_black_holes_across_clusters(safe_total, safe_clusters)
 
@@ -189,8 +192,9 @@ static func build_star_anchor_state(star: SimBody, black_holes: Array) -> Dictio
 ## identical geometry — no separate algorithm is needed.
 ##
 ## cluster_radius_au  — BH spread within a single cluster (tight)
-## void_scale         — cluster-centre spacing = void_scale × cluster_radius_au
-##                      (typically 3–5 so clusters are visually separated by voids)
+## void_scale         — desired void scale between populated cluster extents.
+##                      Macro centre spacing adds one extra cluster radius so
+##                      internal BH spread does not collapse that void.
 ##
 ## The spec dict returned per BH contains all fields from build_field_patch_specs
 ## plus "cluster_index: int" for diagnostics.
