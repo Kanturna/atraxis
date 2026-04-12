@@ -46,6 +46,7 @@ enum OrbitBindingState {
 # -------------------------------------------------------------------------
 
 var id: int = -1
+var persistent_object_id: String = ""
 var body_type: int = BodyType.ASTEROID
 var material_type: int = MaterialType.ROCKY
 var influence_level: int = InfluenceLevel.B

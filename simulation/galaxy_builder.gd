@@ -165,6 +165,7 @@ static func _build_simulation_profile(config, spawn_anchor_content: bool, local_
 	return {
 		"start_mode": config.mode,
 		"anchor_topology": config.anchor_topology,
+		"has_runtime_snapshot": false,
 		"spawn_anchor_content": spawn_anchor_content,
 		"seed": config.seed,
 		"black_hole_mass": config.black_hole_mass,

@@ -8,6 +8,7 @@ var radius: float = 0.0
 var cluster_seed: int = 0
 var classification: String = ""
 var activation_state: int = ClusterActivationState.State.UNLOADED
+var simulated_time: float = 0.0
 var cluster_blueprint: Dictionary = {}
 var simulation_profile: Dictionary = {}
 var object_registry: Dictionary = {}
@@ -29,6 +30,13 @@ func get_objects_by_kind(kind: String) -> Array:
 func get_primary_black_hole_object_id() -> String:
 	return str(cluster_blueprint.get("primary_black_hole_object_id", ""))
 
+func replace_object_registry(next_registry: Dictionary) -> void:
+	object_registry = next_registry
+
+func set_object_residency_state(next_state: int) -> void:
+	for object_state in object_registry.values():
+		object_state.residency_state = next_state
+
 func copy() -> ClusterState:
 	var duplicate_state := ClusterState.new()
 	duplicate_state.cluster_id = cluster_id
@@ -37,9 +45,9 @@ func copy() -> ClusterState:
 	duplicate_state.cluster_seed = cluster_seed
 	duplicate_state.classification = classification
 	duplicate_state.activation_state = activation_state
+	duplicate_state.simulated_time = simulated_time
 	duplicate_state.cluster_blueprint = cluster_blueprint.duplicate(true)
 	duplicate_state.simulation_profile = simulation_profile.duplicate(true)
 	for object_id in object_registry.keys():
 		duplicate_state.object_registry[object_id] = object_registry[object_id].copy()
 	return duplicate_state
-

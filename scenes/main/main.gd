@@ -1,6 +1,6 @@
 ## main.gd
-## Root scene script. Owns the currently active cluster session, drives the
-## fixed-timestep loop, and wires the local SimWorld projection to the renderer.
+## Root scene script. Owns the galaxy runtime, drives the fixed-timestep loop,
+## and wires the active local SimWorld projection to the renderer.
 extends Node2D
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
@@ -17,6 +17,7 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 # Simulation state
 # -------------------------------------------------------------------------
 
+var galaxy_runtime: GalaxyRuntime = null
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
 var sim_world: SimWorld = null
@@ -51,9 +52,10 @@ func _process(delta: float) -> void:
 	_accumulated_dt += delta
 	var steps: int = 0
 	while _accumulated_dt >= SimConstants.FIXED_DT and steps < MAX_STEPS_PER_FRAME:
-		sim_world.step_sim(SimConstants.FIXED_DT)
+		galaxy_runtime.step(SimConstants.FIXED_DT)
 		_accumulated_dt -= SimConstants.FIXED_DT
 		steps += 1
+	_sync_runtime_aliases()
 
 	# Render the current sim state (after all steps for this frame)
 	_world_renderer.render_frame(sim_world)
@@ -86,9 +88,8 @@ func restart_simulation(config) -> void:
 	_disconnect_world_signals()
 	_accumulated_dt = 0.0
 
-	active_cluster_session = WorldBuilder.build_active_session_from_config(_current_start_config)
-	galaxy_state = active_cluster_session.galaxy_state
-	sim_world = active_cluster_session.sim_world
+	galaxy_runtime = WorldBuilder.build_runtime_from_config(_current_start_config)
+	_sync_runtime_aliases()
 	if sim_world == null:
 		return
 
@@ -122,5 +123,16 @@ func _on_restart_requested(config) -> void:
 func _on_black_hole_mass_changed(new_mass: float) -> void:
 	_current_start_config.black_hole_mass = new_mass
 	_current_start_config.clamp_values()
-	if active_cluster_session != null:
-		active_cluster_session.set_black_hole_mass(_current_start_config.black_hole_mass)
+	if galaxy_runtime != null:
+		galaxy_runtime.set_black_hole_mass(_current_start_config.black_hole_mass)
+		_sync_runtime_aliases()
+
+func _sync_runtime_aliases() -> void:
+	if galaxy_runtime == null:
+		galaxy_state = null
+		active_cluster_session = null
+		sim_world = null
+		return
+	galaxy_state = galaxy_runtime.galaxy_state
+	active_cluster_session = galaxy_runtime.active_cluster_session
+	sim_world = galaxy_runtime.get_active_sim_world()

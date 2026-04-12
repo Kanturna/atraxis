@@ -16,6 +16,20 @@ class ZoneBoundaries:
 static func build_galaxy_state_from_config(start_config) -> GalaxyState:
 	return GALAXY_BUILDER_SCRIPT.build_from_config(start_config)
 
+static func build_runtime_from_config(start_config) -> GalaxyRuntime:
+	var galaxy_state: GalaxyState = build_galaxy_state_from_config(start_config)
+	return build_runtime_from_galaxy_state(galaxy_state, galaxy_state.primary_cluster_id)
+
+static func build_runtime_from_galaxy_state(
+		galaxy_state: GalaxyState,
+		target_cluster_id: int = -1) -> GalaxyRuntime:
+	var runtime := GalaxyRuntime.new()
+	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
+		return runtime
+	var resolved_cluster_id: int = target_cluster_id if target_cluster_id >= 0 else galaxy_state.primary_cluster_id
+	runtime.initialize(galaxy_state, resolved_cluster_id)
+	return runtime
+
 static func build_active_session_from_config(start_config) -> ActiveClusterSession:
 	var galaxy_state: GalaxyState = build_galaxy_state_from_config(start_config)
 	return build_active_session_from_galaxy_state(galaxy_state, galaxy_state.primary_cluster_id)
@@ -59,6 +73,10 @@ static func build_from_config(world: SimWorld, start_config) -> void:
 static func materialize_cluster_into_world(world: SimWorld, cluster_state: ClusterState) -> void:
 	if world == null or cluster_state == null:
 		return
+	world.time_elapsed = cluster_state.simulated_time
+	if _has_runtime_snapshot(cluster_state):
+		_materialize_runtime_snapshot(world, cluster_state)
+		return
 
 	var spawned_black_holes: Array = _spawn_black_holes_from_cluster(world, cluster_state)
 	var profile: Dictionary = cluster_state.simulation_profile
@@ -66,11 +84,25 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 
 	match start_mode:
 		START_CONFIG_SCRIPT.StartMode.CHAOS_INFLOW:
-			_materialize_chaos_cluster(world, profile, cluster_state.cluster_seed)
+			_materialize_chaos_cluster(world, profile, cluster_state.cluster_seed, cluster_state.cluster_id)
 		START_CONFIG_SCRIPT.StartMode.STABLE_ANCHOR:
-			_materialize_anchor_cluster(world, spawned_black_holes, profile, cluster_state.cluster_seed, true)
+			_materialize_anchor_cluster(
+				world,
+				spawned_black_holes,
+				profile,
+				cluster_state.cluster_seed,
+				cluster_state.cluster_id,
+				true
+			)
 		_:
-			_materialize_anchor_cluster(world, spawned_black_holes, profile, cluster_state.cluster_seed, false)
+			_materialize_anchor_cluster(
+				world,
+				spawned_black_holes,
+				profile,
+				cluster_state.cluster_seed,
+				cluster_state.cluster_id,
+				false
+			)
 
 static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	var mass_factor: float = star.mass / SimConstants.STAR_MASS
@@ -81,6 +113,196 @@ static func compute_zones(star: SimBody) -> ZoneBoundaries:
 	bounds.outer_min = SimConstants.OUTER_ZONE_MIN * mass_factor
 	return bounds
 
+static func writeback_world_into_cluster(
+		world: SimWorld,
+		cluster_state: ClusterState,
+		residency_state: int) -> void:
+	if world == null or cluster_state == null:
+		return
+
+	var next_object_registry: Dictionary = {}
+	var kind_indices: Dictionary = {}
+	var used_object_ids: Dictionary = {}
+	for object_id in cluster_state.object_registry.keys():
+		used_object_ids[object_id] = true
+	var persistent_id_by_sim_id: Dictionary = {}
+	for body in world.bodies:
+		if not body.active:
+			continue
+		var object_id: String = _ensure_body_object_id(
+			cluster_state.cluster_id,
+			body,
+			kind_indices,
+			used_object_ids
+		)
+		persistent_id_by_sim_id[body.id] = object_id
+
+	var active_bodies: Array = []
+	for body in world.bodies:
+		if body.active:
+			active_bodies.append(body)
+	active_bodies.sort_custom(func(a, b): return a.persistent_object_id < b.persistent_object_id)
+
+	for body in active_bodies:
+		var object_state := ClusterObjectState.new()
+		object_state.object_id = persistent_id_by_sim_id[body.id]
+		object_state.kind = _kind_for_body_type(body.body_type)
+		object_state.residency_state = residency_state
+		object_state.local_position = body.position
+		object_state.local_velocity = body.velocity
+		object_state.age = body.age
+		var previous_state: ClusterObjectState = cluster_state.get_object(object_state.object_id)
+		if previous_state != null:
+			object_state.seed = previous_state.seed
+			object_state.descriptor = previous_state.descriptor.duplicate(true)
+		else:
+			object_state.seed = _derive_runtime_object_seed(cluster_state.cluster_seed, object_state.object_id)
+			object_state.descriptor = {}
+		object_state.descriptor["body_type"] = body.body_type
+		object_state.descriptor["material_type"] = body.material_type
+		object_state.descriptor["influence_level"] = body.influence_level
+		object_state.descriptor["mass"] = body.mass
+		object_state.descriptor["radius"] = body.radius
+		object_state.descriptor["temperature"] = body.temperature
+		object_state.descriptor["kinematic"] = body.kinematic
+		object_state.descriptor["scripted_orbit_enabled"] = body.scripted_orbit_enabled
+		object_state.descriptor["orbit_binding_state"] = body.orbit_binding_state
+		object_state.descriptor["orbit_radius"] = body.orbit_radius
+		object_state.descriptor["orbit_angle"] = body.orbit_angle
+		object_state.descriptor["orbit_angular_speed"] = body.orbit_angular_speed
+		object_state.descriptor["debris_mass"] = body.debris_mass
+		object_state.descriptor["sleeping"] = body.sleeping
+		object_state.descriptor["active"] = body.active
+		object_state.descriptor["parent_object_id"] = _resolve_parent_object_id(body, persistent_id_by_sim_id)
+		next_object_registry[object_state.object_id] = object_state
+
+	cluster_state.replace_object_registry(next_object_registry)
+	cluster_state.set_object_residency_state(residency_state)
+	cluster_state.simulated_time = world.time_elapsed
+	cluster_state.simulation_profile["has_runtime_snapshot"] = true
+	cluster_state.radius = _estimate_runtime_cluster_radius(next_object_registry)
+	if cluster_state.get_primary_black_hole_object_id() == "":
+		for object_state in cluster_state.get_objects_by_kind("black_hole"):
+			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
+			object_state.descriptor["is_primary"] = true
+			break
+
+static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> void:
+	if cluster_state == null or dt <= 0.0:
+		return
+	if cluster_state.object_registry.is_empty():
+		cluster_state.simulated_time += dt
+		return
+
+	var object_states: Array = cluster_state.object_registry.values()
+	object_states.sort_custom(func(a, b):
+		var kind_rank_a: int = _kind_sort_rank(a.kind)
+		var kind_rank_b: int = _kind_sort_rank(b.kind)
+		if kind_rank_a != kind_rank_b:
+			return kind_rank_a < kind_rank_b
+		return a.object_id < b.object_id
+	)
+	var object_by_id: Dictionary = {}
+	for object_state in object_states:
+		object_by_id[object_state.object_id] = object_state
+
+	for object_state in object_states:
+		if _is_simplified_analytic_orbiter(object_state):
+			continue
+		object_state.local_position += object_state.local_velocity * dt
+		object_state.age += dt
+
+	for object_state in object_states:
+		if not _is_simplified_analytic_orbiter(object_state):
+			continue
+		var parent_object_id: String = str(object_state.descriptor.get("parent_object_id", ""))
+		var parent_state: ClusterObjectState = object_by_id.get(parent_object_id, null)
+		if parent_state == null:
+			object_state.local_position += object_state.local_velocity * dt
+			object_state.age += dt
+			continue
+		var orbit_angle: float = wrapf(
+			float(object_state.descriptor.get("orbit_angle", 0.0))
+				+ float(object_state.descriptor.get("orbit_angular_speed", 0.0)) * dt,
+			0.0,
+			TAU
+		)
+		var orbit_radius: float = float(object_state.descriptor.get("orbit_radius", 0.0))
+		var radial: Vector2 = Vector2(cos(orbit_angle), sin(orbit_angle))
+		var tangent: Vector2 = Vector2(-sin(orbit_angle), cos(orbit_angle))
+		object_state.descriptor["orbit_angle"] = orbit_angle
+		object_state.local_position = parent_state.local_position + radial * orbit_radius
+		object_state.local_velocity = parent_state.local_velocity \
+			+ tangent * (float(object_state.descriptor.get("orbit_angular_speed", 0.0)) * orbit_radius)
+		object_state.age += dt
+
+	cluster_state.set_object_residency_state(ObjectResidencyState.State.SIMPLIFIED)
+	cluster_state.simulated_time += dt
+	cluster_state.simulation_profile["has_runtime_snapshot"] = true
+	cluster_state.radius = _estimate_runtime_cluster_radius(cluster_state.object_registry)
+
+static func _has_runtime_snapshot(cluster_state: ClusterState) -> bool:
+	return bool(cluster_state.simulation_profile.get("has_runtime_snapshot", false))
+
+static func _materialize_runtime_snapshot(world: SimWorld, cluster_state: ClusterState) -> void:
+	var object_states: Array = cluster_state.object_registry.values()
+	object_states.sort_custom(func(a, b):
+		var kind_rank_a: int = _kind_sort_rank(a.kind)
+		var kind_rank_b: int = _kind_sort_rank(b.kind)
+		if kind_rank_a != kind_rank_b:
+			return kind_rank_a < kind_rank_b
+		return a.object_id < b.object_id
+	)
+
+	var body_by_object_id: Dictionary = {}
+	var pending_parent_links: Array = []
+	for object_state in object_states:
+		var body: SimBody = _make_body_from_object_state(object_state)
+		if body == null or not body.active:
+			continue
+		world.add_body(body)
+		body_by_object_id[object_state.object_id] = body
+		var parent_object_id: String = str(object_state.descriptor.get("parent_object_id", ""))
+		if parent_object_id != "":
+			pending_parent_links.append({
+				"body": body,
+				"parent_object_id": parent_object_id,
+			})
+
+	for link in pending_parent_links:
+		var body: SimBody = link["body"]
+		var parent_body: SimBody = body_by_object_id.get(link["parent_object_id"], null)
+		if parent_body == null:
+			continue
+		body.orbit_parent_id = parent_body.id
+		body.orbit_center = parent_body.position
+
+static func _make_body_from_object_state(object_state: ClusterObjectState) -> SimBody:
+	var body := SimBody.new()
+	body.persistent_object_id = object_state.object_id
+	body.body_type = int(object_state.descriptor.get("body_type", _body_type_for_kind(object_state.kind)))
+	body.material_type = int(object_state.descriptor.get("material_type", SimBody.MaterialType.ROCKY))
+	body.influence_level = int(object_state.descriptor.get("influence_level", SimBody.InfluenceLevel.B))
+	body.mass = float(object_state.descriptor.get("mass", 1.0))
+	body.radius = float(object_state.descriptor.get("radius", 1.0))
+	body.position = object_state.local_position
+	body.velocity = object_state.local_velocity
+	body.temperature = float(object_state.descriptor.get("temperature", 200.0))
+	body.kinematic = bool(object_state.descriptor.get("kinematic", false))
+	body.scripted_orbit_enabled = bool(object_state.descriptor.get("scripted_orbit_enabled", false))
+	body.orbit_binding_state = int(object_state.descriptor.get(
+		"orbit_binding_state",
+		SimBody.OrbitBindingState.FREE_DYNAMIC
+	))
+	body.orbit_radius = float(object_state.descriptor.get("orbit_radius", 0.0))
+	body.orbit_angle = float(object_state.descriptor.get("orbit_angle", 0.0))
+	body.orbit_angular_speed = float(object_state.descriptor.get("orbit_angular_speed", 0.0))
+	body.debris_mass = float(object_state.descriptor.get("debris_mass", 0.0))
+	body.sleeping = bool(object_state.descriptor.get("sleeping", false))
+	body.active = bool(object_state.descriptor.get("active", true))
+	body.age = object_state.age
+	return body
+
 static func _spawn_black_holes_from_cluster(world: SimWorld, cluster_state: ClusterState) -> Array:
 	var spawned: Array = []
 	for object_state in cluster_state.get_objects_by_kind("black_hole"):
@@ -89,7 +311,10 @@ static func _spawn_black_holes_from_cluster(world: SimWorld, cluster_state: Clus
 			cluster_state.simulation_profile.get("black_hole_mass", SimConstants.BLACK_HOLE_MASS)
 		)
 		var black_hole := _make_black_hole(mass)
+		black_hole.persistent_object_id = object_state.object_id
 		black_hole.position = object_state.local_position
+		black_hole.velocity = object_state.local_velocity
+		black_hole.age = object_state.age
 		world.add_body(black_hole)
 		spawned.append({
 			"object_id": object_state.object_id,
@@ -105,6 +330,7 @@ static func _materialize_anchor_cluster(
 		spawned_black_holes: Array,
 		profile: Dictionary,
 		cluster_seed: int,
+		cluster_id: int,
 		stable_mode: bool) -> void:
 	var spawn_anchor: SimBody = _resolve_primary_black_hole_body(spawned_black_holes)
 	if spawn_anchor == null or not profile.get("spawn_anchor_content", true):
@@ -115,22 +341,38 @@ static func _materialize_anchor_cluster(
 	var stars: Array = _place_analytic_stars(spawn_anchor, profile, rng) \
 		if stable_mode else _place_dynamic_stars(spawn_anchor, profile, rng)
 
+	for star_index in range(stars.size()):
+		stars[star_index].persistent_object_id = _make_cluster_object_id(cluster_id, "star", star_index)
 	for star in stars:
 		world.add_body(star)
-	for star in stars:
+	for star_index in range(stars.size()):
+		var star: SimBody = stars[star_index]
 		for i in range(int(profile.get("planets_per_star", 0))):
-			world.add_body(_make_core_planet(star, i, int(profile.get("planets_per_star", 0))))
+			var planet := _make_core_planet(star, i, int(profile.get("planets_per_star", 0)))
+			planet.persistent_object_id = _make_child_object_id(star.persistent_object_id, "planet", i)
+			world.add_body(planet)
+	if stars.is_empty():
+		return
 	for i in range(int(profile.get("disturbance_body_count", 0))):
-		world.add_body(_make_disturbance_body(stars[i % stars.size()], rng, i))
+		var disturbance := _make_disturbance_body(stars[i % stars.size()], rng, i)
+		disturbance.persistent_object_id = _make_cluster_object_id(cluster_id, "asteroid", i)
+		world.add_body(disturbance)
 
-static func _materialize_chaos_cluster(world: SimWorld, profile: Dictionary, cluster_seed: int) -> void:
+static func _materialize_chaos_cluster(
+		world: SimWorld,
+		profile: Dictionary,
+		cluster_seed: int,
+		cluster_id: int) -> void:
 	var star := _make_star()
+	star.persistent_object_id = _make_cluster_object_id(cluster_id, "star", 0)
 	world.add_body(star)
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = cluster_seed
 	for i in range(int(profile.get("chaos_body_count", 0))):
-		world.add_body(_make_inflow_body(star, profile, rng, i))
+		var inflow_body := _make_inflow_body(star, profile, rng, i)
+		inflow_body.persistent_object_id = _make_cluster_object_id(cluster_id, "chaos_inflow", i)
+		world.add_body(inflow_body)
 
 static func _resolve_primary_black_hole_body(spawned_black_holes: Array) -> SimBody:
 	for entry in spawned_black_holes:
@@ -351,3 +593,99 @@ static func _pick_inflow_material(rng: RandomNumberGenerator, index: int) -> int
 		SimBody.MaterialType.ICY,
 	]
 	return palette[(index + rng.randi_range(0, palette.size() - 1)) % palette.size()]
+
+static func _kind_for_body_type(body_type: int) -> String:
+	match body_type:
+		SimBody.BodyType.BLACK_HOLE:
+			return "black_hole"
+		SimBody.BodyType.STAR:
+			return "star"
+		SimBody.BodyType.PLANET:
+			return "planet"
+		SimBody.BodyType.ASTEROID:
+			return "asteroid"
+		SimBody.BodyType.FRAGMENT:
+			return "fragment"
+		_:
+			return "body"
+
+static func _body_type_for_kind(kind: String) -> int:
+	match kind:
+		"black_hole":
+			return SimBody.BodyType.BLACK_HOLE
+		"star":
+			return SimBody.BodyType.STAR
+		"planet":
+			return SimBody.BodyType.PLANET
+		"asteroid":
+			return SimBody.BodyType.ASTEROID
+		"fragment":
+			return SimBody.BodyType.FRAGMENT
+		_:
+			return SimBody.BodyType.ASTEROID
+
+static func _kind_sort_rank(kind: String) -> int:
+	match kind:
+		"black_hole":
+			return 0
+		"star":
+			return 1
+		"planet":
+			return 2
+		"asteroid":
+			return 3
+		"fragment":
+			return 4
+		_:
+			return 99
+
+static func _make_cluster_object_id(cluster_id: int, kind: String, index: int) -> String:
+	return "cluster_%d:%s_%d" % [cluster_id, kind, index]
+
+static func _make_child_object_id(parent_object_id: String, kind: String, index: int) -> String:
+	return "%s:%s_%d" % [parent_object_id, kind, index]
+
+static func _ensure_body_object_id(
+		cluster_id: int,
+		body: SimBody,
+		kind_indices: Dictionary,
+		used_object_ids: Dictionary) -> String:
+	var kind: String = _kind_for_body_type(body.body_type)
+	var next_index: int = int(kind_indices.get(kind, 0))
+	if body.persistent_object_id != "":
+		used_object_ids[body.persistent_object_id] = true
+		kind_indices[kind] = next_index + 1
+		return body.persistent_object_id
+	var candidate_id: String = _make_cluster_object_id(cluster_id, kind, next_index)
+	while used_object_ids.has(candidate_id):
+		next_index += 1
+		candidate_id = _make_cluster_object_id(cluster_id, kind, next_index)
+	kind_indices[kind] = next_index + 1
+	body.persistent_object_id = candidate_id
+	used_object_ids[body.persistent_object_id] = true
+	return body.persistent_object_id
+
+static func _resolve_parent_object_id(body: SimBody, persistent_id_by_sim_id: Dictionary) -> String:
+	if body.orbit_parent_id < 0:
+		return ""
+	return str(persistent_id_by_sim_id.get(body.orbit_parent_id, ""))
+
+static func _derive_runtime_object_seed(cluster_seed: int, object_id: String) -> int:
+	return absi((cluster_seed + 1) * 8_191 + object_id.hash())
+
+static func _is_simplified_analytic_orbiter(object_state: ClusterObjectState) -> bool:
+	return bool(object_state.descriptor.get("scripted_orbit_enabled", false)) \
+		and int(object_state.descriptor.get(
+			"orbit_binding_state",
+			SimBody.OrbitBindingState.FREE_DYNAMIC
+		)) in [
+			SimBody.OrbitBindingState.BOUND_ANALYTIC,
+			SimBody.OrbitBindingState.CAPTURED_ANALYTIC,
+		]
+
+static func _estimate_runtime_cluster_radius(object_registry: Dictionary) -> float:
+	var max_extent: float = 0.0
+	for object_state in object_registry.values():
+		var object_radius: float = float(object_state.descriptor.get("radius", 0.0))
+		max_extent = maxf(max_extent, object_state.local_position.length() + object_radius)
+	return max_extent
