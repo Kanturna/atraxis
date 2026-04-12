@@ -64,7 +64,6 @@ func step_sim(dt: float) -> void:
 			body.velocity += body.acceleration * sub_dt
 			body.position += body.velocity * sub_dt
 			_apply_star_black_hole_periapsis_guardrail(body, previous_position)
-			_apply_star_nearfield_drag(body, sub_dt)
 			body.age += sub_dt
 
 	_update_scripted_orbiters(sim_dt)
@@ -316,31 +315,6 @@ func _requires_star_black_hole_guardrail(body: SimBody) -> bool:
 		and not body.sleeping \
 		and not body.kinematic \
 		and body.body_type == SimBody.BodyType.STAR
-
-func _apply_star_nearfield_drag(body: SimBody, sub_dt: float) -> void:
-	# Stage 3: local near-field dissipation.
-	# Prevents extreme close BH passes from settling into a permanent tight
-	# high-speed mini-orbit.  Applies a distance-weighted velocity drag only
-	# within BH_NEARFIELD_DRAG_ZONE_FACTOR × nearfield_radius of the dominant BH.
-	# The linear weight (1.0 at BH surface → 0.0 at zone edge) ensures smooth
-	# falloff with no discontinuity at the boundary.
-	# Normal orbits (≥ 4 AU) lie well outside the zone and are unaffected.
-	if not _requires_star_black_hole_guardrail(body):
-		return
-	if not _dominant_bh_cache.has(body.id):
-		return
-	var entry: Dictionary = _dominant_bh_cache[body.id]
-	var dominant_black_hole: SimBody = entry["dominant_bh"]
-	var nearfield_radius: float = entry["nearfield_radius"]
-	var dissipation_radius: float = nearfield_radius * SimConstants.BH_NEARFIELD_DRAG_ZONE_FACTOR
-	if dissipation_radius <= 0.0:
-		return
-	var current_distance: float = body.position.distance_to(dominant_black_hole.position)
-	if current_distance >= dissipation_radius:
-		return
-	var zone_weight: float = 1.0 - (current_distance / dissipation_radius)
-	var drag: float = SimConstants.BH_NEARFIELD_DRAG_STRENGTH * zone_weight * sub_dt
-	body.velocity *= maxf(0.0, 1.0 - drag)
 
 func _update_scripted_orbiters(sim_dt: float) -> void:
 	for body in bodies:

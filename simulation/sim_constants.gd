@@ -105,9 +105,17 @@ const BH_STAR_APPROACH_PADDING: float = 8.0
 # Escape-velocity clamp margin — used by both guardrail stages (see sim_world.gd).
 # Both the hard periapsis guardrail and the broad energy guardrail clamp star
 # speed to MARGIN × v_esc(r) so the star stays bound after intervention.
-# 0.92 = intentional tuning start point, not a physical constant. Closer to 1.0
-# = more tightly bound; lower values = more conservative buffer.
-const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.92
+#
+# Why 0.995:  At the Stage-1 minimum-distance boundary (r ≈ 58 units for a 12M BH),
+# v_esc ≈ 6433 units/s.  With margin 0.995 the star exits at ≈ 6401 units/s, which
+# corresponds to an orbit with apoapsis ≈ 5.8 AU — firmly within the normal star-orbit
+# range (4–20 AU) rather than the 0.32 AU apoapsis produced by the old 0.92 margin.
+# The Stage-2 broad-energy guardrail (nearfield_radius ≈ 7.1 AU) catches any
+# subsequent perturbation that would push the star past escape speed.
+# This value is scale-independent: the apoapsis ≈ 5.8 AU holds for all BH masses
+# in the configured range (2M–30M) because both v_esc and the orbital energy scale
+# with sqrt(M) and M respectively.
+const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.995
 # Gravity contribution cutoff for kinematic BHs only.
 # BH→body gravity is skipped when G*M/r² falls below this threshold.
 # Conservative: 0.05 acc-units is negligible compared to near-BH values of
@@ -115,26 +123,6 @@ const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.92
 # in the current 5-BH default it has almost no effect.
 # Do not raise this too high — hard gravity cutoffs create visible boundary artefacts.
 const BH_GRAVITY_MIN_ACCEL: float = 0.05
-
-# --- Near-field drag (orbital dissipation, Stage 3) ---
-# After an extreme close BH pass the star can retain far more kinetic energy than
-# needed for a circular orbit at that radius.  Without dissipation it stays in a
-# permanent tight high-speed mini-orbit.  This stage applies a tiny distance-weighted
-# drag only within a tight zone so that the excess energy bleeds off gradually and
-# the orbit spirals outward to a larger, calmer path.
-#
-# Guards: only dynamic (non-kinematic, non-sleeping) stars; only within the zone;
-# per-substep so the effect scales correctly with time_scale.
-# Normal star orbits start at 4 AU; for a 12M BH the zone reaches only ~0.71 AU —
-# everyday orbits are completely unaffected.
-#
-# Fraction of nearfield_radius that defines the dissipation zone boundary.
-# 0.10 × ~7120 ≈ 712 sim-units ≈ 0.71 AU for a 12M BH.
-const BH_NEARFIELD_DRAG_ZONE_FACTOR: float = 0.10
-# Per-second drag coefficient at zone centre (linearly weighted to 0 at zone edge).
-# 0.4 = 40 %/s at closest approach.  Raise to tighten the spiral-out speed;
-# lower to make dissipation more gradual.  Does not affect orbits outside the zone.
-const BH_NEARFIELD_DRAG_STRENGTH: float = 0.4
 
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
