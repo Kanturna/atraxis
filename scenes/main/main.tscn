@@ -78,7 +78,7 @@ layout_mode = 2
 
 [node name="TitleLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox" unique_id=274540226]
 layout_mode = 2
-text = "Restart Lab"
+text = "Universe Builder"
 
 [node name="SettingsGrid" type="GridContainer" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox" unique_id=761510455]
 layout_mode = 2
@@ -86,7 +86,7 @@ columns = 2
 
 [node name="ModeLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1348092864]
 layout_mode = 2
-text = "World preset"
+text = "Internal preset"
 
 [node name="ModeOption" type="OptionButton" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1861459480]
 custom_minimum_size = Vector2(170, 0)
@@ -94,7 +94,7 @@ layout_mode = 2
 
 [node name="AnchorTopologyLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1861459481]
 layout_mode = 2
-text = "Anchor Topology"
+text = "Universe layout"
 
 [node name="AnchorTopologyOption" type="OptionButton" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1861459482]
 custom_minimum_size = Vector2(170, 0)
@@ -112,7 +112,7 @@ rounded = true
 
 [node name="BHMassLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320001]
 layout_mode = 2
-text = "BH Mass (All)"
+text = "Black hole mass"
 
 [node name="BHMassSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320002]
 custom_minimum_size = Vector2(170, 0)
@@ -124,7 +124,7 @@ value = 12000000.0
 
 [node name="BlackHoleCountLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320016]
 layout_mode = 2
-text = "Black Holes"
+text = "Total black holes"
 
 [node name="BlackHoleCountSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320017]
 custom_minimum_size = Vector2(170, 0)
@@ -136,7 +136,7 @@ rounded = true
 
 [node name="StarCountLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320003]
 layout_mode = 2
-text = "Star Count"
+text = "Spawn stars in active cluster"
 
 [node name="StarCountSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320004]
 custom_minimum_size = Vector2(170, 0)
@@ -148,7 +148,7 @@ rounded = true
 
 [node name="PlanetsPerStarLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320005]
 layout_mode = 2
-text = "Planets / Star"
+text = "Planets / spawn star"
 
 [node name="PlanetsPerStarSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320006]
 custom_minimum_size = Vector2(170, 0)
@@ -160,7 +160,7 @@ rounded = true
 
 [node name="StarInnerOrbitLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320007]
 layout_mode = 2
-text = "Star Inner Orbit"
+text = "Star inner orbit (AU)"
 
 [node name="StarInnerOrbitSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320008]
 custom_minimum_size = Vector2(170, 0)
@@ -172,7 +172,7 @@ value = 4.0
 
 [node name="StarOuterOrbitLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320009]
 layout_mode = 2
-text = "Star Outer Orbit"
+text = "Star outer orbit (AU)"
 
 [node name="StarOuterOrbitSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320010]
 custom_minimum_size = Vector2(170, 0)
@@ -184,7 +184,7 @@ value = 20.0
 
 [node name="FieldSpacingLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320013]
 layout_mode = 2
-text = "Field Spacing"
+text = "Local BH spacing (AU)"
 
 [node name="FieldSpacingSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320014]
 custom_minimum_size = Vector2(170, 0)
@@ -196,7 +196,7 @@ value = 9.0
 
 [node name="DisturbanceCountLabel" type="Label" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320011]
 layout_mode = 2
-text = "Disturbances"
+text = "Spawn disturbances"
 
 [node name="DisturbanceCountSpin" type="SpinBox" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox/SettingsGrid" unique_id=1100320012]
 custom_minimum_size = Vector2(170, 0)
@@ -267,12 +267,12 @@ rounded = true
 visible = false
 custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
-text = "Field Patch: multiple BHs form concentric rings around the center. Black Holes sets the total count, including the central BH. Stars still start around the center in this first stage."
+text = "Field Patch: local multi-BH system. Requested black holes are all spawned inside the active cluster. Increase local BH spacing to keep gravity wells more separated."
 autowrap_mode = 3
 
 [node name="RestartButton" type="Button" parent="DebugOverlay/RightPanelScroll/RightPanelVBox/StartPanel/VBox" unique_id=1453386492]
 layout_mode = 2
-text = "Restart"
+text = "Rebuild Universe"
 
 [node name="AnchorPanel" type="PanelContainer" parent="DebugOverlay/RightPanelScroll/RightPanelVBox" unique_id=148800001]
 custom_minimum_size = Vector2(304, 0)

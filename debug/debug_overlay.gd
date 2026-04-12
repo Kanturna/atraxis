@@ -283,7 +283,7 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 		return
 	_anchor_diagnostics_label.text = (
 		"[code]"
-		+ "Anchor Diagnostics\n"
+		+ "Universe Diagnostics\n"
 		+ _build_cluster_diagnostics_lines()
 		+ "BH count        %d\n" % anchor_stats["black_hole_count"]
 		+ "Field rings     %d\n" % anchor_stats["field_ring_count"]
@@ -313,14 +313,14 @@ func _build_cluster_diagnostics_lines() -> String:
 		else 1
 	)
 	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
-	var visible_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
+	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
 		+ "Layout         %s\n" % _describe_topology_role(profile)
 		+ "Requested BHs  %d\n" % requested_black_hole_count
 		+ "Galaxy BHs     %d\n" % _count_total_galaxy_black_holes()
-		+ "Active BHs     %d\n" % active_cluster_black_holes
-		+ "Visible BHs    %d\n" % visible_black_holes
+		+ "Cluster BHs    %d\n" % active_cluster_black_holes
+		+ "Materialized   %d\n" % materialized_black_holes
 		+ "Macro clusters %d\n" % requested_cluster_count
 		+ "Clusters total  %d\n" % _galaxy_state.get_cluster_count()
 		+ "Clusters simp   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
@@ -609,7 +609,7 @@ func _set_topology_hint_texts() -> void:
 
 func _effective_public_anchor_topology(anchor_topology: int) -> int:
 	if anchor_topology == START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH:
-		return START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+		return START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	return anchor_topology
 
 func _select_option_button_id(option_button: OptionButton, item_id: int, fallback_item_id: int) -> void:

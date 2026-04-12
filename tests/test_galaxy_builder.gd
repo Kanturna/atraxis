@@ -21,9 +21,10 @@ func test_galaxy_builder_field_patch_is_deterministic_for_same_seed() -> void:
 	assert_eq(galaxy_b.get_cluster_count(), 1, "field patch should be represented as one cluster")
 	_assert_clusters_equivalent(galaxy_a.get_primary_cluster(), galaxy_b.get_primary_cluster())
 
-func test_anchor_topologies_map_to_expected_cluster_counts() -> void:
+func test_public_central_bh_alias_collapses_into_the_field_patch_main_path() -> void:
 	var central_config = START_CONFIG_SCRIPT.new()
 	central_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	central_config.black_hole_count = 9
 
 	var field_patch_config = START_CONFIG_SCRIPT.new()
 	field_patch_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
@@ -38,13 +39,18 @@ func test_anchor_topologies_map_to_expected_cluster_counts() -> void:
 	var field_patch_galaxy: GalaxyState = WorldBuilder.build_galaxy_state_from_config(field_patch_config)
 	var galaxy_cluster_galaxy: GalaxyState = WorldBuilder.build_galaxy_state_from_config(galaxy_cluster_config)
 
-	assert_eq(central_galaxy.get_cluster_count(), 1, "central BH should be wrapped as a single cluster")
+	assert_eq(central_galaxy.get_cluster_count(), 1, "the internal central alias should still resolve to a single public cluster")
 	assert_eq(field_patch_galaxy.get_cluster_count(), 1, "field patch should be wrapped as a single cluster")
 	assert_eq(galaxy_cluster_galaxy.get_cluster_count(), 3, "galaxy cluster topology should build multiple clusters")
 	assert_eq(
 		central_galaxy.get_primary_cluster().get_objects_by_kind("black_hole").size(),
 		1,
-		"central BH cluster should carry exactly one black hole object"
+		"the internal central alias should normalize to a one-BH local field patch"
+	)
+	assert_eq(
+		central_galaxy.get_primary_cluster().simulation_profile.get("topology_role", ""),
+		"field_patch_local_system",
+		"the internal central alias should no longer create a separate public topology role"
 	)
 	assert_eq(
 		field_patch_galaxy.get_primary_cluster().get_objects_by_kind("black_hole").size(),

@@ -20,7 +20,7 @@ enum StartMode {
 }
 
 enum AnchorTopology {
-	CENTRAL_BH = 0,
+	CENTRAL_BH = 0, # Internal compatibility alias; the public builder normalizes this to FIELD_PATCH.
 	FIELD_PATCH = 1,
 	GALAXY_CLUSTER = 2,
 }
@@ -125,3 +125,16 @@ func uses_reference_star_carriers() -> bool:
 
 func resolved_anchor_topology() -> int:
 	return anchor_topology
+
+func canonical_public_anchor_topology() -> int:
+	if anchor_topology == AnchorTopology.CENTRAL_BH:
+		return AnchorTopology.FIELD_PATCH
+	return anchor_topology
+
+func canonicalized_public_copy():
+	var config = copy()
+	config.anchor_topology = canonical_public_anchor_topology()
+	if anchor_topology == AnchorTopology.CENTRAL_BH:
+		config.black_hole_count = 1
+	config.clamp_values()
+	return config

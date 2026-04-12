@@ -9,11 +9,12 @@ static func build_from_config(start_config) -> GalaxyState:
 	var config = start_config if start_config != null else START_CONFIG_SCRIPT.new()
 	var safe_config = config.copy()
 	safe_config.clamp_values()
+	var public_config = safe_config.canonicalized_public_copy()
 
 	var galaxy_state := GalaxyState.new()
-	galaxy_state.galaxy_seed = safe_config.seed
+	galaxy_state.galaxy_seed = public_config.seed
 
-	_build_main_universe_galaxy(galaxy_state, safe_config)
+	_build_main_universe_galaxy(galaxy_state, public_config)
 
 	return galaxy_state
 
