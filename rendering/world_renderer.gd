@@ -114,7 +114,7 @@ func _draw_discovered_sectors() -> void:
 	var active_sector_coord: Vector2i = active_sector_coord_variant \
 		if active_sector_coord_variant is Vector2i \
 		else Vector2i.ZERO
-	var sector_size := Vector2.ONE * _worldgen.config.sector_scale
+	var sector_size: Vector2 = Vector2.ONE * float(_worldgen.config.sector_scale)
 	for sector_coord in _galaxy_state.get_discovered_sector_coords():
 		var sector_origin_local: Vector2 = _active_cluster_session.to_local(_worldgen.sector_origin(sector_coord))
 		var is_active_sector: bool = sector_coord == active_sector_coord
@@ -122,14 +122,25 @@ func _draw_discovered_sectors() -> void:
 		draw_rect(Rect2(sector_origin_local, sector_size), sector_color, false, 1.5 if is_active_sector else 1.0)
 
 func _draw_registered_clusters() -> void:
-	var nearest_remote_cluster: ClusterState = null
-	var nearest_remote_distance: float = INF
-	for cluster_state in _galaxy_state.get_clusters():
+	var cluster_payload: Dictionary = build_registered_cluster_debug_markers(
+		_galaxy_state,
+		_active_cluster_session
+	)
+	var marker_radius_scale: float = _debug_marker_canvas_scale()
+	for marker in cluster_payload.get("markers", []):
+		var cluster_id: int = int(marker.get("cluster_id", -1))
+		var cluster_state: ClusterState = _galaxy_state.get_cluster(cluster_id)
 		if cluster_state == null:
 			continue
-		var cluster_local_center: Vector2 = _active_cluster_session.to_local(cluster_state.global_center)
+		var cluster_local_center: Vector2 = Vector2(marker.get("local_center", Vector2.ZERO))
 		var cluster_color: Color = _cluster_debug_color(cluster_state)
-		var line_width: float = 2.4 if cluster_state.cluster_id == _active_cluster_session.cluster_id else 1.4
+		var is_active: bool = bool(marker.get("is_active", false))
+		var line_width: float = 2.6 if is_active else 1.5
+		var marker_radius: float = cluster_debug_marker_world_radius(
+			float(marker.get("radius", cluster_state.get_authoritative_radius())),
+			marker_radius_scale,
+			is_active
+		)
 		draw_arc(
 			cluster_local_center,
 			cluster_state.get_authoritative_radius(),
@@ -141,15 +152,35 @@ func _draw_registered_clusters() -> void:
 		)
 		draw_circle(
 			cluster_local_center,
-			7.0 if cluster_state.cluster_id == _active_cluster_session.cluster_id else 4.0,
-			cluster_color
+			marker_radius,
+			Color(cluster_color.r, cluster_color.g, cluster_color.b, 0.16 if is_active else 0.11)
 		)
-		if cluster_state.cluster_id != _active_cluster_session.cluster_id:
-			var center_distance: float = cluster_local_center.length()
-			if center_distance < nearest_remote_distance:
-				nearest_remote_distance = center_distance
-				nearest_remote_cluster = cluster_state
+		draw_arc(
+			cluster_local_center,
+			marker_radius,
+			0.0,
+			TAU,
+			32,
+			cluster_color,
+			2.0 if is_active else 1.2
+		)
+		var cross_half_extent: float = marker_radius * 0.75
+		draw_line(
+			cluster_local_center + Vector2(-cross_half_extent, 0.0),
+			cluster_local_center + Vector2(cross_half_extent, 0.0),
+			cluster_color,
+			2.0 if is_active else 1.4
+		)
+		draw_line(
+			cluster_local_center + Vector2(0.0, -cross_half_extent),
+			cluster_local_center + Vector2(0.0, cross_half_extent),
+			cluster_color,
+			2.0 if is_active else 1.4
+		)
 	_draw_cluster_label(_active_cluster_session.active_cluster_state, "ACTIVE")
+	var nearest_remote_cluster: ClusterState = _galaxy_state.get_cluster(
+		int(cluster_payload.get("nearest_remote_cluster_id", -1))
+	)
 	if nearest_remote_cluster != null:
 		_draw_cluster_label(nearest_remote_cluster, "GHOST")
 
@@ -173,8 +204,67 @@ func _cluster_debug_color(cluster_state: ClusterState) -> Color:
 		return Color(1.0, 1.0, 1.0, 0.3)
 	match cluster_state.activation_state:
 		ClusterActivationState.State.ACTIVE:
-			return Color(0.98, 0.90, 0.34, 0.72)
+			return Color(0.98, 0.90, 0.34, 0.82)
 		ClusterActivationState.State.SIMPLIFIED:
-			return Color(0.36, 0.92, 0.86, 0.46)
+			return Color(0.36, 0.92, 0.86, 0.60)
 		_:
-			return Color(0.86, 0.89, 0.98, 0.26)
+			return Color(0.86, 0.89, 0.98, 0.44)
+
+func _debug_marker_canvas_scale() -> float:
+	var canvas_scale: Vector2 = get_canvas_transform().get_scale()
+	return maxf(maxf(absf(canvas_scale.x), absf(canvas_scale.y)), 0.001)
+
+static func build_registered_cluster_debug_markers(
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession) -> Dictionary:
+	var markers: Array = []
+	var nearest_remote_cluster_id: int = -1
+	var nearest_remote_distance: float = INF
+	if galaxy_state == null or active_cluster_session == null:
+		return {
+			"markers": markers,
+			"nearest_remote_cluster_id": nearest_remote_cluster_id,
+		}
+	for cluster_state in galaxy_state.get_clusters():
+		if cluster_state == null:
+			continue
+		var is_active: bool = cluster_state.cluster_id == active_cluster_session.cluster_id
+		var local_center: Vector2 = active_cluster_session.to_local(cluster_state.global_center)
+		markers.append({
+			"cluster_id": cluster_state.cluster_id,
+			"local_center": local_center,
+			"radius": cluster_state.get_authoritative_radius(),
+			"is_active": is_active,
+			"state": activation_state_debug_name(cluster_state.activation_state),
+		})
+		if not is_active:
+			var center_distance: float = local_center.length()
+			if center_distance < nearest_remote_distance:
+				nearest_remote_distance = center_distance
+				nearest_remote_cluster_id = cluster_state.cluster_id
+	return {
+		"markers": markers,
+		"nearest_remote_cluster_id": nearest_remote_cluster_id,
+	}
+
+static func cluster_debug_marker_world_radius(
+		cluster_radius: float,
+		canvas_scale: float,
+		is_active: bool = false) -> float:
+	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var min_marker_radius: float = (4.0 if is_active else 3.0) / safe_canvas_scale
+	var target_marker_radius: float = (11.0 if is_active else 8.0) / safe_canvas_scale
+	var max_marker_radius: float = maxf(
+		cluster_radius * (0.09 if is_active else 0.06),
+		min_marker_radius
+	)
+	return clampf(target_marker_radius, min_marker_radius, max_marker_radius)
+
+static func activation_state_debug_name(activation_state: int) -> String:
+	match activation_state:
+		ClusterActivationState.State.ACTIVE:
+			return "active"
+		ClusterActivationState.State.SIMPLIFIED:
+			return "simplified"
+		_:
+			return "unloaded"

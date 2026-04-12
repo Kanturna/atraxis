@@ -3,6 +3,7 @@ extends GutTest
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
 const WORLDGEN_MAPPING_SCRIPT := preload("res://simulation/galaxy_worldgen_mapping.gd")
+const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
 
 func test_public_worldgen_builder_is_deterministic_for_same_seed() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -261,6 +262,7 @@ func test_same_sector_candidates_keep_a_small_clearance_margin_in_v1() -> void:
 	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
 	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
 	var found_multi_candidate_sector: bool = false
+	var found_strict_clearance_pair: bool = false
 	for y in range(-12, 13):
 		for x in range(-12, 13):
 			var candidates: Array = worldgen.build_cluster_candidates(
@@ -274,17 +276,25 @@ func test_same_sector_candidates_keep_a_small_clearance_margin_in_v1() -> void:
 				for right_index in range(left_index + 1, candidates.size()):
 					var left_candidate = candidates[left_index]
 					var right_candidate = candidates[right_index]
-					var required_clearance: float = (left_candidate.radius + right_candidate.radius) * 0.85
+					var left_layout_targets: Dictionary = left_candidate.descriptor.get("layout_targets", {})
+					var right_layout_targets: Dictionary = right_candidate.descriptor.get("layout_targets", {})
+					var requires_strict_clearance: bool = bool(left_layout_targets.get("readability_clearance", false)) \
+						or bool(right_layout_targets.get("readability_clearance", false))
+					var required_clearance: float = (left_candidate.radius + right_candidate.radius) \
+						* (1.0 if requires_strict_clearance else 0.85)
 					assert_gte(
 						left_candidate.global_center.distance_to(right_candidate.global_center),
 						required_clearance - 0.001,
 						"same-sector cluster candidates should keep the stronger readability clearance instead of reading like one merged center"
 					)
+					if requires_strict_clearance:
+						found_strict_clearance_pair = true
 			if found_multi_candidate_sector:
 				break
 		if found_multi_candidate_sector:
 			break
 	assert_true(found_multi_candidate_sector, "dense worldgen settings should expose at least one multi-candidate sector for the clearance test")
+	assert_true(found_strict_clearance_pair, "dense worldgen settings should expose at least one readability-sensitive candidate pair for the stricter clearance tier")
 
 func test_worldgen_candidate_spacing_floors_protect_friendly_and_hostile_cluster_layouts() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -303,11 +313,37 @@ func test_worldgen_candidate_spacing_floors_protect_friendly_and_hostile_cluster
 		var candidate_descriptor = candidates_by_archetype[archetype]
 		assert_not_null(candidate_descriptor, "the spacing-floor scan should find a %s candidate" % archetype)
 		var layout_targets: Dictionary = candidate_descriptor.descriptor.get("layout_targets", {})
+		var content_profile: Dictionary = candidate_descriptor.descriptor.get("content_profile", {})
 		var spacing_floor_au: float = float(layout_targets.get("spacing_floor_au", 0.0))
 		assert_gte(
 			candidate_descriptor.bh_spacing_au + 0.001,
 			spacing_floor_au,
 			"%s candidates should never drop below their calibrated spacing floor" % archetype
+		)
+		if archetype == "dense_bh_knot":
+			assert_almost_eq(
+				spacing_floor_au,
+				float(layout_targets.get("hostile_spacing_floor_au", 0.0)),
+				0.001,
+				"dense BH knots should resolve to the hostile spacing floor"
+			)
+		else:
+			assert_almost_eq(
+				spacing_floor_au,
+				float(layout_targets.get("friendly_spacing_floor_au", 0.0)),
+				0.001,
+				"%s should resolve to the friendlier spacing floor" % archetype
+			)
+		var expected_radius_floor_au: float = maxf(
+			float(layout_targets.get("cluster_radius_floor_au", 0.0)),
+			float(content_profile.get("star_outer_orbit_au", 0.0)) + 2.0
+				+ float(maxi(candidate_descriptor.bh_count - 1, 0)) * 0.5
+					* maxf(candidate_descriptor.bh_spacing_au, spacing_floor_au)
+		)
+		assert_gte(
+			candidate_descriptor.radius / SimConstants.AU + 0.001,
+			expected_radius_floor_au,
+			"%s candidates should now scale cluster radius with final BH count and spacing" % archetype
 		)
 		var cluster_state: ClusterState = GalaxyBuilder._build_cluster_state_from_candidate(
 			worldgen_config,
@@ -675,9 +711,6 @@ func test_primary_cluster_prefers_friendly_spawn_archetypes_over_hostile_candida
 
 	var primary_cluster: ClusterState = matched_galaxy_state.get_primary_cluster()
 	var primary_archetype: String = str(primary_cluster.simulation_profile.get("content_archetype", ""))
-	var max_spawn_priority: int = -9_999
-	for cluster_state in matched_galaxy_state.get_clusters():
-		max_spawn_priority = maxi(max_spawn_priority, int(cluster_state.simulation_profile.get("spawn_priority", 0)))
 
 	assert_false(
 		primary_archetype in ["void", "dense_bh_knot"],
@@ -687,10 +720,135 @@ func test_primary_cluster_prefers_friendly_spawn_archetypes_over_hostile_candida
 		bool(primary_cluster.simulation_profile.get("spawn_viable", false)),
 		"the chosen primary cluster should now pass the hard local spawn-viability gate"
 	)
+	assert_gt(
+		float(primary_cluster.simulation_profile.get("layout_primary_clearance_margin_au", -1.0)),
+		-0.001,
+		"the chosen primary cluster should keep a positive primary-clearance margin"
+	)
+	assert_gt(
+		float(primary_cluster.simulation_profile.get("layout_cluster_radius_margin_au", -1.0)),
+		-0.001,
+		"the chosen primary cluster should keep a positive cluster-radius margin"
+	)
+
+func test_preferred_spawn_cluster_prefers_geometry_before_spawn_priority() -> void:
+	var galaxy_state := GalaxyState.new()
+
+	var higher_priority_cluster := ClusterState.new()
+	higher_priority_cluster.cluster_id = 1
+	higher_priority_cluster.global_center = Vector2(150.0, 0.0)
+	higher_priority_cluster.simulation_profile = {
+		"spawn_viable": true,
+		"spawn_priority": 100,
+		"layout_primary_clearance_margin_au": 0.5,
+		"layout_cluster_radius_margin_au": 0.5,
+	}
+	galaxy_state.add_cluster(higher_priority_cluster)
+
+	var roomier_cluster := ClusterState.new()
+	roomier_cluster.cluster_id = 2
+	roomier_cluster.global_center = Vector2(400.0, 0.0)
+	roomier_cluster.simulation_profile = {
+		"spawn_viable": true,
+		"spawn_priority": 60,
+		"layout_primary_clearance_margin_au": 3.0,
+		"layout_cluster_radius_margin_au": 1.4,
+	}
+	galaxy_state.add_cluster(roomier_cluster)
+
+	var matched_cluster: ClusterState = GalaxyBuilder._find_preferred_spawn_cluster(galaxy_state)
+
 	assert_eq(
-		int(primary_cluster.simulation_profile.get("spawn_priority", -1)),
-		max_spawn_priority,
-		"the primary cluster should be chosen from the highest-priority spawnable archetype tier first"
+		matched_cluster.cluster_id,
+		roomier_cluster.cluster_id,
+		"preferred spawn selection should now favor the roomier geometry before raw spawn priority"
+	)
+
+func test_cluster_layout_diagnostics_fail_when_primary_clearance_is_too_small() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 223
+	config.cluster_density = 0.82
+	config.void_strength = 0.14
+	config.bh_richness = 0.66
+	config.star_richness = 0.61
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidate_descriptor = _find_candidate_descriptors_for_all_archetypes(worldgen, config.seed, 40).get("star_nursery", null)
+	assert_not_null(candidate_descriptor, "the primary-clearance test needs a star nursery candidate")
+	var content_profile: Dictionary = candidate_descriptor.descriptor.get("content_profile", {})
+	var layout_targets: Dictionary = candidate_descriptor.descriptor.get("layout_targets", {})
+	var primary_clearance_limit_au: float = maxf(
+		float(layout_targets.get("reserved_start_band_au", 0.0)) * 0.5,
+		1.0
+	)
+	var cramped_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
+		2,
+		primary_clearance_limit_au,
+		worldgen_config.black_hole_mass
+	)
+	var diagnostics: Dictionary = GalaxyBuilder._build_cluster_layout_diagnostics(
+		worldgen_config,
+		candidate_descriptor.radius,
+		cramped_specs,
+		content_profile,
+		layout_targets
+	)
+
+	assert_false(
+		bool(diagnostics.get("spawn_viable", true)),
+		"clusters whose secondary BH intrudes into the reserved start band should fail spawn viability"
+	)
+	assert_eq(
+		str(diagnostics.get("spawn_viability_reason", "")),
+		"primary_clearance_below_start_band",
+		"primary-clearance failures should report the dedicated spawn-viability reason"
+	)
+	assert_lt(
+		float(diagnostics.get("layout_primary_clearance_margin_au", 0.0)),
+		0.0,
+		"primary-clearance failures should expose a negative clearance margin"
+	)
+
+func test_cluster_layout_diagnostics_fail_when_cluster_radius_is_too_small() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 377
+	config.cluster_density = 0.84
+	config.void_strength = 0.12
+	config.bh_richness = 0.58
+	config.star_richness = 0.64
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var candidate_descriptor = _find_candidate_descriptors_for_all_archetypes(worldgen, config.seed, 40).get("scrap_rich_remnant", null)
+	assert_not_null(candidate_descriptor, "the cluster-radius test needs a scrap-rich remnant candidate")
+	var content_profile: Dictionary = candidate_descriptor.descriptor.get("content_profile", {})
+	var layout_targets: Dictionary = candidate_descriptor.descriptor.get("layout_targets", {})
+	var compact_cluster_radius: float = maxf(
+		(float(layout_targets.get("cluster_radius_floor_au", 0.0)) - 0.75) * SimConstants.AU,
+		SimConstants.AU
+	)
+	var diagnostics: Dictionary = GalaxyBuilder._build_cluster_layout_diagnostics(
+		worldgen_config,
+		compact_cluster_radius,
+		ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(1, candidate_descriptor.bh_spacing_au, worldgen_config.black_hole_mass),
+		content_profile,
+		layout_targets
+	)
+
+	assert_false(
+		bool(diagnostics.get("spawn_viable", true)),
+		"clusters whose radius drops below the orbit-band floor should fail spawn viability"
+	)
+	assert_eq(
+		str(diagnostics.get("spawn_viability_reason", "")),
+		"cluster_radius_below_orbit_band",
+		"cluster-radius failures should report the dedicated spawn-viability reason"
+	)
+	assert_lt(
+		float(diagnostics.get("layout_cluster_radius_margin_au", 0.0)),
+		0.0,
+		"cluster-radius failures should expose a negative radius margin"
 	)
 
 func test_starter_fallback_candidate_is_explicitly_spawn_safe() -> void:

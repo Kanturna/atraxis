@@ -350,7 +350,9 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Transit objs    %d\n" % _galaxy_state.get_transit_object_count()
 		+ "Min BH dist    %s\n" % _format_layout_metric_au(float(profile.get("layout_min_bh_distance_au", -1.0)))
 		+ "Primary clear  %s\n" % _format_layout_metric_au(float(profile.get("layout_primary_clearance_au", -1.0)))
+		+ "Clear margin   %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_primary_clearance_margin_au", -1.0)))
 		+ "Start band     %s\n" % _format_layout_metric_au(float(profile.get("layout_reserved_start_band_au", -1.0)))
+		+ "Radius margin  %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_cluster_radius_margin_au", -1.0)))
 		+ "Cluster active  %d\n" % _active_cluster_session.cluster_id
 		+ "Cluster global  %.0f, %.0f\n" % [
 			_active_cluster_session.cluster_global_origin.x,
@@ -663,6 +665,11 @@ func _format_layout_metric_au(value_au: float) -> String:
 	if value_au < 0.0:
 		return "--"
 	return "%.1f AU" % value_au
+
+func _format_signed_layout_metric_au(value_au: float) -> String:
+	if value_au < 0.0:
+		return "%.1f AU" % value_au
+	return "+%.1f AU" % value_au
 
 func _build_worldgen_help_text() -> String:
 	return (

@@ -244,31 +244,35 @@ func _build_cluster_candidate(
 		radius_noise,
 		content_profile
 	) * SimConstants.AU
-	var resolved_global_center: Vector2 = _resolve_candidate_global_center(
-		sector_origin_world,
-		candidate_rng,
-		descriptor.radius,
-		existing_candidates
-	)
-	descriptor.global_center = resolved_global_center
 	descriptor.descriptor = {
 		"sector_key": sector_key(region_descriptor.sector_coord),
 		"sector_padding": _sector_candidate_padding(descriptor.radius),
 		"content_profile": content_profile.duplicate(true),
 		"layout_targets": layout_targets.duplicate(true),
 	}
+	var resolved_global_center: Vector2 = _resolve_candidate_global_center(
+		sector_origin_world,
+		candidate_rng,
+		descriptor,
+		existing_candidates
+	)
+	descriptor.global_center = resolved_global_center
 	return descriptor
 
 func _resolve_candidate_global_center(
 		sector_origin_world: Vector2,
 		candidate_rng: RandomNumberGenerator,
-		candidate_radius: float,
+		candidate_descriptor,
 		existing_candidates: Array) -> Vector2:
 	var best_local_position: Vector2 = Vector2.ZERO
 	var best_clearance_margin: float = -INF
 	for _attempt in range(5):
-		var local_position: Vector2 = _sample_candidate_local_center(candidate_rng, candidate_radius)
-		var clearance_margin: float = _candidate_clearance_margin(local_position, candidate_radius, existing_candidates)
+		var local_position: Vector2 = _sample_candidate_local_center(candidate_rng, candidate_descriptor.radius)
+		var clearance_margin: float = _candidate_clearance_margin(
+			local_position,
+			candidate_descriptor,
+			existing_candidates
+		)
 		if clearance_margin > best_clearance_margin:
 			best_clearance_margin = clearance_margin
 			best_local_position = local_position
@@ -286,23 +290,40 @@ func _sample_candidate_local_center(candidate_rng: RandomNumberGenerator, candid
 func _sector_candidate_padding(candidate_radius: float) -> float:
 	return minf(maxf(config.sector_scale * 0.16, candidate_radius * 0.30), config.sector_scale * 0.42)
 
-func _candidate_clearance_margin(local_position: Vector2, candidate_radius: float, existing_candidates: Array) -> float:
+func _candidate_clearance_margin(local_position: Vector2, candidate_descriptor, existing_candidates: Array) -> float:
 	var best_margin: float = INF
 	for existing_candidate in existing_candidates:
 		if existing_candidate == null:
 			continue
 		var existing_local_position: Vector2 = existing_candidate.global_center - sector_origin(existing_candidate.sector_coord)
-		var required_distance: float = _candidate_clearance_distance(candidate_radius, existing_candidate.radius)
+		var required_distance: float = _candidate_clearance_distance(candidate_descriptor, existing_candidate)
 		var margin: float = local_position.distance_to(existing_local_position) - required_distance
 		best_margin = minf(best_margin, margin)
 	if best_margin == INF:
 		return 0.0
 	return best_margin
 
-func _candidate_clearance_distance(candidate_radius: float, other_radius: float) -> float:
+func _candidate_clearance_distance(candidate_descriptor, other_candidate) -> float:
 	# Keep same-sector clusters visually distinct enough that they do not read as
 	# one merged local formation during ordinary camera movement.
-	return (candidate_radius + other_radius) * 0.85
+	var readability_multiplier: float = 1.0 \
+		if _candidate_requires_readability_clearance(candidate_descriptor) \
+			or _candidate_requires_readability_clearance(other_candidate) \
+		else 0.85
+	return (candidate_descriptor.radius + other_candidate.radius) * readability_multiplier
+
+func _candidate_requires_readability_clearance(candidate_descriptor) -> bool:
+	if candidate_descriptor == null:
+		return false
+	var descriptor_metadata: Dictionary = candidate_descriptor.descriptor if candidate_descriptor != null else {}
+	var layout_targets_variant = descriptor_metadata.get("layout_targets", {})
+	if layout_targets_variant is Dictionary and layout_targets_variant.has("readability_clearance"):
+		return bool(layout_targets_variant.get("readability_clearance", false))
+	var content_profile_variant = descriptor_metadata.get("content_profile", {})
+	if content_profile_variant is Dictionary:
+		return WORLDGEN_MAPPING_SCRIPT.is_star_bearing_content_profile(content_profile_variant) \
+			or WORLDGEN_MAPPING_SCRIPT.is_spawn_relevant_content_profile(content_profile_variant)
+	return false
 
 func _describe_fallback_region(galaxy_seed: int):
 	var descriptor := REGION_DESCRIPTOR_SCRIPT.new()

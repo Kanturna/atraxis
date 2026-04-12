@@ -516,12 +516,18 @@ static func _build_cluster_layout_diagnostics(
 	var primary_clearance_au: float = _primary_black_hole_clearance_au(local_black_hole_specs)
 	var required_primary_clearance_au: float = reserved_start_band_au + dominance_radius_au
 	var cluster_radius_au: float = cluster_radius / SimConstants.AU
+	var primary_clearance_margin_au: float = required_primary_clearance_au \
+		if primary_clearance_au < 0.0 \
+		else primary_clearance_au - required_primary_clearance_au
+	var cluster_radius_margin_au: float = cluster_radius_au - cluster_radius_floor_au
 	var has_primary_clearance_issue: bool = primary_clearance_au >= 0.0 \
-		and primary_clearance_au + 0.001 < required_primary_clearance_au
-	var has_cluster_radius_issue: bool = cluster_radius_au + 0.001 < cluster_radius_floor_au
+		and primary_clearance_margin_au + 0.001 < 0.0
+	var has_cluster_radius_issue: bool = cluster_radius_margin_au + 0.001 < 0.0
 	var spawn_viable: bool = not has_primary_clearance_issue and not has_cluster_radius_issue
 	var spawn_viability_reason: String = "ok"
-	if has_primary_clearance_issue:
+	if has_primary_clearance_issue and has_cluster_radius_issue:
+		spawn_viability_reason = "primary_clearance_and_cluster_radius_below_floor"
+	elif has_primary_clearance_issue:
 		spawn_viability_reason = "primary_clearance_below_start_band"
 	elif has_cluster_radius_issue:
 		spawn_viability_reason = "cluster_radius_below_orbit_band"
@@ -533,6 +539,8 @@ static func _build_cluster_layout_diagnostics(
 		"layout_min_bh_distance_au": min_bh_distance_au,
 		"layout_primary_clearance_au": primary_clearance_au,
 		"layout_required_primary_clearance_au": required_primary_clearance_au,
+		"layout_primary_clearance_margin_au": primary_clearance_margin_au,
+		"layout_cluster_radius_margin_au": cluster_radius_margin_au,
 		"spawn_viable": spawn_viable,
 		"spawn_viability_reason": spawn_viability_reason,
 	}
@@ -583,18 +591,40 @@ static func _find_preferred_spawn_cluster(galaxy_state: GalaxyState) -> ClusterS
 	if galaxy_state == null:
 		return null
 	var matched_cluster: ClusterState = null
+	var best_primary_clearance_margin: float = -INF
+	var best_cluster_radius_margin: float = -INF
 	var best_spawn_priority: int = -9_999
 	var best_distance: float = INF
 	for cluster_state in galaxy_state.get_clusters():
 		if not bool(cluster_state.simulation_profile.get("spawn_viable", false)):
 			continue
+		var primary_clearance_margin: float = float(cluster_state.simulation_profile.get(
+			"layout_primary_clearance_margin_au",
+			-INF
+		))
+		var cluster_radius_margin: float = float(cluster_state.simulation_profile.get(
+			"layout_cluster_radius_margin_au",
+			-INF
+		))
 		var spawn_priority: int = int(cluster_state.simulation_profile.get("spawn_priority", 0))
 		var distance: float = cluster_state.global_center.length()
 		if matched_cluster == null \
-				or spawn_priority > best_spawn_priority \
-				or (spawn_priority == best_spawn_priority and distance < best_distance) \
-				or (spawn_priority == best_spawn_priority and is_equal_approx(distance, best_distance)
+				or primary_clearance_margin > best_primary_clearance_margin + 0.001 \
+				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+					and cluster_radius_margin > best_cluster_radius_margin + 0.001) \
+				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+					and absf(cluster_radius_margin - best_cluster_radius_margin) <= 0.001
+					and spawn_priority > best_spawn_priority) \
+				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+					and absf(cluster_radius_margin - best_cluster_radius_margin) <= 0.001
+					and spawn_priority == best_spawn_priority
+					and distance < best_distance) \
+				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+					and absf(cluster_radius_margin - best_cluster_radius_margin) <= 0.001
+					and spawn_priority == best_spawn_priority and is_equal_approx(distance, best_distance)
 					and cluster_state.cluster_id < matched_cluster.cluster_id):
+			best_primary_clearance_margin = primary_clearance_margin
+			best_cluster_radius_margin = cluster_radius_margin
 			best_spawn_priority = spawn_priority
 			best_distance = distance
 			matched_cluster = cluster_state
