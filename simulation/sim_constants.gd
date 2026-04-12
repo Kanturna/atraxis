@@ -116,6 +116,26 @@ const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.92
 # Do not raise this too high — hard gravity cutoffs create visible boundary artefacts.
 const BH_GRAVITY_MIN_ACCEL: float = 0.05
 
+# --- Near-field drag (orbital dissipation, Stage 3) ---
+# After an extreme close BH pass the star can retain far more kinetic energy than
+# needed for a circular orbit at that radius.  Without dissipation it stays in a
+# permanent tight high-speed mini-orbit.  This stage applies a tiny distance-weighted
+# drag only within a tight zone so that the excess energy bleeds off gradually and
+# the orbit spirals outward to a larger, calmer path.
+#
+# Guards: only dynamic (non-kinematic, non-sleeping) stars; only within the zone;
+# per-substep so the effect scales correctly with time_scale.
+# Normal star orbits start at 4 AU; for a 12M BH the zone reaches only ~0.71 AU —
+# everyday orbits are completely unaffected.
+#
+# Fraction of nearfield_radius that defines the dissipation zone boundary.
+# 0.10 × ~7120 ≈ 712 sim-units ≈ 0.71 AU for a 12M BH.
+const BH_NEARFIELD_DRAG_ZONE_FACTOR: float = 0.10
+# Per-second drag coefficient at zone centre (linearly weighted to 0 at zone edge).
+# 0.4 = 40 %/s at closest approach.  Raise to tighten the spiral-out speed;
+# lower to make dissipation more gradual.  Does not affect orbits outside the zone.
+const BH_NEARFIELD_DRAG_STRENGTH: float = 0.4
+
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
 const STAR_RADIUS: float     = 30.0
