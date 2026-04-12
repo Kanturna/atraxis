@@ -1,5 +1,7 @@
 extends Node
 
+const CAPTURE_NAME: StringName = &"signal_debugger"
+
 # Properties
 # |===================================|
 # |===================================|
@@ -7,6 +9,7 @@ extends Node
 
 var _signal_graph: SignalGraph
 var _lambda_map: Dictionary = {}
+var _capture_registered := false
 
 # Lifecycle
 # |===================================|
@@ -14,8 +17,23 @@ var _lambda_map: Dictionary = {}
 # |===================================|
 
 func _ready():
-	if OS.is_debug_build():
-		EngineDebugger.register_message_capture("signal_debugger", _on_signal_debugger_message_capture)
+	if _should_register_capture():
+		EngineDebugger.register_message_capture(CAPTURE_NAME, _on_signal_debugger_message_capture)
+		_capture_registered = true
+
+func _exit_tree():
+	if _capture_registered and EngineDebugger.has_capture(CAPTURE_NAME):
+		EngineDebugger.unregister_message_capture(CAPTURE_NAME)
+	_capture_registered = false
+
+func _should_register_capture() -> bool:
+	if not OS.is_debug_build():
+		return false
+	if DisplayServer.get_name() == "headless":
+		return false
+	if not EngineDebugger.is_active():
+		return false
+	return not EngineDebugger.has_capture(CAPTURE_NAME)
 
 # Signals
 # |===================================|
@@ -53,6 +71,8 @@ func _on_signal_debugger_message_capture(message: String, data: Array) -> bool:
 	return true
 
 func _on_signal_execution(signal_name: String, node_name: String, args):
+	if not _capture_registered or not EngineDebugger.is_active():
+		return
 	EngineDebugger.send_message(
 		"signal_debugger:signal_executed",
 		[Time.get_datetime_string_from_system(), node_name, signal_name]
