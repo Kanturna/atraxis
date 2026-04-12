@@ -17,6 +17,9 @@ func add_cluster(cluster_state: ClusterState) -> void:
 func get_cluster(cluster_id: int) -> ClusterState:
 	return clusters_by_id.get(cluster_id, null)
 
+func has_cluster(cluster_id: int) -> bool:
+	return clusters_by_id.has(cluster_id)
+
 func get_clusters() -> Array:
 	var ordered: Array = []
 	for cluster_id in cluster_order:
@@ -31,3 +34,12 @@ func get_primary_cluster() -> ClusterState:
 func get_cluster_count() -> int:
 	return cluster_order.size()
 
+func get_cluster_ids() -> Array:
+	return cluster_order.duplicate()
+
+func count_clusters_by_activation_state(state: int) -> int:
+	var count: int = 0
+	for cluster_state in get_clusters():
+		if cluster_state.activation_state == state:
+			count += 1
+	return count

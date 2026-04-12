@@ -184,6 +184,136 @@ func test_simplified_cluster_step_advances_deactivated_dynamic_body_linearly() -
 		"simplified stepping should keep remote objects marked as simplified"
 	)
 
+func test_simplified_cluster_unloads_after_idle_delay() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
+	var first_star: SimBody = runtime.get_active_sim_world().get_star()
+	var persisted_star_id: String = first_star.persistent_object_id
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+
+	runtime.activate_cluster(second_cluster_id)
+
+	var steps_until_unload: int = int(ceil(
+		SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY / SimConstants.FIXED_DT
+	)) + 1
+	for _i in range(steps_until_unload):
+		runtime.step(SimConstants.FIXED_DT)
+
+	var unloaded_star: ClusterObjectState = first_cluster.get_object(persisted_star_id)
+	assert_eq(
+		first_cluster.activation_state,
+		ClusterActivationState.State.UNLOADED,
+		"simplified clusters should freeze back into unloaded source state after the unload delay"
+	)
+	assert_eq(
+		unloaded_star.residency_state,
+		ObjectResidencyState.State.RESIDENT,
+		"unloaded clusters should persist objects as resident data instead of active or simplified runtime state"
+	)
+	assert_true(
+		first_cluster.last_unloaded_runtime_time - first_cluster.last_deactivated_runtime_time
+			>= SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY,
+		"unload policy should wait at least the configured simplified idle delay"
+	)
+
+func test_unloaded_cluster_reloads_from_persisted_snapshot() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
+	var first_star: SimBody = runtime.get_active_sim_world().get_star()
+	var persisted_star_id: String = first_star.persistent_object_id
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+
+	runtime.step(SimConstants.FIXED_DT)
+	runtime.activate_cluster(second_cluster_id)
+
+	var steps_until_unload: int = int(ceil(
+		SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY / SimConstants.FIXED_DT
+	)) + 1
+	for _i in range(steps_until_unload):
+		runtime.step(SimConstants.FIXED_DT)
+
+	var persisted_star: ClusterObjectState = first_cluster.get_object(persisted_star_id)
+	var persisted_position: Vector2 = persisted_star.local_position
+	var persisted_time: float = first_cluster.simulated_time
+
+	runtime.activate_cluster(first_cluster_id)
+
+	var reloaded_star: SimBody = runtime.get_active_sim_world().get_star()
+	assert_eq(
+		first_cluster.activation_state,
+		ClusterActivationState.State.ACTIVE,
+		"reactivating an unloaded cluster should promote it back into the active bubble"
+	)
+	assert_true(
+		reloaded_star.position.is_equal_approx(persisted_position),
+		"unloaded clusters should reload from their persisted snapshot state instead of regenerating a different runtime layout"
+	)
+	assert_almost_eq(
+		runtime.get_active_sim_world().time_elapsed,
+		persisted_time,
+		0.0001,
+		"reloading an unloaded cluster should restore its persisted simulation time"
+	)
+
+func test_cluster_activation_request_switches_cluster_on_next_step() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+
+	assert_true(
+		runtime.request_cluster_activation(second_cluster_id),
+		"valid non-active clusters should be accepted as queued activation targets"
+	)
+	assert_true(runtime.has_pending_activation_request(), "queued activation requests should remain pending until the next runtime step")
+	assert_eq(
+		runtime.get_pending_activation_cluster_id(),
+		second_cluster_id,
+		"runtime should expose which cluster is queued for activation"
+	)
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		first_cluster_id,
+		"requesting a cluster switch should not replace the active session until the runtime advances"
+	)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_false(runtime.has_pending_activation_request(), "the queued activation should be consumed by the next runtime step")
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"queued activation requests should switch the active cluster at the start of the next runtime step"
+	)
+
 func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: int) -> int:
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state.cluster_id != active_cluster_id:

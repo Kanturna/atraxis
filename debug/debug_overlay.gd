@@ -11,6 +11,7 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 
 signal restart_requested(start_config)
 signal black_hole_mass_changed(new_mass: float)
+signal cluster_activation_requested(cluster_id: int)
 
 var _sim: SimWorld = null
 var _galaxy_state: GalaxyState = null
@@ -144,6 +145,9 @@ func initialize(
 func toggle() -> void:
 	visible = not visible
 
+func request_cluster_activation(cluster_id: int) -> void:
+	cluster_activation_requested.emit(cluster_id)
+
 func update_runtime_metrics(frame_delta: float, steps_this_frame: int) -> void:
 	_last_frame_delta = frame_delta
 	_last_steps_this_frame = steps_this_frame
@@ -270,6 +274,8 @@ func _build_cluster_diagnostics_lines() -> String:
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
 		+ "Clusters total  %d\n" % _galaxy_state.get_cluster_count()
+		+ "Clusters simp   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.SIMPLIFIED)
+		+ "Clusters idle   %d\n" % _galaxy_state.count_clusters_by_activation_state(ClusterActivationState.State.UNLOADED)
 		+ "Cluster active  %d\n" % _active_cluster_session.cluster_id
 		+ "Cluster global  %.0f, %.0f\n" % [
 			_active_cluster_session.cluster_global_origin.x,

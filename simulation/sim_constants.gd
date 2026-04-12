@@ -87,6 +87,12 @@ const DEFAULT_GALAXY_CLUSTER_RADIUS_AU: float = 5.0 # BH spread within each clus
 const DEFAULT_GALAXY_VOID_SCALE: float = 4.0        # inter-cluster spacing as multiple of cluster radius
 const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy topology
 
+# --- Cluster runtime lifecycle ---
+# Simplified remote clusters continue ticking for a short while after they leave
+# the active bubble. Once they have been remote-only for this many runtime
+# seconds, they are frozen back into the durable UNLOADED source state.
+const CLUSTER_SIMPLIFIED_UNLOAD_DELAY: float = 2.0
+
 # --- Dominant BH adaptive integration ---
 # Dynamic bodies keep the raw inverse-square gravity law. We only adapt the
 # number of substeps when the dominant BH's local orbital timescale becomes

@@ -6,10 +6,14 @@ extends RefCounted
 
 var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
+var runtime_time_elapsed: float = 0.0
+var pending_activation_cluster_id: int = -1
 
 func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) -> void:
 	galaxy_state = next_galaxy_state
 	active_cluster_session = null
+	runtime_time_elapsed = 0.0
+	pending_activation_cluster_id = -1
 	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
 		return
 
@@ -19,6 +23,7 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
+	_flush_pending_activation_request()
 	if active_cluster_session != null and active_cluster_session.sim_world != null:
 		active_cluster_session.sim_world.step_sim(dt)
 		WorldBuilder.writeback_world_into_cluster(
@@ -27,6 +32,8 @@ func step(dt: float) -> void:
 			ObjectResidencyState.State.ACTIVE
 		)
 	_step_simplified_clusters(dt)
+	runtime_time_elapsed += dt
+	_apply_simplified_unload_policy()
 
 func activate_cluster(target_cluster_id: int) -> void:
 	if galaxy_state == null:
@@ -35,20 +42,26 @@ func activate_cluster(target_cluster_id: int) -> void:
 	if target_cluster == null:
 		return
 	if active_cluster_session != null and active_cluster_session.cluster_id == target_cluster_id:
+		pending_activation_cluster_id = -1
 		return
 
-	if active_cluster_session != null and active_cluster_session.sim_world != null:
-		WorldBuilder.writeback_world_into_cluster(
-			active_cluster_session.sim_world,
-			active_cluster_session.active_cluster_state,
-			ObjectResidencyState.State.SIMPLIFIED
-		)
-		active_cluster_session.active_cluster_state.activation_state = ClusterActivationState.State.SIMPLIFIED
-		active_cluster_session.active_cluster_state.set_object_residency_state(
-			ObjectResidencyState.State.SIMPLIFIED
-		)
-
+	_demote_active_cluster_to_simplified()
 	_activate_cluster_internal(target_cluster_id)
+	pending_activation_cluster_id = -1
+
+func request_cluster_activation(target_cluster_id: int) -> bool:
+	if galaxy_state == null or not galaxy_state.has_cluster(target_cluster_id):
+		return false
+	if active_cluster_session != null and active_cluster_session.cluster_id == target_cluster_id:
+		return false
+	pending_activation_cluster_id = target_cluster_id
+	return true
+
+func has_pending_activation_request() -> bool:
+	return pending_activation_cluster_id >= 0
+
+func get_pending_activation_cluster_id() -> int:
+	return pending_activation_cluster_id
 
 func writeback_active_cluster() -> void:
 	if active_cluster_session == null or active_cluster_session.sim_world == null:
@@ -72,14 +85,13 @@ func _activate_cluster_internal(target_cluster_id: int) -> void:
 	active_cluster_session = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state, target_cluster_id)
 	if active_cluster_session == null or active_cluster_session.active_cluster_state == null:
 		return
-	active_cluster_session.active_cluster_state.activation_state = ClusterActivationState.State.ACTIVE
-	active_cluster_session.active_cluster_state.set_object_residency_state(ObjectResidencyState.State.ACTIVE)
 	if active_cluster_session.sim_world != null:
 		WorldBuilder.writeback_world_into_cluster(
 			active_cluster_session.sim_world,
 			active_cluster_session.active_cluster_state,
 			ObjectResidencyState.State.ACTIVE
 		)
+	active_cluster_session.active_cluster_state.mark_active(runtime_time_elapsed)
 
 func _step_simplified_clusters(dt: float) -> void:
 	if galaxy_state == null:
@@ -91,3 +103,34 @@ func _step_simplified_clusters(dt: float) -> void:
 		if cluster_state.activation_state != ClusterActivationState.State.SIMPLIFIED:
 			continue
 		WorldBuilder.step_simplified_cluster(cluster_state, dt)
+
+func _flush_pending_activation_request() -> void:
+	if pending_activation_cluster_id < 0:
+		return
+	var target_cluster_id: int = pending_activation_cluster_id
+	pending_activation_cluster_id = -1
+	activate_cluster(target_cluster_id)
+
+func _demote_active_cluster_to_simplified() -> void:
+	if active_cluster_session == null or active_cluster_session.sim_world == null:
+		return
+	WorldBuilder.writeback_world_into_cluster(
+		active_cluster_session.sim_world,
+		active_cluster_session.active_cluster_state,
+		ObjectResidencyState.State.SIMPLIFIED
+	)
+	active_cluster_session.active_cluster_state.mark_simplified(runtime_time_elapsed)
+
+func _apply_simplified_unload_policy() -> void:
+	if galaxy_state == null:
+		return
+	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
+	for cluster_state in galaxy_state.get_clusters():
+		if cluster_state.cluster_id == active_cluster_id:
+			continue
+		if not cluster_state.can_unload_from_simplified(
+			runtime_time_elapsed,
+			SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY
+		):
+			continue
+		cluster_state.mark_unloaded(runtime_time_elapsed)
