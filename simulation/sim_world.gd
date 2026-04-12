@@ -259,7 +259,12 @@ func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position
 	var nearfield_radius: float = entry["nearfield_radius"]
 	var offset_from_black_hole: Vector2 = body.position - dominant_black_hole.position
 	var current_distance: float = offset_from_black_hole.length()
-	var minimum_distance: float = dominant_black_hole.radius + body.radius + SimConstants.BH_STAR_APPROACH_PADDING
+	# Stage 1 floor = larger of the physical surface gap and the dominance-radius fraction.
+	# The fraction (≈ 0.43 AU for 12M BH) keeps Stage 1 from firing on every periapsis
+	# of a naturally eccentric orbit; only truly extreme close passes are redirected.
+	# This lets the orbit evolve freely through multi-BH perturbations between events.
+	var physical_minimum: float = dominant_black_hole.radius + body.radius + SimConstants.BH_STAR_APPROACH_PADDING
+	var minimum_distance: float = maxf(physical_minimum, nearfield_radius * SimConstants.BH_MIN_PERIAPSIS_FACTOR)
 
 	# --- Stage 1: Hard periapsis guardrail (minimum approach distance) ---
 	# Fires when the star has just crossed inward past minimum_distance.

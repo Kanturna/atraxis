@@ -98,24 +98,28 @@ const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy to
 # fell just outside the nearfield and were integrated with a single coarse step.
 const BH_NEARFIELD_DISTANCE_FACTOR: float = 0.65
 const BH_NEARFIELD_SUBSTEPS: int = 8
-# Small star-specific periapsis guardrail used after nearfield substeps.
-# This does not capture or rebind stars; it only prevents ultra-close inward
-# passages from collapsing into unusable near-singularity spikes.
+# Physical floor for the Stage-1 periapsis guardrail (BH + star radii + tiny gap).
+# The actual guardrail fires at max(this, BH_MIN_PERIAPSIS_FACTOR × nearfield_radius)
+# so this only matters for very small/light BHs where the factor would fall below
+# the physical surface.
 const BH_STAR_APPROACH_PADDING: float = 8.0
+# Stage-1 minimum periapsis expressed as a fraction of the dominant BH's nearfield radius.
+# The guardrail repositions the star at max(physical_min, factor × nearfield_radius).
+# Why 0.06:  For a 12M BH nearfield_radius ≈ 7120 units → floor ≈ 427 units (0.43 AU).
+# A star on a natural orbit in the multi-BH field has periapsis at 1–20 AU and never
+# triggers Stage 1 at all, letting the orbit evolve freely through BH perturbations.
+# Only truly extreme close passes (< 0.43 AU) are redirected.  The resulting orbit has
+# apoapsis ≈ 6.8 AU (12M BH), ≈ 3.9 AU (4M BH), ≈ 10.8 AU (30M BH).
+const BH_MIN_PERIAPSIS_FACTOR: float = 0.06
 # Escape-velocity clamp margin — used by both guardrail stages (see sim_world.gd).
 # Both the hard periapsis guardrail and the broad energy guardrail clamp star
 # speed to MARGIN × v_esc(r) so the star stays bound after intervention.
 #
-# Why 0.995:  At the Stage-1 minimum-distance boundary (r ≈ 58 units for a 12M BH),
-# v_esc ≈ 6433 units/s.  With margin 0.995 the star exits at ≈ 6401 units/s, which
-# corresponds to an orbit with apoapsis ≈ 5.8 AU — firmly within the normal star-orbit
-# range (4–20 AU) rather than the 0.32 AU apoapsis produced by the old 0.92 margin.
-# The Stage-2 broad-energy guardrail (nearfield_radius ≈ 7.1 AU) catches any
-# subsequent perturbation that would push the star past escape speed.
-# This value is scale-independent: the apoapsis ≈ 5.8 AU holds for all BH masses
-# in the configured range (2M–30M) because both v_esc and the orbital energy scale
-# with sqrt(M) and M respectively.
-const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.995
+# Why 0.97:  At the new dynamic floor (r ≈ 427 units for a 12M BH), v_esc ≈ 2371.
+# 0.97 × v_esc gives v ≈ 2300, corresponding to apoapsis ≈ 6.8 AU — inside the
+# normal star-orbit range (4–20 AU) and inside the nearfield zone (7.1 AU for 12M BH).
+# Stage-2 (broad energy guardrail at nearfield_radius) catches perturbation-induced escape.
+const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.97
 # Gravity contribution cutoff for kinematic BHs only.
 # BH→body gravity is skipped when G*M/r² falls below this threshold.
 # Conservative: 0.05 acc-units is negligible compared to near-BH values of
