@@ -242,6 +242,9 @@ func _rebuild_dominant_bh_cache() -> void:
 				best_bh = bh
 				best_dist = delta.length()
 		if best_bh != null:
+			if body.last_dominant_bh_id >= 0 and body.last_dominant_bh_id != best_bh.id:
+				body.dominant_bh_handoff_count += 1
+			body.last_dominant_bh_id = best_bh.id
 			var safe_distance: float = maxf(best_dist, best_bh.radius + body.radius)
 			var orbital_timescale: float = 0.0
 			if best_bh.mass > 0.0:
@@ -253,6 +256,8 @@ func _rebuild_dominant_bh_cache() -> void:
 				"distance": best_dist,
 				"orbital_timescale": orbital_timescale,
 			}
+		else:
+			body.last_dominant_bh_id = -1
 
 func _determine_black_hole_adaptive_substeps(sim_dt: float) -> int:
 	if sim_dt <= 0.0 or _dominant_bh_cache.is_empty():

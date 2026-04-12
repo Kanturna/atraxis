@@ -90,6 +90,11 @@ var orbit_radius: float = 0.0
 var orbit_angle: float = 0.0
 var orbit_angular_speed: float = 0.0
 
+## Debug-facing anchor tracking for dynamic orbit diagnostics.
+## Persisted so cluster snapshot reloads keep the accumulated handoff history.
+var last_dominant_bh_id: int = -1
+var dominant_bh_handoff_count: int = 0
+
 # -------------------------------------------------------------------------
 # Lifecycle
 # -------------------------------------------------------------------------

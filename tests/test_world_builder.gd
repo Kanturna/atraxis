@@ -3,6 +3,7 @@ extends GutTest
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
 const GALAXY_WORLDGEN_SCRIPT := preload("res://simulation/galaxy_worldgen.gd")
+const DEBUG_METRICS_SCRIPT := preload("res://debug/debug_metrics.gd")
 
 func test_internal_reference_fixture_creates_analytic_reference_layout() -> void:
 	var world := _build_fixture_world(func(config):
@@ -156,6 +157,56 @@ func test_live_black_hole_mass_updates_every_active_cluster_black_hole() -> void
 	for black_hole in world.get_black_holes():
 		assert_almost_eq(black_hole.mass, config.black_hole_mass * 1.25, 0.001, "live BH mass changes should affect all active-cluster anchors")
 
+func test_dynamic_star_spawn_distributes_hosts_across_available_black_holes() -> void:
+	var world := SimWorld.new()
+
+	var primary_bh := WorldBuilder._make_black_hole(12_000_000.0)
+	primary_bh.position = Vector2.ZERO
+	world.add_body(primary_bh)
+
+	var secondary_bh := WorldBuilder._make_black_hole(12_000_000.0)
+	secondary_bh.position = Vector2(11.0 * SimConstants.AU, 0.0)
+	world.add_body(secondary_bh)
+
+	var tertiary_bh := WorldBuilder._make_black_hole(12_000_000.0)
+	tertiary_bh.position = Vector2(0.0, 11.5 * SimConstants.AU)
+	world.add_body(tertiary_bh)
+
+	var spawned_black_holes: Array = [
+		{"object_id": "cluster_0:black_hole_0", "is_primary": true, "body": primary_bh},
+		{"object_id": "cluster_0:black_hole_1", "is_primary": false, "body": secondary_bh},
+		{"object_id": "cluster_0:black_hole_2", "is_primary": false, "body": tertiary_bh},
+	]
+	var profile := {
+		"star_count": 4,
+		"star_inner_orbit_au": 4.0,
+		"star_outer_orbit_au": 20.0,
+		"star_mass_scale_min": 0.9,
+		"star_mass_scale_max": 1.1,
+	}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+
+	var stars: Array = WorldBuilder._place_dynamic_stars(spawned_black_holes, profile, rng)
+	var distinct_host_ids: Dictionary = {}
+
+	assert_eq(stars.size(), 4, "test setup should materialize all requested dynamic stars")
+	for star in stars:
+		distinct_host_ids[star.orbit_parent_id] = true
+		assert_true(
+			star.orbit_parent_id in [primary_bh.id, secondary_bh.id, tertiary_bh.id],
+			"each dynamic star should keep a valid host black hole id"
+		)
+		var host_black_hole: SimBody = world.get_body_by_id(star.orbit_parent_id)
+		assert_not_null(host_black_hole, "the stored host id should resolve back to a live black hole")
+		assert_gte(
+			star.position.distance_to(host_black_hole.position),
+			4.0 * SimConstants.AU - 0.001,
+			"host-aware stars should start on the configured inner orbit radius or beyond"
+		)
+
+	assert_gt(distinct_host_ids.size(), 1, "dynamic stars should no longer all spawn around the primary black hole")
+
 func test_public_worldgen_cluster_can_materialize_more_than_four_planets_per_star_when_legacy_hint_requests_it() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
@@ -249,6 +300,36 @@ func test_archetype_material_profiles_bias_materialized_body_materials() -> void
 		"star nurseries should bias at least some planets toward rocky or mixed materials"
 	)
 
+func test_spawn_viable_star_bearing_archetypes_begin_with_host_aligned_dynamic_stars() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 2442
+	config.cluster_density = 0.94
+	config.void_strength = 0.18
+	config.bh_richness = 0.60
+	config.star_richness = 0.60
+	config.rare_zone_frequency = 1.0
+
+	for archetype in ["dense_bh_knot", "star_nursery", "scrap_rich_remnant"]:
+		var world: SimWorld = _materialize_worldgen_archetype(config, archetype)
+		var anchor: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)["anchor"]
+
+		assert_eq(
+			anchor["stars_with_host"],
+			world.get_stars().size(),
+			"%s should assign every spawned star a host black hole" % archetype
+		)
+		assert_eq(
+			anchor["host_dominance_mismatch_count"],
+			0,
+			"%s should begin with host-aligned dominant anchors" % archetype
+		)
+		if world.get_black_holes().size() > 1 and world.get_stars().size() > 1:
+			assert_gt(
+				_count_distinct_star_hosts(world),
+				1,
+				"%s should spread dynamic stars across more than one black hole when multiple hosts exist" % archetype
+			)
+
 func _build_fixture_world(configure: Callable) -> SimWorld:
 	var config = START_CONFIG_SCRIPT.new()
 	configure.call(config)
@@ -271,6 +352,23 @@ func _materialize_worldgen_archetype(config, archetype: String) -> SimWorld:
 	WorldBuilder.materialize_cluster_into_world(world, cluster_state)
 	return world
 
+func _materialize_spawn_viable_worldgen_archetype(config, archetype: String) -> SimWorld:
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+	var worldgen_config = GALAXY_BUILDER_SCRIPT._build_public_worldgen_config(safe_config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var cluster_state: ClusterState = _find_spawn_viable_cluster_state_for_archetype(
+		worldgen_config,
+		worldgen,
+		safe_config.seed,
+		archetype,
+		40
+	)
+	assert_not_null(cluster_state, "test setup should find a spawn-viable %s candidate within the scan window" % archetype)
+	var world := SimWorld.new()
+	WorldBuilder.materialize_cluster_into_world(world, cluster_state)
+	return world
+
 func _find_candidate_descriptor_for_archetype(worldgen, galaxy_seed: int, archetype: String, scan_radius: int):
 	for y in range(-scan_radius, scan_radius + 1):
 		for x in range(-scan_radius, scan_radius + 1):
@@ -280,6 +378,34 @@ func _find_candidate_descriptor_for_archetype(worldgen, galaxy_seed: int, archet
 				if candidate_descriptor.region_archetype == archetype:
 					return candidate_descriptor
 	return null
+
+func _find_spawn_viable_cluster_state_for_archetype(
+		worldgen_config,
+		worldgen,
+		galaxy_seed: int,
+		archetype: String,
+		scan_radius: int) -> ClusterState:
+	for y in range(-scan_radius, scan_radius + 1):
+		for x in range(-scan_radius, scan_radius + 1):
+			var region_descriptor = worldgen.describe_region(galaxy_seed, Vector2i(x, y))
+			var candidates: Array = worldgen.build_cluster_candidates(galaxy_seed, region_descriptor)
+			for candidate_descriptor in candidates:
+				if candidate_descriptor.region_archetype != archetype:
+					continue
+				var cluster_state: ClusterState = GALAXY_BUILDER_SCRIPT._build_cluster_state_from_candidate(
+					worldgen_config,
+					candidate_descriptor
+				)
+				if bool(cluster_state.simulation_profile.get("spawn_viable", false)):
+					return cluster_state
+	return null
+
+func _count_distinct_star_hosts(world: SimWorld) -> int:
+	var host_ids: Dictionary = {}
+	for star in world.get_stars():
+		if star.orbit_parent_id >= 0:
+			host_ids[star.orbit_parent_id] = true
+	return host_ids.size()
 
 func _count_bodies_with_material(world: SimWorld, body_type: int, material_type: int) -> int:
 	var count: int = 0

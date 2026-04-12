@@ -467,6 +467,8 @@ static func _make_body_from_object_state(object_state: ClusterObjectState) -> Si
 	body.orbit_radius = float(object_state.descriptor.get("orbit_radius", 0.0))
 	body.orbit_angle = float(object_state.descriptor.get("orbit_angle", 0.0))
 	body.orbit_angular_speed = float(object_state.descriptor.get("orbit_angular_speed", 0.0))
+	body.last_dominant_bh_id = int(object_state.descriptor.get("last_dominant_bh_id", -1))
+	body.dominant_bh_handoff_count = int(object_state.descriptor.get("dominant_bh_handoff_count", 0))
 	body.debris_mass = float(object_state.descriptor.get("debris_mass", 0.0))
 	body.sleeping = bool(object_state.descriptor.get("sleeping", false))
 	body.active = bool(object_state.descriptor.get("active", true))
@@ -518,14 +520,19 @@ static func _materialize_anchor_cluster(
 		cluster_seed: int,
 		cluster_id: int,
 		analytic_star_carriers: bool) -> void:
-	var spawn_anchor: SimBody = _resolve_primary_black_hole_body(spawned_black_holes)
-	if spawn_anchor == null or not profile.get("spawn_anchor_content", true):
+	if not profile.get("spawn_anchor_content", true):
 		return
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = cluster_seed
-	var stars: Array = _place_analytic_stars(spawn_anchor, profile, rng) \
-		if analytic_star_carriers else _place_dynamic_stars(spawn_anchor, profile, rng)
+	var stars: Array = []
+	if analytic_star_carriers:
+		var spawn_anchor: SimBody = _resolve_primary_black_hole_body(spawned_black_holes)
+		if spawn_anchor == null:
+			return
+		stars = _place_analytic_stars(spawn_anchor, profile, rng)
+	else:
+		stars = _place_dynamic_stars(spawned_black_holes, profile, rng)
 
 	for star_index in range(stars.size()):
 		stars[star_index].persistent_object_id = _make_cluster_object_id(cluster_id, "star", star_index)
@@ -634,18 +641,140 @@ static func _build_star_specs(profile: Dictionary, rng: RandomNumberGenerator) -
 
 	return specs
 
-static func _place_dynamic_stars(black_hole: SimBody, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
+static func _build_dynamic_star_specs(profile: Dictionary, rng: RandomNumberGenerator) -> Array:
+	var specs: Array = []
+	var n: int = int(profile.get("star_count", 0))
+	if n <= 0:
+		return specs
+
+	var mass_scale_min: float = float(profile.get("star_mass_scale_min", 0.7))
+	var mass_scale_max: float = maxf(
+		mass_scale_min,
+		float(profile.get("star_mass_scale_max", 1.3))
+	)
+	for _i in range(n):
+		specs.append({
+			"mass_scale": rng.randf_range(mass_scale_min, mass_scale_max),
+		})
+	return specs
+
+static func _place_dynamic_stars(spawned_black_holes: Array, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []
-	for spec in _build_star_specs(profile, rng):
+	var host_entries: Array = _build_dynamic_star_host_entries(spawned_black_holes, rng)
+	if host_entries.is_empty():
+		return stars
+
+	var star_specs: Array = _build_dynamic_star_specs(profile, rng)
+	var assignments: Array = _assign_dynamic_star_specs_to_hosts(star_specs, host_entries)
+	for assignment in assignments:
+		var host_entry: Dictionary = host_entries[int(assignment["host_index"])]
+		var spec: Dictionary = assignment["spec"]
 		var star := _make_star()
 		star.mass = SimConstants.STAR_MASS * spec["mass_scale"]
 		star.radius = SimConstants.STAR_RADIUS * sqrt(spec["mass_scale"])
 		star.kinematic = false
 		star.scripted_orbit_enabled = false
 		star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
-		_place_in_orbit(star, black_hole, spec["orbit_radius"], spec["phase"], 0.0)
+		_place_in_orbit(
+			star,
+			host_entry["body"],
+			_resolve_dynamic_star_orbit_radius(profile, int(assignment["slot_index"])),
+			_resolve_dynamic_star_phase(host_entry, int(assignment["slot_index"])),
+			0.0
+		)
 		stars.append(star)
 	return stars
+
+static func _build_dynamic_star_host_entries(spawned_black_holes: Array, rng: RandomNumberGenerator) -> Array:
+	var host_entries: Array = []
+	for entry in spawned_black_holes:
+		var black_hole: SimBody = entry.get("body", null)
+		if black_hole == null or not black_hole.active:
+			continue
+		host_entries.append({
+			"body": black_hole,
+			"object_id": str(entry.get("object_id", "")),
+			"is_primary": bool(entry.get("is_primary", false)),
+			"nearest_other_distance": _nearest_other_black_hole_distance(black_hole, spawned_black_holes),
+			"assigned_count": 0,
+			"base_phase": 0.0,
+		})
+	host_entries.sort_custom(func(a, b):
+		if bool(a["is_primary"]) != bool(b["is_primary"]):
+			return bool(a["is_primary"])
+		var distance_a: float = float(a["nearest_other_distance"])
+		var distance_b: float = float(b["nearest_other_distance"])
+		if not is_equal_approx(distance_a, distance_b):
+			return distance_a > distance_b
+		return str(a["object_id"]) < str(b["object_id"])
+	)
+	for entry in host_entries:
+		entry["base_phase"] = _resolve_dynamic_star_host_base_phase(entry["body"], host_entries, rng)
+	return host_entries
+
+static func _nearest_other_black_hole_distance(host_black_hole: SimBody, spawned_black_holes: Array) -> float:
+	var nearest_distance: float = INF
+	for entry in spawned_black_holes:
+		var other_black_hole: SimBody = entry.get("body", null)
+		if other_black_hole == null or other_black_hole.id == host_black_hole.id:
+			continue
+		nearest_distance = minf(
+			nearest_distance,
+			host_black_hole.position.distance_to(other_black_hole.position)
+		)
+	return nearest_distance
+
+static func _resolve_dynamic_star_host_base_phase(
+		host_black_hole: SimBody,
+		host_entries: Array,
+		rng: RandomNumberGenerator) -> float:
+	var nearest_other_black_hole: SimBody = null
+	var nearest_distance_sq: float = INF
+	for entry in host_entries:
+		var other_black_hole: SimBody = entry.get("body", null)
+		if other_black_hole == null or other_black_hole.id == host_black_hole.id:
+			continue
+		var distance_sq: float = host_black_hole.position.distance_squared_to(other_black_hole.position)
+		if distance_sq < nearest_distance_sq:
+			nearest_distance_sq = distance_sq
+			nearest_other_black_hole = other_black_hole
+	if nearest_other_black_hole == null:
+		return rng.randf_range(0.0, TAU)
+	return (host_black_hole.position - nearest_other_black_hole.position).angle()
+
+static func _assign_dynamic_star_specs_to_hosts(star_specs: Array, host_entries: Array) -> Array:
+	var assignments: Array = []
+	if star_specs.is_empty() or host_entries.is_empty():
+		return assignments
+	for spec in star_specs:
+		var best_host_index: int = 0
+		var best_assigned_count: int = int(host_entries[0]["assigned_count"])
+		for host_index in range(1, host_entries.size()):
+			var assigned_count: int = int(host_entries[host_index]["assigned_count"])
+			if assigned_count < best_assigned_count:
+				best_host_index = host_index
+				best_assigned_count = assigned_count
+		host_entries[best_host_index]["assigned_count"] = best_assigned_count + 1
+		assignments.append({
+			"host_index": best_host_index,
+			"slot_index": best_assigned_count,
+			"spec": spec,
+		})
+	return assignments
+
+static func _resolve_dynamic_star_orbit_radius(profile: Dictionary, slot_index: int) -> float:
+	var inner_orbit_radius: float = float(profile.get("star_inner_orbit_au", 0.0)) * SimConstants.AU
+	var outer_orbit_radius: float = maxf(
+		inner_orbit_radius,
+		float(profile.get("star_outer_orbit_au", 0.0)) * SimConstants.AU
+	)
+	var lane_spacing: float = maxf(0.35 * SimConstants.AU, 12.0 * SimConstants.STAR_RADIUS)
+	return minf(inner_orbit_radius + float(slot_index) * lane_spacing, outer_orbit_radius)
+
+static func _resolve_dynamic_star_phase(host_entry: Dictionary, slot_index: int) -> float:
+	var assigned_count: int = int(host_entry.get("assigned_count", 1))
+	var centered_slot: float = float(slot_index) - (float(assigned_count - 1) * 0.5)
+	return wrapf(float(host_entry.get("base_phase", 0.0)) + centered_slot * 0.42, 0.0, TAU)
 
 static func _place_analytic_stars(black_hole: SimBody, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []
@@ -964,6 +1093,8 @@ static func _build_object_state_from_body(
 	object_state.descriptor["orbit_radius"] = body.orbit_radius
 	object_state.descriptor["orbit_angle"] = body.orbit_angle
 	object_state.descriptor["orbit_angular_speed"] = body.orbit_angular_speed
+	object_state.descriptor["last_dominant_bh_id"] = body.last_dominant_bh_id
+	object_state.descriptor["dominant_bh_handoff_count"] = body.dominant_bh_handoff_count
 	object_state.descriptor["debris_mass"] = body.debris_mass
 	object_state.descriptor["sleeping"] = body.sleeping
 	object_state.descriptor["active"] = body.active

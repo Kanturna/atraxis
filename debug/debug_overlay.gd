@@ -264,7 +264,6 @@ func _update_stats_text() -> void:
 	var anchor_stats: Dictionary = snapshot["anchor"]
 	var fps: int = Engine.get_frames_per_second()
 	var frame_ms: float = _last_frame_delta * 1000.0
-	_update_anchor_switch_tracking(anchor_stats["star_anchor_states"])
 	var star_anchor_lines: String = _format_star_anchor_lines(anchor_stats["star_anchor_states"])
 	_update_anchor_diagnostics_text(anchor_stats, star_anchor_lines)
 
@@ -313,7 +312,13 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 		+ "Min BH-BH       %.0f\n" % anchor_stats["min_black_hole_distance"]
 		+ "Min star-star   %.0f\n" % anchor_stats["min_star_star_distance"]
 		+ "Min star-BH     %.0f\n" % anchor_stats["min_star_bh_distance"]
-		+ "BH switches     %d\n" % _anchor_switch_count
+		+ "Min star-host   %.0f\n" % anchor_stats["min_star_host_bh_distance"]
+		+ "Stars w/ host   %d\n" % anchor_stats["stars_with_host"]
+		+ "Host matches    %d\n" % anchor_stats["host_dominance_match_count"]
+		+ "Host mismatch   %d\n" % anchor_stats["host_dominance_mismatch_count"]
+		+ "BH handoffs     %d\n" % anchor_stats["total_dominant_handoffs"]
+		+ "Stars handoffed %d\n" % anchor_stats["stars_with_dominant_handoffs"]
+		+ "Close star enc  %d\n" % anchor_stats["close_star_encounter_count"]
 		+ star_anchor_lines
 		+ "[/code]"
 	)
@@ -546,15 +551,19 @@ func _format_star_anchor_lines(star_anchor_states: Array) -> String:
 		return ""
 	var lines: PackedStringArray = []
 	for state in star_anchor_states:
+		var host_text: String = "--" if state["host_bh_id"] < 0 else str(state["host_bh_id"])
 		var dominant_text: String = "--" if state["dominant_bh_id"] < 0 else str(state["dominant_bh_id"])
-		var secondary_text: String = "--" if state["secondary_bh_id"] < 0 else str(state["secondary_bh_id"])
+		var host_status_text: String = "host-ok" if state["dominant_matches_host"] else "host-swap"
 		var status_text: String = "E<0" if state["negative_specific_energy"] else "E>=0"
 		lines.append(
-			"Star %d         BH%s>%s  r%.2f %s" % [
+			"Star %d         H%s D%s h%d rH%.0f d*%.0f %s %s" % [
 				state["star_id"],
+				host_text,
 				dominant_text,
-				secondary_text,
-				state["dominance_ratio"],
+				state["dominant_handoff_count"],
+				state["host_distance"],
+				state["min_other_star_distance"],
+				host_status_text,
 				status_text,
 			]
 		)

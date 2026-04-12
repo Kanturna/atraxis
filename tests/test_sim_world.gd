@@ -36,6 +36,31 @@ func test_far_from_black_hole_keeps_single_substep() -> void:
 		"bodies far from every black hole should keep the default single-step integration"
 	)
 
+func test_dominant_black_hole_handoffs_are_counted_when_anchor_changes() -> void:
+	var world := SimWorld.new()
+
+	var left_black_hole := _make_black_hole()
+	left_black_hole.position = Vector2.ZERO
+	world.add_body(left_black_hole)
+
+	var right_black_hole := _make_black_hole()
+	right_black_hole.position = Vector2(9000.0, 0.0)
+	world.add_body(right_black_hole)
+
+	var star := _make_dynamic_star()
+	star.position = Vector2(2200.0, 0.0)
+	world.add_body(star)
+
+	world._rebuild_dominant_bh_cache()
+	assert_eq(star.last_dominant_bh_id, left_black_hole.id, "initial dominant-anchor sampling should lock onto the nearer black hole")
+	assert_eq(star.dominant_bh_handoff_count, 0, "the first dominant-anchor sample should not count as a handoff")
+
+	star.position = Vector2(6800.0, 0.0)
+	world._rebuild_dominant_bh_cache()
+
+	assert_eq(star.last_dominant_bh_id, right_black_hole.id, "after crossing the balance region the other black hole should dominate")
+	assert_eq(star.dominant_bh_handoff_count, 1, "switching dominant black holes should increment the persisted handoff counter")
+
 func test_leapfrog_keeps_circular_star_orbit_stable() -> void:
 	var world := SimWorld.new()
 

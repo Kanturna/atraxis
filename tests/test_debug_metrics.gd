@@ -249,3 +249,62 @@ func test_anchor_metrics_report_dominant_and_secondary_black_holes_per_star() ->
 	assert_eq(star_states[0]["dominant_bh_id"], central_bh.id, "the closer central BH should dominate the star")
 	assert_eq(star_states[0]["secondary_bh_id"], outer_bh.id, "the next strongest BH should be reported as the secondary anchor")
 	assert_gt(star_states[0]["dominance_ratio"], 1.0, "dominant anchor should report a ratio above 1.0 against the secondary BH")
+
+func test_anchor_metrics_report_host_alignment_handoffs_and_close_star_encounters() -> void:
+	var world := SimWorld.new()
+
+	var central_bh := SimBody.new()
+	central_bh.active = true
+	central_bh.body_type = SimBody.BodyType.BLACK_HOLE
+	central_bh.kinematic = true
+	central_bh.mass = 12_000_000.0
+	central_bh.position = Vector2.ZERO
+	world.add_body(central_bh)
+
+	var outer_bh := SimBody.new()
+	outer_bh.active = true
+	outer_bh.body_type = SimBody.BodyType.BLACK_HOLE
+	outer_bh.kinematic = true
+	outer_bh.mass = 12_000_000.0
+	outer_bh.position = Vector2(9000.0, 0.0)
+	world.add_body(outer_bh)
+
+	var matched_star := SimBody.new()
+	matched_star.active = true
+	matched_star.body_type = SimBody.BodyType.STAR
+	matched_star.kinematic = false
+	matched_star.mass = SimConstants.STAR_MASS
+	matched_star.position = Vector2(2500.0, 0.0)
+	matched_star.velocity = Vector2(0.0, 300.0)
+	matched_star.orbit_parent_id = central_bh.id
+	matched_star.dominant_bh_handoff_count = 2
+	world.add_body(matched_star)
+
+	var mismatched_star := SimBody.new()
+	mismatched_star.active = true
+	mismatched_star.body_type = SimBody.BodyType.STAR
+	mismatched_star.kinematic = false
+	mismatched_star.mass = SimConstants.STAR_MASS
+	mismatched_star.position = Vector2(2900.0, 0.0)
+	mismatched_star.velocity = Vector2(0.0, 300.0)
+	mismatched_star.orbit_parent_id = outer_bh.id
+	world.add_body(mismatched_star)
+
+	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
+	var anchor: Dictionary = snapshot["anchor"]
+	var star_states: Array = anchor["star_anchor_states"]
+
+	assert_eq(anchor["stars_with_host"], 2, "both stars should report their assigned host black hole")
+	assert_eq(anchor["host_dominance_match_count"], 1, "one star should begin aligned with its dominant black hole")
+	assert_eq(anchor["host_dominance_mismatch_count"], 1, "one star should expose a host-vs-dominant mismatch")
+	assert_almost_eq(anchor["min_star_host_bh_distance"], 2500.0, 0.001, "host diagnostics should expose the nearest star-to-host distance")
+	assert_eq(anchor["stars_with_dominant_handoffs"], 1, "handoff aggregation should count stars that already switched dominant BHs")
+	assert_eq(anchor["total_dominant_handoffs"], 2, "handoff aggregation should sum the per-star counters")
+	assert_eq(anchor["close_star_encounter_count"], 2, "both stars should report the close encounter when their separation is small")
+	assert_eq(star_states[0]["host_bh_id"], central_bh.id, "per-star diagnostics should expose the matched host id")
+	assert_true(star_states[0]["dominant_matches_host"], "the matched star should report host alignment")
+	assert_eq(star_states[0]["dominant_handoff_count"], 2, "per-star diagnostics should expose the persisted handoff counter")
+	assert_almost_eq(star_states[0]["min_other_star_distance"], 400.0, 0.001, "per-star diagnostics should expose the nearest other-star distance")
+	assert_eq(star_states[1]["host_bh_id"], outer_bh.id, "per-star diagnostics should expose the mismatched host id")
+	assert_false(star_states[1]["dominant_matches_host"], "the mismatched star should report a host mismatch")
+	assert_almost_eq(star_states[1]["host_distance"], 6100.0, 0.001, "host distance should use the assigned host, not the dominant one")

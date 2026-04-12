@@ -2,6 +2,7 @@ extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
+const DEBUG_METRICS_SCRIPT := preload("res://debug/debug_metrics.gd")
 
 func test_default_config_starts_on_the_public_main_universe_path() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -157,25 +158,42 @@ func test_public_worldgen_startup_remains_stable_for_initial_steps() -> void:
 
 	WorldBuilder.build_from_config(world, config)
 
-	var star: SimBody = world.get_star()
-	assert_not_null(star, "worldgen startup smoke test needs at least one star in the active cluster")
-	var initial_speed: float = star.velocity.length()
-	for _step in range(240):
+	var stars: Array = world.get_stars()
+	assert_false(stars.is_empty(), "worldgen startup smoke test needs at least one star in the active cluster")
+	var initial_anchor_snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
+	var initial_anchor: Dictionary = initial_anchor_snapshot["anchor"]
+	var initial_speed_by_star_id: Dictionary = {}
+	for star in stars:
+		initial_speed_by_star_id[star.id] = star.velocity.length()
+
+	assert_eq(
+		initial_anchor["stars_with_host"],
+		stars.size(),
+		"public dynamic startup should assign every spawned star a host black hole"
+	)
+	assert_eq(
+		initial_anchor["host_dominance_mismatch_count"],
+		0,
+		"public dynamic startup should begin with host-aligned dominant anchors"
+	)
+
+	for _step in range(600):
 		world.step_sim(SimConstants.FIXED_DT)
 
 	var nearest_black_hole_distance: float = INF
-	for black_hole in world.get_black_holes():
-		nearest_black_hole_distance = minf(
-			nearest_black_hole_distance,
-			star.position.distance_to(black_hole.position)
+	for star in stars:
+		assert_true(star.active, "worldgen startup stars should survive the initial local evolution")
+		assert_lt(
+			star.velocity.length(),
+			float(initial_speed_by_star_id.get(star.id, star.velocity.length())) * 5.0,
+			"worldgen startup should not explode into runaway velocity during the first seconds"
 		)
+		for black_hole in world.get_black_holes():
+			nearest_black_hole_distance = minf(
+				nearest_black_hole_distance,
+				star.position.distance_to(black_hole.position)
+			)
 
-	assert_true(star.active, "worldgen startup stars should survive the initial local evolution")
-	assert_lt(
-		star.velocity.length(),
-		initial_speed * 5.0,
-		"worldgen startup should not explode into runaway velocity during the first seconds"
-	)
 	assert_gt(
 		nearest_black_hole_distance,
 		SimConstants.BLACK_HOLE_RADIUS + SimConstants.STAR_RADIUS,
