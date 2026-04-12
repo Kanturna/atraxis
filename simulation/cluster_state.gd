@@ -7,6 +7,7 @@ const CLUSTER_GROUP_STATE_SCRIPT := preload("res://simulation/cluster_group_stat
 var cluster_id: int = -1
 var global_center: Vector2 = Vector2.ZERO
 var radius: float = 0.0
+var runtime_extent_radius: float = 0.0
 var cluster_seed: int = 0
 var classification: String = ""
 var activation_state: int = ClusterActivationState.State.UNLOADED
@@ -44,6 +45,12 @@ func get_objects_by_kind(kind: String) -> Array:
 
 func get_primary_black_hole_object_id() -> String:
 	return str(cluster_blueprint.get("primary_black_hole_object_id", ""))
+
+func get_authoritative_radius() -> float:
+	return maxf(radius, 0.0)
+
+func update_runtime_extent(next_extent_radius: float) -> void:
+	runtime_extent_radius = maxf(get_authoritative_radius(), next_extent_radius)
 
 func get_group(group_id: String):
 	return group_registry.get(group_id, null)
@@ -148,6 +155,7 @@ func copy() -> ClusterState:
 	duplicate_state.cluster_id = cluster_id
 	duplicate_state.global_center = global_center
 	duplicate_state.radius = radius
+	duplicate_state.runtime_extent_radius = runtime_extent_radius
 	duplicate_state.cluster_seed = cluster_seed
 	duplicate_state.classification = classification
 	duplicate_state.activation_state = activation_state

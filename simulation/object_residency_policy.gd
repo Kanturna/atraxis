@@ -23,12 +23,12 @@ static func supports_transit_import(transit_state) -> bool:
 static func transit_export_radius(cluster_state: ClusterState) -> float:
 	if cluster_state == null:
 		return 0.0
-	return cluster_state.radius * SimConstants.CLUSTER_TRANSIT_EXPORT_RADIUS_FACTOR
+	return cluster_state.get_authoritative_radius() * SimConstants.CLUSTER_TRANSIT_EXPORT_RADIUS_FACTOR
 
 static func transit_import_radius(cluster_state: ClusterState) -> float:
 	if cluster_state == null:
 		return 0.0
-	return cluster_state.radius * SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
+	return cluster_state.get_authoritative_radius() * SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
 
 static func is_position_within_cluster_import_radius(
 		global_position: Vector2,

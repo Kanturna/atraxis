@@ -222,6 +222,7 @@ static func _build_inflow_lab_fixture_galaxy(galaxy_state: GalaxyState, config) 
 		}
 	)
 	cluster_state.radius = _estimate_cluster_radius([], cluster_state.simulation_profile)
+	cluster_state.runtime_extent_radius = cluster_state.radius
 	galaxy_state.add_cluster(cluster_state)
 
 static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
@@ -254,6 +255,7 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 		simulation_profile_overrides
 	)
 	cluster_state.radius = _estimate_cluster_radius(local_black_hole_specs, cluster_state.simulation_profile)
+	cluster_state.runtime_extent_radius = cluster_state.radius
 
 	for spec in local_black_hole_specs:
 		var object_state := ClusterObjectState.new()
@@ -316,6 +318,7 @@ static func _build_cluster_state_from_candidate(
 		"rare_zone_weight": candidate_descriptor.rare_zone_weight,
 		"scrap_potential": candidate_descriptor.scrap_potential,
 		"life_potential": candidate_descriptor.life_potential,
+		"worldgen_radius": candidate_descriptor.radius,
 		"content_profile": content_profile.duplicate(true),
 		"content_markers": content_markers.duplicate(true),
 		"descriptor": candidate_descriptor.descriptor.duplicate(true),
@@ -326,7 +329,8 @@ static func _build_cluster_state_from_candidate(
 		local_black_hole_specs.size(),
 		content_profile
 	)
-	cluster_state.radius = _estimate_cluster_radius(local_black_hole_specs, cluster_state.simulation_profile)
+	cluster_state.radius = candidate_descriptor.radius
+	cluster_state.runtime_extent_radius = cluster_state.radius
 
 	for spec in local_black_hole_specs:
 		var object_state := ClusterObjectState.new()
@@ -390,6 +394,7 @@ static func _build_worldgen_simulation_profile(
 		"rare_zone_weight": candidate_descriptor.rare_zone_weight,
 		"scrap_potential": candidate_descriptor.scrap_potential,
 		"life_potential": candidate_descriptor.life_potential,
+		"worldgen_radius": candidate_descriptor.radius,
 		"sector_scale": worldgen_config.sector_scale,
 		"cluster_density": worldgen_config.cluster_density,
 		"void_strength": worldgen_config.void_strength,

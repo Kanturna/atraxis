@@ -149,7 +149,7 @@ static func writeback_world_into_cluster(
 	cluster_state.set_object_residency_state(residency_state)
 	cluster_state.simulated_time = world.time_elapsed
 	cluster_state.simulation_profile["has_runtime_snapshot"] = true
-	cluster_state.radius = _estimate_runtime_cluster_radius(next_object_registry)
+	cluster_state.update_runtime_extent(_estimate_runtime_cluster_radius(next_object_registry))
 	if cluster_state.get_primary_black_hole_object_id() == "":
 		for object_state in cluster_state.get_objects_by_kind("black_hole"):
 			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
@@ -372,7 +372,7 @@ static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> v
 	cluster_state.set_object_residency_state(ObjectResidencyState.State.SIMPLIFIED)
 	cluster_state.simulated_time += dt
 	cluster_state.simulation_profile["has_runtime_snapshot"] = true
-	cluster_state.radius = _estimate_runtime_cluster_radius(cluster_state.object_registry)
+	cluster_state.update_runtime_extent(_estimate_runtime_cluster_radius(cluster_state.object_registry))
 
 static func _compute_simplified_black_hole_acceleration(object_state: ClusterObjectState, black_hole_states: Array) -> Vector2:
 	var acceleration: Vector2 = Vector2.ZERO
@@ -1125,7 +1125,7 @@ static func _accept_transit_object_into_cluster(cluster_state: ClusterState, tra
 	)
 	cluster_state.register_object(object_state)
 	var object_radius: float = float(object_state.descriptor.get("radius", 0.0))
-	cluster_state.radius = maxf(cluster_state.radius, cluster_local_position.length() + object_radius)
+	cluster_state.update_runtime_extent(cluster_local_position.length() + object_radius)
 
 static func _is_simplified_analytic_orbiter(object_state: ClusterObjectState) -> bool:
 	return bool(object_state.descriptor.get("scripted_orbit_enabled", false)) \

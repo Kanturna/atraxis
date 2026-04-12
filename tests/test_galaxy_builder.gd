@@ -160,6 +160,130 @@ func test_sector_discovery_is_idempotent_and_keeps_cluster_registry_stable() -> 
 			"candidate indices should stay inside the explicit V1 0..2 cluster-candidate limit"
 		)
 
+func test_sector_descriptor_getters_return_defensive_copies() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 812
+	config.cluster_density = 0.88
+	config.void_strength = 0.12
+	config.bh_richness = 0.59
+	config.star_richness = 0.51
+	config.rare_zone_frequency = 0.44
+
+	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+	var primary_cluster: ClusterState = galaxy_state.get_primary_cluster()
+	var sector_coord_variant = primary_cluster.simulation_profile.get("sector_coord", Vector2i.ZERO)
+	var sector_coord: Vector2i = sector_coord_variant if sector_coord_variant is Vector2i else Vector2i.ZERO
+	var original_descriptor = galaxy_state.get_region_descriptor(sector_coord)
+	var descriptor_copy = galaxy_state.get_region_descriptor(sector_coord)
+	var candidate_copies: Array = galaxy_state.get_sector_candidate_descriptors(sector_coord)
+
+	assert_not_null(original_descriptor, "the defensive-copy test needs a discovered region descriptor")
+	assert_false(candidate_copies.is_empty(), "the defensive-copy test needs at least one sector candidate")
+
+	descriptor_copy.region_archetype = "tampered"
+	descriptor_copy.cluster_chance = 0.0
+	candidate_copies[0].classification = "tampered_cluster"
+	candidate_copies[0].radius = 1.0
+
+	var fresh_descriptor = galaxy_state.get_region_descriptor(sector_coord)
+	var fresh_candidates: Array = galaxy_state.get_sector_candidate_descriptors(sector_coord)
+	assert_eq(
+		fresh_descriptor.region_archetype,
+		original_descriptor.region_archetype,
+		"region descriptor getters should return copies instead of leaking the cached source object"
+	)
+	assert_almost_eq(
+		fresh_descriptor.cluster_chance,
+		original_descriptor.cluster_chance,
+		0.0001,
+		"mutating a returned region descriptor should not alter the cached source-of-truth descriptor"
+	)
+	assert_ne(
+		fresh_candidates[0].classification,
+		"tampered_cluster",
+		"candidate descriptor getters should return copies instead of cached mutable objects"
+	)
+	assert_gt(
+		fresh_candidates[0].radius,
+		1.0,
+		"mutating a returned candidate descriptor should not alter the cached source-of-truth candidate"
+	)
+
+func test_registered_worldgen_clusters_keep_candidate_radius_as_authoritative_extent() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 257
+	config.cluster_density = 0.93
+	config.void_strength = 0.09
+	config.bh_richness = 0.71
+	config.star_richness = 0.56
+	config.rare_zone_frequency = 0.38
+
+	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+	var checked_clusters: int = 0
+	for cluster_state in galaxy_state.get_clusters():
+		var sector_coord_variant = cluster_state.simulation_profile.get("sector_coord", null)
+		if not (sector_coord_variant is Vector2i):
+			continue
+		var candidate_index: int = int(cluster_state.simulation_profile.get("candidate_index", -1))
+		var matched_candidate = null
+		for candidate_descriptor in galaxy_state.get_sector_candidate_descriptors(sector_coord_variant):
+			if candidate_descriptor.candidate_index == candidate_index:
+				matched_candidate = candidate_descriptor
+				break
+		assert_not_null(matched_candidate, "registered worldgen clusters should map back to one deterministic candidate descriptor")
+		assert_almost_eq(
+			cluster_state.radius,
+			matched_candidate.radius,
+			0.001,
+			"worldgen candidate radius should remain the authoritative cluster extent instead of being replaced by a runtime estimate"
+		)
+		assert_almost_eq(
+			float(cluster_state.simulation_profile.get("worldgen_radius", 0.0)),
+			matched_candidate.radius,
+			0.001,
+			"the simulation profile should retain the authoritative worldgen radius explicitly"
+		)
+		checked_clusters += 1
+	assert_gt(checked_clusters, 0, "the radius-authority test should inspect at least one registered worldgen cluster")
+
+func test_same_sector_candidates_keep_a_small_clearance_margin_in_v1() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1664
+	config.sector_scale = 180.0 * SimConstants.AU
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.84
+	config.star_richness = 0.56
+	config.rare_zone_frequency = 0.72
+
+	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+	var found_multi_candidate_sector: bool = false
+	for y in range(-12, 13):
+		for x in range(-12, 13):
+			var candidates: Array = worldgen.build_cluster_candidates(
+				config.seed,
+				worldgen.describe_region(config.seed, Vector2i(x, y))
+			)
+			if candidates.size() < 2:
+				continue
+			found_multi_candidate_sector = true
+			for left_index in range(candidates.size()):
+				for right_index in range(left_index + 1, candidates.size()):
+					var left_candidate = candidates[left_index]
+					var right_candidate = candidates[right_index]
+					var required_clearance: float = (left_candidate.radius + right_candidate.radius) * 0.55
+					assert_gte(
+						left_candidate.global_center.distance_to(right_candidate.global_center),
+						required_clearance - 0.001,
+						"same-sector cluster candidates should keep the small V1 clearance margin instead of heavily overlapping"
+					)
+			if found_multi_candidate_sector:
+				break
+		if found_multi_candidate_sector:
+			break
+	assert_true(found_multi_candidate_sector, "dense worldgen settings should expose at least one multi-candidate sector for the clearance test")
+
 func test_cluster_black_holes_start_resident_and_expose_lifecycle_scaffold() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 5

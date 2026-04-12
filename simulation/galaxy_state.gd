@@ -81,11 +81,19 @@ func has_discovered_sector(sector_coord: Vector2i) -> bool:
 	return region_descriptors_by_sector_key.has(_sector_key_from_coord(sector_coord))
 
 func get_region_descriptor(sector_coord: Vector2i):
-	return region_descriptors_by_sector_key.get(_sector_key_from_coord(sector_coord), null)
+	var descriptor = region_descriptors_by_sector_key.get(_sector_key_from_coord(sector_coord), null)
+	return descriptor.copy() if descriptor != null and descriptor.has_method("copy") else descriptor
 
 func get_sector_candidate_descriptors(sector_coord: Vector2i) -> Array:
 	var candidates: Array = candidate_descriptors_by_sector_key.get(_sector_key_from_coord(sector_coord), [])
-	return candidates.duplicate()
+	var copies: Array = []
+	for candidate_descriptor in candidates:
+		copies.append(
+			candidate_descriptor.copy()
+				if candidate_descriptor != null and candidate_descriptor.has_method("copy")
+				else candidate_descriptor
+		)
+	return copies
 
 func get_cluster_ids_for_sector(sector_coord: Vector2i) -> Array:
 	var cluster_ids: Array = cluster_ids_by_sector_key.get(_sector_key_from_coord(sector_coord), [])
@@ -97,20 +105,26 @@ func discover_sector(sector_coord: Vector2i, worldgen):
 	var sector_key: String = worldgen.sector_key(sector_coord)
 	var existing_descriptor = region_descriptors_by_sector_key.get(sector_key, null)
 	if existing_descriptor != null:
-		return existing_descriptor
+		return existing_descriptor.copy() if existing_descriptor.has_method("copy") else existing_descriptor
 
 	var descriptor = worldgen.describe_region(galaxy_seed, sector_coord)
 	var candidates: Array = worldgen.build_cluster_candidates(galaxy_seed, descriptor)
+	var stored_candidates: Array = []
 	var cluster_ids: Array = []
 	for candidate_descriptor in candidates:
 		cluster_ids.append(candidate_descriptor.cluster_id)
+		stored_candidates.append(
+			candidate_descriptor.copy()
+				if candidate_descriptor != null and candidate_descriptor.has_method("copy")
+				else candidate_descriptor
+		)
 
-	region_descriptors_by_sector_key[sector_key] = descriptor
-	candidate_descriptors_by_sector_key[sector_key] = candidates
-	cluster_ids_by_sector_key[sector_key] = cluster_ids
+	region_descriptors_by_sector_key[sector_key] = descriptor.copy() if descriptor.has_method("copy") else descriptor
+	candidate_descriptors_by_sector_key[sector_key] = stored_candidates
+	cluster_ids_by_sector_key[sector_key] = cluster_ids.duplicate()
 	if not discovered_sector_order.has(sector_key):
 		discovered_sector_order.append(sector_key)
-	return descriptor
+	return descriptor.copy() if descriptor.has_method("copy") else descriptor
 
 func count_clusters_by_activation_state(state: int) -> int:
 	var count: int = 0
@@ -280,7 +294,7 @@ func find_cluster_containing_global_position(global_position: Vector2, radius_fa
 	var matched_cluster: ClusterState = null
 	var best_distance: float = INF
 	for cluster_state in get_clusters():
-		var cluster_radius: float = cluster_state.radius * radius_factor
+		var cluster_radius: float = cluster_state.get_authoritative_radius() * radius_factor
 		var distance: float = cluster_state.global_center.distance_to(global_position)
 		if distance > cluster_radius:
 			continue

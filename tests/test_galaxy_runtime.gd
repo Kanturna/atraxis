@@ -696,6 +696,51 @@ func test_resident_arrival_reappears_when_target_cluster_becomes_active() -> voi
 		"reactivating the target cluster should restore the resident arrival at the stored local arrival position"
 	)
 
+func test_worldgen_cluster_radius_stays_authoritative_through_writeback_and_arrival() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.cluster_density = 0.92
+	config.void_strength = 0.10
+	config.bh_richness = 0.74
+	config.star_richness = 0.58
+	config.rare_zone_frequency = 0.36
+	config.disturbance_body_count = 1
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var active_authoritative_radius: float = active_cluster.radius
+	var target_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, active_cluster.cluster_id)
+	var target_cluster: ClusterState = runtime.galaxy_state.get_cluster(target_cluster_id)
+	var target_authoritative_radius: float = target_cluster.radius
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		active_cluster.radius,
+		active_authoritative_radius,
+		0.001,
+		"active-cluster writeback should not replace the authoritative worldgen radius with a runtime extent estimate"
+	)
+
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(target_cluster)
+	var transit_state = _make_test_transit_asteroid(
+		"transit:authoritative_radius_arrival",
+		active_cluster.cluster_id,
+		target_cluster.global_center + Vector2(import_radius * 0.5, 0.0),
+		Vector2.ZERO
+	)
+	runtime.galaxy_state.register_transit_object(transit_state)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		target_cluster.radius,
+		target_authoritative_radius,
+		0.001,
+		"resident arrivals should not silently expand the authoritative cluster radius beyond the worldgen-owned extent"
+	)
+
 func test_in_transit_asteroid_imports_into_active_cluster_when_it_enters_cluster_space() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR

@@ -126,7 +126,8 @@ func build_cluster_candidates(
 			galaxy_seed,
 			region_descriptor,
 			candidate_index,
-			candidate_rng
+			candidate_rng,
+			candidates
 		))
 	return candidates
 
@@ -180,10 +181,10 @@ func _build_cluster_candidate(
 		galaxy_seed: int,
 		region_descriptor,
 		candidate_index: int,
-		candidate_rng: RandomNumberGenerator):
+		candidate_rng: RandomNumberGenerator,
+		existing_candidates: Array):
 	var descriptor := CANDIDATE_DESCRIPTOR_SCRIPT.new()
 	var candidate_seed: int = _candidate_seed(galaxy_seed, region_descriptor.sector_coord, candidate_index)
-	var sector_padding: float = config.sector_scale * 0.16
 	var sector_origin_world: Vector2 = sector_origin(region_descriptor.sector_coord)
 	var bh_noise: float = candidate_rng.randf()
 	var spacing_noise: float = candidate_rng.randf()
@@ -195,10 +196,6 @@ func _build_cluster_candidate(
 	descriptor.cluster_seed = candidate_seed
 	descriptor.classification = "%s_cluster" % region_descriptor.region_archetype
 	descriptor.region_archetype = region_descriptor.region_archetype
-	descriptor.global_center = sector_origin_world + Vector2(
-		candidate_rng.randf_range(sector_padding, config.sector_scale - sector_padding),
-		candidate_rng.randf_range(sector_padding, config.sector_scale - sector_padding)
-	)
 	descriptor.bh_richness = region_descriptor.bh_richness
 	descriptor.star_richness = region_descriptor.star_richness
 	descriptor.rare_zone_weight = region_descriptor.rare_zone_weight
@@ -217,11 +214,63 @@ func _build_cluster_candidate(
 		descriptor.bh_spacing_au,
 		radius_noise
 	) * SimConstants.AU
+	var resolved_global_center: Vector2 = _resolve_candidate_global_center(
+		sector_origin_world,
+		candidate_rng,
+		descriptor.radius,
+		existing_candidates
+	)
+	descriptor.global_center = resolved_global_center
 	descriptor.descriptor = {
 		"sector_key": sector_key(region_descriptor.sector_coord),
-		"sector_padding": sector_padding,
+		"sector_padding": _sector_candidate_padding(descriptor.radius),
 	}
 	return descriptor
+
+func _resolve_candidate_global_center(
+		sector_origin_world: Vector2,
+		candidate_rng: RandomNumberGenerator,
+		candidate_radius: float,
+		existing_candidates: Array) -> Vector2:
+	var best_local_position: Vector2 = Vector2.ZERO
+	var best_clearance_margin: float = -INF
+	for _attempt in range(5):
+		var local_position: Vector2 = _sample_candidate_local_center(candidate_rng, candidate_radius)
+		var clearance_margin: float = _candidate_clearance_margin(local_position, candidate_radius, existing_candidates)
+		if clearance_margin > best_clearance_margin:
+			best_clearance_margin = clearance_margin
+			best_local_position = local_position
+		if clearance_margin >= 0.0:
+			break
+	return sector_origin_world + best_local_position
+
+func _sample_candidate_local_center(candidate_rng: RandomNumberGenerator, candidate_radius: float) -> Vector2:
+	var sector_padding: float = _sector_candidate_padding(candidate_radius)
+	return Vector2(
+		candidate_rng.randf_range(sector_padding, config.sector_scale - sector_padding),
+		candidate_rng.randf_range(sector_padding, config.sector_scale - sector_padding)
+	)
+
+func _sector_candidate_padding(candidate_radius: float) -> float:
+	return minf(maxf(config.sector_scale * 0.16, candidate_radius * 0.30), config.sector_scale * 0.42)
+
+func _candidate_clearance_margin(local_position: Vector2, candidate_radius: float, existing_candidates: Array) -> float:
+	var best_margin: float = INF
+	for existing_candidate in existing_candidates:
+		if existing_candidate == null:
+			continue
+		var existing_local_position: Vector2 = existing_candidate.global_center - sector_origin(existing_candidate.sector_coord)
+		var required_distance: float = _candidate_clearance_distance(candidate_radius, existing_candidate.radius)
+		var margin: float = local_position.distance_to(existing_local_position) - required_distance
+		best_margin = minf(best_margin, margin)
+	if best_margin == INF:
+		return 0.0
+	return best_margin
+
+func _candidate_clearance_distance(candidate_radius: float, other_radius: float) -> float:
+	# Small V1 soft-clearance only: reduce heavily overlapping cluster claims
+	# inside one sector without turning candidate placement into a bigger solver.
+	return (candidate_radius + other_radius) * 0.55
 
 func _describe_fallback_region(galaxy_seed: int):
 	var descriptor := REGION_DESCRIPTOR_SCRIPT.new()
