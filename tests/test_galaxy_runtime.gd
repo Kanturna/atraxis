@@ -509,6 +509,49 @@ func test_active_dynamic_asteroid_exports_into_galaxy_transit_registry() -> void
 		"objects outside the target cluster radius should remain en route until they actually enter the target cluster"
 	)
 
+func test_transit_routing_keeps_current_target_until_a_competitor_wins_by_clear_margin() -> void:
+	var galaxy_state := GalaxyState.new()
+	galaxy_state.add_cluster(_make_manual_cluster(0, Vector2.ZERO, 100.0))
+	galaxy_state.add_cluster(_make_manual_cluster(1, Vector2(1000.0, 0.0), 100.0))
+	galaxy_state.add_cluster(_make_manual_cluster(2, Vector2(1400.0, 0.0), 100.0))
+
+	var transit_state = _make_test_transit_asteroid(
+		"transit:routing_hysteresis",
+		0,
+		Vector2(1215.0, 0.0),
+		Vector2.ZERO
+	)
+	transit_state.target_cluster_id = 1
+	transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE
+	galaxy_state.register_transit_object(transit_state)
+
+	WorldBuilder.step_transit_objects(galaxy_state, SimConstants.FIXED_DT)
+
+	assert_eq(
+		transit_state.target_cluster_id,
+		1,
+		"routing should keep the current non-source target when a competing cluster is only marginally better"
+	)
+	assert_eq(
+		transit_state.arrival_phase,
+		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE,
+		"the retained target should stay en route while the object is still outside its import radius"
+	)
+
+	transit_state.global_position = Vector2(1230.0, 0.0)
+	WorldBuilder.step_transit_objects(galaxy_state, SimConstants.FIXED_DT)
+
+	assert_eq(
+		transit_state.target_cluster_id,
+		2,
+		"routing should retarget once a competing cluster wins by a clear claim margin"
+	)
+	assert_eq(
+		transit_state.arrival_phase,
+		TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE,
+		"clear retargets should still remain en route until the new target is actually reached"
+	)
+
 func test_arriving_transit_object_settles_into_unloaded_target_cluster_as_resident() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -628,6 +671,53 @@ func test_in_transit_asteroid_imports_into_active_cluster_when_it_enters_cluster
 		"transit import should convert the stored global position back into the active cluster's local space"
 	)
 
+func test_transit_object_reacquires_its_source_cluster_when_it_returns_inside_source_space() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 6
+	config.galaxy_cluster_count = 2
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var source_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var competing_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, source_cluster.cluster_id)
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(source_cluster)
+	var transit_state = _make_test_transit_asteroid(
+		"transit:source_reacquire",
+		source_cluster.cluster_id,
+		source_cluster.global_center + Vector2(import_radius * 0.5, 0.0),
+		Vector2.ZERO
+	)
+	transit_state.target_cluster_id = competing_cluster_id
+	transit_state.arrival_phase = TRANSIT_OBJECT_STATE_SCRIPT.ArrivalPhase.EN_ROUTE
+	runtime.galaxy_state.register_transit_object(transit_state)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var imported_body: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(transit_state.object_id)
+	var persisted_object: ClusterObjectState = source_cluster.get_object(transit_state.object_id)
+	assert_eq(
+		runtime.get_transit_object_count(),
+		0,
+		"returning inside the source cluster should hand the object back out of global transit"
+	)
+	assert_not_null(
+		imported_body,
+		"source-cluster reacquire should re-materialize the returning object into the active local simulation"
+	)
+	assert_not_null(
+		persisted_object,
+		"source-cluster reacquire should restore the object into the source cluster registry"
+	)
+	assert_eq(
+		persisted_object.residency_state,
+		ObjectResidencyState.State.ACTIVE,
+		"reacquiring into the active source cluster should make the object ACTIVE again"
+	)
+
 func test_dynamic_stars_do_not_enter_transit_in_the_first_narrow_pipeline() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -742,6 +832,16 @@ func test_cluster_activation_request_switches_cluster_on_next_step() -> void:
 		second_cluster_id,
 		"queued activation requests should switch the active cluster at the start of the next runtime step"
 	)
+
+func _make_manual_cluster(cluster_id: int, global_center: Vector2, radius: float) -> ClusterState:
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_id = cluster_id
+	cluster_state.global_center = global_center
+	cluster_state.radius = radius
+	cluster_state.cluster_seed = 10_000 + cluster_id
+	cluster_state.classification = "test_cluster"
+	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
+	return cluster_state
 
 func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: int) -> int:
 	for cluster_state in galaxy_state.get_clusters():

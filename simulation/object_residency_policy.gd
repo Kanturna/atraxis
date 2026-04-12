@@ -30,6 +30,35 @@ static func transit_import_radius(cluster_state: ClusterState) -> float:
 		return 0.0
 	return cluster_state.radius * SimConstants.CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR
 
+static func transit_cluster_claim_score(transit_state, cluster_state: ClusterState) -> float:
+	if not supports_transit_import(transit_state) or cluster_state == null:
+		return INF
+	var import_radius: float = maxf(transit_import_radius(cluster_state), 1.0)
+	var distance_to_center: float = transit_state.global_position.distance_to(cluster_state.global_center)
+	var distance_outside_import: float = maxf(0.0, distance_to_center - import_radius)
+	return distance_outside_import / import_radius
+
+static func should_keep_transit_target(
+		transit_state,
+		current_target: ClusterState,
+		challenger_target: ClusterState) -> bool:
+	if transit_state == null or current_target == null:
+		return false
+	if challenger_target == null or challenger_target.cluster_id == current_target.cluster_id:
+		return true
+	if can_import_transit_object_into_cluster(transit_state, current_target):
+		return true
+	if can_import_transit_object_into_cluster(transit_state, challenger_target):
+		return false
+	var current_lock_radius: float = transit_import_radius(current_target) \
+		* SimConstants.CLUSTER_TRANSIT_ROUTING_LOCK_RADIUS_FACTOR
+	var distance_to_current: float = transit_state.global_position.distance_to(current_target.global_center)
+	if distance_to_current <= current_lock_radius:
+		return true
+	var current_score: float = transit_cluster_claim_score(transit_state, current_target)
+	var challenger_score: float = transit_cluster_claim_score(transit_state, challenger_target)
+	return current_score <= challenger_score + SimConstants.CLUSTER_TRANSIT_ROUTING_SCORE_MARGIN
+
 static func residency_state_for_cluster_activation(activation_state: int) -> int:
 	match activation_state:
 		ClusterActivationState.State.ACTIVE:

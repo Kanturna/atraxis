@@ -97,6 +97,8 @@ const CLUSTER_SIMPLIFIED_RANGE_FACTOR: float = 2.5
 const CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD: float = 1.5
 const CLUSTER_TRANSIT_EXPORT_RADIUS_FACTOR: float = 1.05
 const CLUSTER_TRANSIT_IMPORT_RADIUS_FACTOR: float = 1.0
+const CLUSTER_TRANSIT_ROUTING_SCORE_MARGIN: float = 0.35
+const CLUSTER_TRANSIT_ROUTING_LOCK_RADIUS_FACTOR: float = 1.2
 
 # --- Dominant BH adaptive integration ---
 # Dynamic bodies keep the raw inverse-square gravity law. We only adapt the
