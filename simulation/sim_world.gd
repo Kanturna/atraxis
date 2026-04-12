@@ -300,20 +300,14 @@ func _apply_star_black_hole_periapsis_guardrail(body: SimBody, previous_position
 					body.velocity -= fallback_direction * fallback_radial_velocity
 				return
 
-	# --- Stage 2: Broad energy guardrail (anywhere within nearfield) ---
-	# Stage 1 only fires when the star physically crosses minimum_distance.
-	# A star that passes at e.g. 100–500 units never triggers Stage 1, but can
-	# still receive a massive velocity kick from a coarse-timestep integration
-	# and escape. This stage catches those cases: whenever a star inside the
-	# nearfield has positive specific orbital energy (i.e. it would escape the
-	# dominant BH), its speed is clamped to MARGIN × v_esc at its current radius.
-	# Direction is preserved so orbital motion remains visually coherent.
-	if nearfield_radius > 0.0 and current_distance > 0.0 and current_distance <= nearfield_radius:
-		var gm: float = SimConstants.G * dominant_black_hole.mass
-		var specific_energy: float = 0.5 * body.velocity.length_squared() - gm / current_distance
-		if specific_energy > 0.0:
-			var escape_speed: float = sqrt(2.0 * gm / current_distance)
-			body.velocity = body.velocity.normalized() * escape_speed * SimConstants.BH_GUARDRAIL_ESCAPE_MARGIN
+	# Stage 2 (broad energy guardrail) deliberately removed.
+	# In a multi-BH field a star that becomes unbound from the dominant BH is
+	# naturally steered toward a neighbouring BH whose gravity is already stronger
+	# at that distance; clamping its velocity here prevented that organic capture
+	# and sent the star on a very wide (46–80 AU) orbit instead, producing the
+	# visible "expands then contracts" loop.  The dynamic periapsis floor in Stage 1
+	# (BH_MIN_PERIAPSIS_FACTOR × nearfield_radius ≈ 0.43 AU) prevents the close-pass
+	# numerical energy injection that Stage 2 was originally guarding against.
 
 func _requires_star_black_hole_guardrail(body: SimBody) -> bool:
 	return body.active \

@@ -111,14 +111,15 @@ const BH_STAR_APPROACH_PADDING: float = 8.0
 # Only truly extreme close passes (< 0.43 AU) are redirected.  The resulting orbit has
 # apoapsis ≈ 6.8 AU (12M BH), ≈ 3.9 AU (4M BH), ≈ 10.8 AU (30M BH).
 const BH_MIN_PERIAPSIS_FACTOR: float = 0.06
-# Escape-velocity clamp margin — used by both guardrail stages (see sim_world.gd).
-# Both the hard periapsis guardrail and the broad energy guardrail clamp star
-# speed to MARGIN × v_esc(r) so the star stays bound after intervention.
+# Escape-velocity clamp margin — used by Stage 1 only (see sim_world.gd).
+# Stage 2 (broad energy guardrail) has been removed; Stage 1 is the sole
+# velocity intervention, and only fires for extreme close passes (< 0.43 AU).
+# After Stage 1 the star has tangential speed = min(v_tangential, MARGIN × v_esc).
 #
-# Why 0.97:  At the new dynamic floor (r ≈ 427 units for a 12M BH), v_esc ≈ 2371.
-# 0.97 × v_esc gives v ≈ 2300, corresponding to apoapsis ≈ 6.8 AU — inside the
-# normal star-orbit range (4–20 AU) and inside the nearfield zone (7.1 AU for 12M BH).
-# Stage-2 (broad energy guardrail at nearfield_radius) catches perturbation-induced escape.
+# Why 0.97:  At the Stage-1 floor (r ≈ 427 units, 12M BH), v_esc ≈ 2371 units/s.
+# 0.97 × v_esc ≈ 2300 → apoapsis ≈ 6.8 AU, comfortably inside the normal orbit
+# zone (4–20 AU).  In a multi-BH field the star then travels freely and is
+# captured naturally by whichever BH has the strongest pull at apoapsis.
 const BH_GUARDRAIL_ESCAPE_MARGIN: float = 0.97
 # Gravity contribution cutoff for kinematic BHs only.
 # BH→body gravity is skipped when G*M/r² falls below this threshold.
