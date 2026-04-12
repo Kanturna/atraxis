@@ -104,6 +104,7 @@ static func _build_chaos_galaxy(galaxy_state: GalaxyState, config) -> void:
 		"local_black_hole_specs": [],
 		"primary_black_hole_object_id": "",
 		"supported_object_kinds": ["black_hole", "star", "planet", "asteroid", "agent"],
+		"supported_entity_kinds": ["agent", "unit", "creature"],
 		"supported_residency_states": [
 			ObjectResidencyState.State.RESIDENT,
 			ObjectResidencyState.State.ACTIVE,
@@ -129,6 +130,7 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 		"local_black_hole_specs": local_black_hole_specs.duplicate(true),
 		"primary_black_hole_object_id": "",
 		"supported_object_kinds": ["black_hole", "star", "planet", "asteroid", "agent"],
+		"supported_entity_kinds": ["agent", "unit", "creature"],
 		"supported_residency_states": [
 			ObjectResidencyState.State.RESIDENT,
 			ObjectResidencyState.State.ACTIVE,

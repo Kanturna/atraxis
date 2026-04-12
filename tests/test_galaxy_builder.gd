@@ -122,6 +122,7 @@ func test_cluster_black_holes_start_resident_and_expose_lifecycle_scaffold() -> 
 	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
 	var cluster_state: ClusterState = galaxy_state.get_primary_cluster()
 	var supported_states: Array = cluster_state.cluster_blueprint.get("supported_residency_states", [])
+	var supported_entity_kinds: Array = cluster_state.cluster_blueprint.get("supported_entity_kinds", [])
 
 	assert_true(
 		supported_states.has(ObjectResidencyState.State.RESIDENT),
@@ -138,6 +139,14 @@ func test_cluster_black_holes_start_resident_and_expose_lifecycle_scaffold() -> 
 	assert_true(
 		supported_states.has(ObjectResidencyState.State.IN_TRANSIT),
 		"cluster blueprint should advertise in-transit objects as a supported lifecycle state"
+	)
+	assert_true(
+		supported_entity_kinds.has("agent"),
+		"cluster blueprint should advertise agents as supported entity kinds for future world-entity binding"
+	)
+	assert_true(
+		supported_entity_kinds.has("unit"),
+		"cluster blueprint should advertise units as supported entity kinds for future grouped ownership"
 	)
 
 	for object_state in cluster_state.get_objects_by_kind("black_hole"):

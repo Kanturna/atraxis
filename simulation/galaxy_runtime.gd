@@ -36,6 +36,7 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 
 	var resolved_cluster_id: int = initial_cluster_id if initial_cluster_id >= 0 else galaxy_state.primary_cluster_id
 	_activate_cluster_internal(resolved_cluster_id)
+	galaxy_state.sync_world_entity_bindings()
 
 func step(dt: float) -> void:
 	if dt <= 0.0:
@@ -55,6 +56,7 @@ func step(dt: float) -> void:
 		)
 	_step_simplified_clusters(dt)
 	_import_transit_objects_into_active_cluster()
+	galaxy_state.sync_world_entity_bindings()
 	runtime_time_elapsed += dt
 	_apply_simplified_unload_policy()
 
@@ -141,6 +143,24 @@ func get_transit_object_count() -> int:
 		return 0
 	return galaxy_state.get_transit_object_count()
 
+func get_world_entity_count() -> int:
+	if galaxy_state == null:
+		return 0
+	return galaxy_state.get_world_entity_count()
+
+func get_active_world_entities() -> Array:
+	if galaxy_state == null or active_cluster_session == null:
+		return []
+	return galaxy_state.get_world_entities_for_cluster(
+		active_cluster_session.cluster_id,
+		ObjectResidencyState.State.ACTIVE
+	)
+
+func get_world_entities_in_transit() -> Array:
+	if galaxy_state == null:
+		return []
+	return galaxy_state.get_world_entities_in_transit()
+
 func _activate_cluster_internal(target_cluster_id: int) -> void:
 	active_cluster_session = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state, target_cluster_id)
 	if active_cluster_session == null or active_cluster_session.active_cluster_state == null:
@@ -152,6 +172,7 @@ func _activate_cluster_internal(target_cluster_id: int) -> void:
 			ObjectResidencyState.State.ACTIVE
 		)
 	active_cluster_session.active_cluster_state.mark_active(runtime_time_elapsed)
+	galaxy_state.sync_world_entity_bindings()
 
 func _step_simplified_clusters(dt: float) -> void:
 	if galaxy_state == null:

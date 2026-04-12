@@ -2,7 +2,9 @@
 class_name GalaxyState
 extends RefCounted
 
+const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_GROUP_STATE_SCRIPT := preload("res://simulation/transit_group_state.gd")
+const WORLD_ENTITY_STATE_SCRIPT := preload("res://simulation/world_entity_state.gd")
 
 var galaxy_seed: int = 0
 var primary_cluster_id: int = -1
@@ -12,6 +14,8 @@ var transit_order: Array = []
 var transit_objects_by_id: Dictionary = {}
 var transit_group_order: Array = []
 var transit_groups_by_id: Dictionary = {}
+var entity_order: Array = []
+var entities_by_id: Dictionary = {}
 
 func add_cluster(cluster_state: ClusterState) -> void:
 	clusters_by_id[cluster_state.cluster_id] = cluster_state
@@ -101,6 +105,45 @@ func get_transit_groups() -> Array:
 func get_transit_group_count() -> int:
 	return transit_group_order.size()
 
+func register_world_entity(entity_state) -> void:
+	if entity_state == null:
+		return
+	entities_by_id[entity_state.entity_id] = entity_state
+	if not entity_order.has(entity_state.entity_id):
+		entity_order.append(entity_state.entity_id)
+	sync_world_entity_bindings()
+
+func get_world_entity(entity_id: String):
+	return entities_by_id.get(entity_id, null)
+
+func get_world_entities() -> Array:
+	var ordered: Array = []
+	for entity_id in entity_order:
+		var entity_state = get_world_entity(entity_id)
+		if entity_state != null:
+			ordered.append(entity_state)
+	return ordered
+
+func get_world_entity_count() -> int:
+	return entity_order.size()
+
+func get_world_entities_for_cluster(cluster_id: int, residency_filter: int = -1) -> Array:
+	var matches: Array = []
+	for entity_state in get_world_entities():
+		if entity_state.current_cluster_id != cluster_id:
+			continue
+		if residency_filter >= 0 and entity_state.residency_state != residency_filter:
+			continue
+		matches.append(entity_state)
+	return matches
+
+func get_world_entities_in_transit() -> Array:
+	var matches: Array = []
+	for entity_state in get_world_entities():
+		if entity_state.residency_state == ObjectResidencyState.State.IN_TRANSIT:
+			matches.append(entity_state)
+	return matches
+
 func sync_transit_groups_from_objects() -> void:
 	var grouped_transit_states: Dictionary = {}
 	var next_group_order: Array = []
@@ -161,6 +204,13 @@ func sync_transit_groups_from_objects() -> void:
 	transit_group_order = next_group_order
 	transit_groups_by_id = next_groups_by_id
 
+func sync_world_entity_bindings() -> void:
+	sync_transit_groups_from_objects()
+	for cluster_state in get_clusters():
+		cluster_state.sync_group_registry_from_objects()
+	for entity_state in get_world_entities():
+		_sync_world_entity_binding(entity_state)
+
 func find_cluster_containing_global_position(global_position: Vector2, radius_factor: float = 1.0) -> ClusterState:
 	var matched_cluster: ClusterState = null
 	var best_distance: float = INF
@@ -196,6 +246,9 @@ func _resolve_transit_group_kind(group_members: Array, previous_group) -> String
 	return "group"
 
 func _resolve_transit_group_primary_object_id(group_members: Array, previous_group) -> String:
+	for transit_state in group_members:
+		if bool(transit_state.descriptor.get("group_primary_requested", false)):
+			return transit_state.object_id
 	if previous_group != null and _transit_group_members_include_object(group_members, str(previous_group.primary_object_id)):
 		return str(previous_group.primary_object_id)
 	for transit_state in group_members:
@@ -206,6 +259,9 @@ func _resolve_transit_group_primary_object_id(group_members: Array, previous_gro
 	return str(group_members[0].object_id)
 
 func _resolve_transit_group_anchor_object_id(group_members: Array, previous_group, fallback_primary_object_id: String) -> String:
+	for transit_state in group_members:
+		if bool(transit_state.descriptor.get("group_anchor_requested", false)):
+			return transit_state.object_id
 	if previous_group != null and _transit_group_members_include_object(group_members, str(previous_group.anchor_object_id)):
 		return str(previous_group.anchor_object_id)
 	for transit_state in group_members:
@@ -223,3 +279,85 @@ func _find_transit_group_member_by_id(group_members: Array, object_id: String):
 
 func _transit_group_members_include_object(group_members: Array, object_id: String) -> bool:
 	return _find_transit_group_member_by_id(group_members, object_id) != null
+
+func _sync_world_entity_binding(entity_state) -> void:
+	if entity_state == null:
+		return
+	if entity_state.bound_group_id != "":
+		if has_transit_group(entity_state.bound_group_id):
+			var transit_group = get_transit_group(entity_state.bound_group_id)
+			entity_state.current_group_id = transit_group.group_id
+			entity_state.current_transit_group_id = transit_group.group_id
+			entity_state.current_cluster_id = transit_group.target_cluster_id \
+				if transit_group.target_cluster_id >= 0 else transit_group.source_cluster_id
+			entity_state.resolved_anchor_object_id = _resolve_entity_anchor_object_id(
+				entity_state,
+				transit_group.primary_object_id,
+				transit_group.anchor_object_id
+			)
+			entity_state.residency_state = ObjectResidencyState.State.IN_TRANSIT
+			if entity_state.home_cluster_id < 0 and transit_group.source_cluster_id >= 0:
+				entity_state.home_cluster_id = transit_group.source_cluster_id
+			return
+		var owner_cluster: ClusterState = _find_cluster_owning_group(entity_state.bound_group_id)
+		if owner_cluster != null:
+			var cluster_group = owner_cluster.get_group(entity_state.bound_group_id)
+			entity_state.current_group_id = cluster_group.group_id
+			entity_state.current_transit_group_id = ""
+			entity_state.current_cluster_id = owner_cluster.cluster_id
+			entity_state.resolved_anchor_object_id = _resolve_entity_anchor_object_id(
+				entity_state,
+				cluster_group.primary_object_id,
+				cluster_group.anchor_object_id
+			)
+			entity_state.residency_state = cluster_group.residency_state
+			if entity_state.home_cluster_id < 0:
+				entity_state.home_cluster_id = owner_cluster.cluster_id
+			return
+	if entity_state.preferred_object_id != "":
+		var object_cluster: ClusterState = _find_cluster_owning_object(entity_state.preferred_object_id)
+		if object_cluster != null:
+			var object_state: ClusterObjectState = object_cluster.get_object(entity_state.preferred_object_id)
+			entity_state.current_group_id = ""
+			entity_state.current_transit_group_id = ""
+			entity_state.current_cluster_id = object_cluster.cluster_id
+			entity_state.resolved_anchor_object_id = entity_state.preferred_object_id
+			entity_state.residency_state = object_state.residency_state if object_state != null \
+				else OBJECT_RESIDENCY_POLICY_SCRIPT.residency_state_for_cluster_activation(object_cluster.activation_state)
+			if entity_state.home_cluster_id < 0:
+				entity_state.home_cluster_id = object_cluster.cluster_id
+			return
+	entity_state.current_group_id = ""
+	entity_state.current_transit_group_id = ""
+	entity_state.current_cluster_id = entity_state.home_cluster_id
+	entity_state.resolved_anchor_object_id = entity_state.preferred_object_id
+	entity_state.residency_state = ObjectResidencyState.State.RESIDENT \
+		if entity_state.home_cluster_id >= 0 else ObjectResidencyState.State.IN_TRANSIT
+
+func _find_cluster_owning_group(group_id: String) -> ClusterState:
+	if group_id == "":
+		return null
+	for cluster_state in get_clusters():
+		if cluster_state.has_group(group_id):
+			return cluster_state
+	return null
+
+func _find_cluster_owning_object(object_id: String) -> ClusterState:
+	if object_id == "":
+		return null
+	for cluster_state in get_clusters():
+		if cluster_state.has_object(object_id):
+			return cluster_state
+	return null
+
+func _resolve_entity_anchor_object_id(entity_state, primary_object_id: String, anchor_object_id: String) -> String:
+	if entity_state == null:
+		return anchor_object_id if anchor_object_id != "" else primary_object_id
+	match int(entity_state.attachment_mode):
+		WORLD_ENTITY_STATE_SCRIPT.ATTACHMENT_DIRECT_OBJECT:
+			return entity_state.preferred_object_id if entity_state.preferred_object_id != "" \
+				else (anchor_object_id if anchor_object_id != "" else primary_object_id)
+		WORLD_ENTITY_STATE_SCRIPT.ATTACHMENT_GROUP_PRIMARY:
+			return primary_object_id if primary_object_id != "" else anchor_object_id
+		_:
+			return anchor_object_id if anchor_object_id != "" else primary_object_id

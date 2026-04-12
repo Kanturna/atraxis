@@ -174,11 +174,14 @@ func _resolve_group_kind(member_states: Array, previous_group) -> String:
 	return "group"
 
 func _resolve_group_primary_object_id(member_states: Array, previous_group) -> String:
-	if previous_group != null and _group_members_include_object(member_states, str(previous_group.primary_object_id)):
-		return str(previous_group.primary_object_id)
+	for object_state in member_states:
+		if bool(object_state.descriptor.get("group_primary_requested", false)):
+			return object_state.object_id
 	for object_state in member_states:
 		if bool(object_state.descriptor.get("group_primary", false)):
 			return object_state.object_id
+	if previous_group != null and _group_members_include_object(member_states, str(previous_group.primary_object_id)):
+		return str(previous_group.primary_object_id)
 	if member_states.is_empty():
 		return ""
 	return str(member_states[0].object_id)
@@ -187,11 +190,14 @@ func _resolve_group_anchor_object_id(
 		member_states: Array,
 		previous_group,
 		fallback_primary_object_id: String) -> String:
-	if previous_group != null and _group_members_include_object(member_states, str(previous_group.anchor_object_id)):
-		return str(previous_group.anchor_object_id)
+	for object_state in member_states:
+		if bool(object_state.descriptor.get("group_anchor_requested", false)):
+			return object_state.object_id
 	for object_state in member_states:
 		if bool(object_state.descriptor.get("group_anchor", false)):
 			return object_state.object_id
+	if previous_group != null and _group_members_include_object(member_states, str(previous_group.anchor_object_id)):
+		return str(previous_group.anchor_object_id)
 	return fallback_primary_object_id
 
 func _group_members_include_object(member_states: Array, object_id: String) -> bool:

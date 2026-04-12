@@ -3,6 +3,7 @@ extends GutTest
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
+const WORLD_ENTITY_STATE_SCRIPT := preload("res://simulation/world_entity_state.gd")
 
 func test_runtime_step_writes_active_cluster_back_into_source_of_truth() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -861,6 +862,98 @@ func test_group_identity_survives_cluster_switch_and_reload() -> void:
 		"reload should preserve the full grouped membership set"
 	)
 
+func test_world_entity_bound_to_group_tracks_cluster_residency_and_anchor_identity() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var import_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_import_radius(active_cluster)
+	var primary_transit = _make_test_transit_asteroid(
+		"transit:entity_group_primary",
+		-1,
+		active_cluster.global_center + Vector2(import_radius * 0.40, 0.0),
+		Vector2.ZERO,
+		"convoy:entity_group",
+		"convoy",
+		true,
+		true
+	)
+	var follower_transit = _make_test_transit_asteroid(
+		"transit:entity_group_follower",
+		-1,
+		active_cluster.global_center + Vector2(import_radius * 0.85, 0.0),
+		Vector2.ZERO,
+		"convoy:entity_group",
+		"convoy"
+	)
+	runtime.galaxy_state.register_transit_object(primary_transit)
+	runtime.galaxy_state.register_transit_object(follower_transit)
+	var entity_state = _make_test_world_entity(
+		"entity:crew_member",
+		"agent",
+		"convoy:entity_group",
+		WORLD_ENTITY_STATE_SCRIPT.ATTACHMENT_GROUP_PRIMARY
+	)
+	runtime.galaxy_state.register_world_entity(entity_state)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	var active_group = active_cluster.get_group("convoy:entity_group")
+	assert_eq(runtime.get_world_entity_count(), 1, "runtime should expose the registered world entity count")
+	assert_eq(runtime.get_active_world_entities().size(), 1, "group-bound entities should become active with their active owner cluster")
+	assert_not_null(active_group, "group-bound entities should sit on a persistent cluster group after the grouped arrival")
+	assert_eq(active_group.primary_object_id, primary_transit.object_id, "the owning cluster group should preserve the explicit primary object id")
+	assert_eq(entity_state.current_cluster_id, active_cluster.cluster_id, "group-bound entities should resolve into the owning active cluster")
+	assert_eq(entity_state.current_group_id, "convoy:entity_group", "group-bound entities should keep their stable group id while resident")
+	assert_eq(entity_state.current_transit_group_id, "", "resident group-bound entities should not report a transit-group binding")
+	assert_eq(entity_state.resolved_anchor_object_id, primary_transit.object_id, "GROUP_PRIMARY entities should resolve to the group's primary object")
+	assert_eq(entity_state.residency_state, ObjectResidencyState.State.ACTIVE, "resident entities in the active cluster should be ACTIVE")
+
+func test_world_entity_can_bind_to_transit_group_before_arrival() -> void:
+	var galaxy_state := GalaxyState.new()
+	galaxy_state.add_cluster(_make_manual_cluster(0, Vector2.ZERO, 100.0))
+	galaxy_state.add_cluster(_make_manual_cluster(1, Vector2(1000.0, 0.0), 100.0))
+	var first_member = _make_test_transit_asteroid(
+		"transit:entity_transit_anchor",
+		0,
+		Vector2(450.0, 0.0),
+		Vector2.ZERO,
+		"convoy:transit_only",
+		"convoy",
+		true,
+		true
+	)
+	var second_member = _make_test_transit_asteroid(
+		"transit:entity_transit_follower",
+		0,
+		Vector2(520.0, 0.0),
+		Vector2.ZERO,
+		"convoy:transit_only",
+		"convoy"
+	)
+	galaxy_state.register_transit_object(first_member)
+	galaxy_state.register_transit_object(second_member)
+	var entity_state = _make_test_world_entity(
+		"entity:traveler",
+		"agent",
+		"convoy:transit_only",
+		WORLD_ENTITY_STATE_SCRIPT.ATTACHMENT_GROUP_ANCHOR
+	)
+	galaxy_state.register_world_entity(entity_state)
+	WorldBuilder.step_transit_objects(galaxy_state, SimConstants.FIXED_DT)
+	galaxy_state.sync_world_entity_bindings()
+
+	assert_eq(entity_state.residency_state, ObjectResidencyState.State.IN_TRANSIT, "entities bound to a transit group should resolve as in transit before arrival")
+	assert_eq(entity_state.current_transit_group_id, "convoy:transit_only", "transit-bound entities should keep the shared transit group id")
+	assert_eq(entity_state.current_group_id, "convoy:transit_only", "transit-bound entities should keep the stable group id while traveling")
+	assert_eq(entity_state.current_cluster_id, 1, "transit-bound entities should expose the current target cluster chosen by the transit group")
+	assert_eq(entity_state.resolved_anchor_object_id, first_member.object_id, "GROUP_ANCHOR entities should resolve to the transit group's anchor object")
+
 func test_transit_object_reacquires_its_source_cluster_when_it_returns_inside_source_space() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
@@ -1097,5 +1190,25 @@ func _make_test_transit_asteroid(
 		"group_kind": group_kind,
 		"group_primary": group_primary,
 		"group_anchor": group_anchor,
+		"group_primary_requested": group_primary,
+		"group_anchor_requested": group_anchor,
 	}
 	return transit_state
+
+func _make_test_world_entity(
+		entity_id: String,
+		entity_kind: String,
+		bound_group_id: String,
+		attachment_mode: int,
+		preferred_object_id: String = ""):
+	var entity_state = WORLD_ENTITY_STATE_SCRIPT.new()
+	entity_state.entity_id = entity_id
+	entity_state.entity_kind = entity_kind
+	entity_state.bound_group_id = bound_group_id
+	entity_state.attachment_mode = attachment_mode
+	entity_state.preferred_object_id = preferred_object_id
+	entity_state.descriptor = {
+		"label": entity_id,
+		"entity_kind": entity_kind,
+	}
+	return entity_state
