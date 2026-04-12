@@ -202,7 +202,7 @@ func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic
 		"simplified stepping should keep remote objects marked as simplified"
 	)
 
-func test_focus_relevance_switches_active_cluster_to_nearest_focus_cluster() -> void:
+func test_focus_relevance_does_not_switch_active_cluster_without_explicit_request() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
@@ -222,8 +222,13 @@ func test_focus_relevance_switches_active_cluster_to_nearest_focus_cluster() -> 
 
 	assert_eq(
 		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"focus relevance should promote the cluster nearest the focus position into the active bubble"
+		first_cluster_id,
+		"focus relevance alone should no longer switch the active cluster"
+	)
+	assert_eq(
+		second_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"the hovered remote cluster should become relevant for previews without turning active"
 	)
 
 func test_focus_relevance_keeps_remote_cluster_in_preview_state_until_zoom_or_entry_threshold() -> void:
@@ -287,7 +292,7 @@ func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays
 		"relevant simplified clusters should keep refreshing their relevance timestamp"
 	)
 
-func test_manual_activation_request_overrides_focus_temporarily_then_releases_back_to_auto() -> void:
+func test_manual_activation_request_switches_cluster_without_focus_rollback() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
@@ -313,7 +318,7 @@ func test_manual_activation_request_overrides_focus_temporarily_then_releases_ba
 	assert_eq(
 		runtime.active_cluster_session.cluster_id,
 		second_cluster_id,
-		"manual activation requests should beat automatic focus selection on the next runtime step"
+		"manual activation requests should switch the active cluster on the next runtime step"
 	)
 
 	var grace_steps: int = int(ceil(
@@ -325,15 +330,15 @@ func test_manual_activation_request_overrides_focus_temporarily_then_releases_ba
 	assert_eq(
 		runtime.active_cluster_session.cluster_id,
 		second_cluster_id,
-		"manual activation should hold the requested cluster briefly before auto focus takes back over"
+		"manual activation should remain on the explicitly requested cluster during the hold window"
 	)
 
 	runtime.step(SimConstants.FIXED_DT)
 
 	assert_eq(
 		runtime.active_cluster_session.cluster_id,
-		first_cluster_id,
-		"after the grace window ends, automatic focus relevance should regain control"
+		second_cluster_id,
+		"without automatic focus switching, the requested cluster should stay active after the hold window ends"
 	)
 
 func test_activation_override_pins_cluster_until_cleared() -> void:
@@ -389,8 +394,8 @@ func test_activation_override_pins_cluster_until_cleared() -> void:
 	assert_false(runtime.has_cluster_activation_override(), "override state should clear cleanly")
 	assert_eq(
 		runtime.active_cluster_session.cluster_id,
-		first_cluster_id,
-		"after clearing the override, automatic focus relevance should take control again"
+		second_cluster_id,
+		"clearing the override should not implicitly switch the active cluster anymore"
 	)
 
 func test_simplified_cluster_unloads_after_idle_delay() -> void:

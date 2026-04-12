@@ -207,7 +207,7 @@ func update_runtime_metrics(frame_delta: float, steps_this_frame: int) -> void:
 	else:
 		_smoothed_frame_ms = lerpf(_smoothed_frame_ms, frame_ms, FRAME_SMOOTHING_ALPHA)
 
-func try_select_body_at_screen(screen_pos: Vector2, world: SimWorld) -> void:
+func try_select_body_at_screen(screen_pos: Vector2, world: SimWorld) -> bool:
 	# Convert screen position to sim-space
 	var sim_pos: Vector2 = screen_pos / SimConstants.SIM_TO_SCREEN
 	var best: SimBody = null
@@ -227,6 +227,8 @@ func try_select_body_at_screen(screen_pos: Vector2, world: SimWorld) -> void:
 		_selected_id = best.id
 		_inspector.display_body(best)
 		visible = true
+		return true
+	return false
 
 func _process(_delta: float) -> void:
 	if _sim == null:

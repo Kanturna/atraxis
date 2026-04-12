@@ -23,6 +23,9 @@ var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
 var sim_world: SimWorld = null
 var _current_start_config: RefCounted = START_CONFIG_SCRIPT.new()
+var _pending_click_activation_cluster_id: int = -1
+var _pending_click_activation_focus_global_position: Vector2 = Vector2.ZERO
+var _pending_click_activation_requested: bool = false
 
 ## Fixed timestep accumulator. Accumulates real delta time and drains it
 ## in FIXED_DT chunks so the simulation always advances in equal steps.
@@ -59,6 +62,7 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	if sim_world == null:
 		return
+	_update_pending_cluster_transition()
 	var preserved_focus_global_position: Vector2 = _camera_focus_global_position()
 	_update_runtime_focus_context()
 	_accumulated_dt += delta
@@ -70,8 +74,17 @@ func _process(delta: float) -> void:
 	var previous_world: SimWorld = sim_world
 	var world_switched: bool = _sync_runtime_aliases()
 	if world_switched:
-		_restore_camera_focus_global_position(preserved_focus_global_position)
+		var focus_to_restore: Vector2 = preserved_focus_global_position
+		if _pending_click_activation_requested \
+				and active_cluster_session != null \
+				and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
+			focus_to_restore = _pending_click_activation_focus_global_position
+		_restore_camera_focus_global_position(focus_to_restore)
 		_rebind_active_world(previous_world, _hud.get_current_time_scale(), _debug_overlay.visible)
+		if active_cluster_session != null and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
+			_clear_pending_cluster_transition(false)
+		elif _pending_click_activation_requested:
+			_clear_pending_cluster_transition(false)
 
 	# Render the current sim state (after all steps for this frame)
 	_world_renderer.render_frame(sim_world)
@@ -92,12 +105,17 @@ func _input(event: InputEvent) -> void:
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() \
 				* event.position
-		_debug_overlay.try_select_body_at_screen(world_pos, sim_world)
+		if _debug_overlay.try_select_body_at_screen(world_pos, sim_world):
+			return
+		var cluster_pick: Dictionary = _world_renderer.pick_remote_cluster_at_canvas_position(world_pos)
+		if not cluster_pick.is_empty():
+			_start_cluster_activation_transition(cluster_pick)
 
 func restart_simulation(config) -> void:
 	var safe_config = config.copy()
 	safe_config.clamp_values()
 	_current_start_config = safe_config
+	_clear_pending_cluster_transition(true)
 
 	var debug_visible: bool = _debug_overlay.visible
 	var time_scale: float = _hud.get_current_time_scale()
@@ -214,6 +232,7 @@ func _restore_camera_focus_global_position(global_focus_position: Vector2) -> vo
 	)
 
 func _release_runtime_references() -> void:
+	_clear_pending_cluster_transition(true)
 	_disconnect_world_signals(sim_world)
 	if _debug_overlay != null:
 		_debug_overlay.clear_world_reference()
@@ -225,3 +244,45 @@ func _release_runtime_references() -> void:
 	galaxy_state = null
 	active_cluster_session = null
 	sim_world = null
+
+func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
+	if _sim_camera == null or active_cluster_session == null:
+		return
+	var cluster_id: int = int(cluster_pick.get("cluster_id", -1))
+	if cluster_id < 0 or cluster_id == active_cluster_session.cluster_id:
+		return
+	var target_global_position: Vector2 = Vector2(cluster_pick.get("global_center", Vector2.ZERO))
+	var target_local_position: Vector2 = active_cluster_session.to_local(target_global_position)
+	var current_visible_radius_sim: float = _sim_camera.get_visible_world_radius() / max(SimConstants.SIM_TO_SCREEN, 0.001)
+	var target_visible_radius_sim: float = current_visible_radius_sim
+	var authoritative_radius: float = maxf(float(cluster_pick.get("authoritative_radius", 0.0)), 0.0)
+	if authoritative_radius > 0.0:
+		target_visible_radius_sim = minf(current_visible_radius_sim, authoritative_radius * 1.1)
+	_pending_click_activation_cluster_id = cluster_id
+	_pending_click_activation_focus_global_position = target_global_position
+	_pending_click_activation_requested = false
+	_sim_camera.start_focus_transition(
+		target_local_position * SimConstants.SIM_TO_SCREEN,
+		target_visible_radius_sim * SimConstants.SIM_TO_SCREEN
+	)
+
+func _update_pending_cluster_transition() -> void:
+	if _pending_click_activation_cluster_id < 0 or _sim_camera == null:
+		return
+	if _pending_click_activation_requested:
+		return
+	if _sim_camera.has_focus_transition_arrived():
+		if galaxy_runtime != null and galaxy_runtime.request_cluster_activation(_pending_click_activation_cluster_id):
+			_pending_click_activation_requested = true
+		else:
+			_clear_pending_cluster_transition(false)
+		return
+	if not _sim_camera.is_focus_transition_active():
+		_clear_pending_cluster_transition(false)
+
+func _clear_pending_cluster_transition(cancel_camera: bool) -> void:
+	_pending_click_activation_cluster_id = -1
+	_pending_click_activation_focus_global_position = Vector2.ZERO
+	_pending_click_activation_requested = false
+	if cancel_camera and _sim_camera != null:
+		_sim_camera.cancel_focus_transition()

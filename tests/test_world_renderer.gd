@@ -68,6 +68,95 @@ func test_remote_cluster_preview_payload_uses_blueprint_specs_for_unloaded_clust
 	assert_true(preview_kinds.has("star"), "remote previews should include stars for unloaded clusters")
 	assert_true(preview_kinds.has("planet"), "remote previews should include planets for unloaded clusters")
 
+func test_remote_cluster_pick_prefers_preview_bodies() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1888
+	config.cluster_density = 0.92
+	config.void_strength = 0.16
+	config.bh_richness = 0.55
+	config.star_richness = 0.62
+	config.rare_zone_frequency = 1.0
+
+	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state)
+	var preview_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(galaxy_state, session)
+	var marker_payload: Dictionary = WORLD_RENDERER_SCRIPT.build_registered_cluster_debug_markers(galaxy_state, session)
+	assert_false(preview_specs.is_empty(), "preview-body picking needs at least one remote preview spec")
+	var preview_spec: Dictionary = preview_specs[0]
+	var canvas_position: Vector2 = BodyRenderer.sim_to_screen(
+		Vector2(preview_spec.get("local_position", Vector2.ZERO))
+	)
+
+	var pick: Dictionary = WORLD_RENDERER_SCRIPT.pick_remote_cluster_from_payloads(
+		preview_specs,
+		marker_payload,
+		galaxy_state,
+		session,
+		canvas_position,
+		1.0
+	)
+
+	assert_eq(
+		int(pick.get("cluster_id", -1)),
+		int(preview_spec.get("cluster_id", -1)),
+		"clicking a remote preview body should resolve to that preview's cluster"
+	)
+
+func test_remote_cluster_pick_uses_markers_when_no_preview_body_is_hit() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 314
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.78
+	config.star_richness = 0.60
+	config.rare_zone_frequency = 0.55
+
+	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state)
+	var marker_payload: Dictionary = WORLD_RENDERER_SCRIPT.build_registered_cluster_debug_markers(galaxy_state, session)
+	var remote_marker: Dictionary = {}
+	var active_marker: Dictionary = {}
+	for marker in marker_payload.get("markers", []):
+		if bool(marker.get("is_active", false)):
+			active_marker = marker
+		elif remote_marker.is_empty():
+			remote_marker = marker
+	assert_false(remote_marker.is_empty(), "marker-based picking needs a remote cluster marker")
+	assert_false(active_marker.is_empty(), "marker-based picking also checks that the active marker is ignored")
+	var remote_canvas_position: Vector2 = BodyRenderer.sim_to_screen(
+		Vector2(remote_marker.get("local_center", Vector2.ZERO))
+	)
+	var active_canvas_position: Vector2 = BodyRenderer.sim_to_screen(
+		Vector2(active_marker.get("local_center", Vector2.ZERO))
+	)
+
+	var remote_pick: Dictionary = WORLD_RENDERER_SCRIPT.pick_remote_cluster_from_payloads(
+		[],
+		marker_payload,
+		galaxy_state,
+		session,
+		remote_canvas_position,
+		1.0
+	)
+	var active_pick: Dictionary = WORLD_RENDERER_SCRIPT.pick_remote_cluster_from_payloads(
+		[],
+		marker_payload,
+		galaxy_state,
+		session,
+		active_canvas_position,
+		1.0
+	)
+
+	assert_eq(
+		int(remote_pick.get("cluster_id", -1)),
+		int(remote_marker.get("cluster_id", -1)),
+		"marker picking should still resolve the remote cluster when no preview body was hit"
+	)
+	assert_true(
+		active_pick.is_empty(),
+		"the active cluster marker should not masquerade as a remote-click target"
+	)
+
 func test_cluster_extent_ring_guard_skips_tiny_and_pathological_radii() -> void:
 	assert_false(
 		WORLD_RENDERER_SCRIPT.should_draw_cluster_extent_ring(1.5, 2_000.0),

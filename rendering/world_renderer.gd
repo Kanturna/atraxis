@@ -28,6 +28,8 @@ var _galaxy_state: GalaxyState = null
 var _active_cluster_session: ActiveClusterSession = null
 var _worldgen = null
 var _debug_overlays_visible: bool = false
+var _cached_remote_preview_specs: Array = []
+var _cached_marker_payload: Dictionary = {}
 
 func initialize(
 		world: SimWorld,
@@ -45,6 +47,8 @@ func initialize(
 	_clear_layer(_marker_layer)
 	_galaxy_state = galaxy_state
 	_active_cluster_session = active_cluster_session
+	_cached_remote_preview_specs = []
+	_cached_marker_payload = {}
 	_worldgen = GalaxyWorldgen.new(galaxy_state.worldgen_config) \
 		if galaxy_state != null and galaxy_state.worldgen_config != null else null
 
@@ -85,13 +89,13 @@ func render_frame(world: SimWorld) -> void:
 		_trail_renderer.update_all(world.bodies)
 	if _debris_renderer != null:
 		_debris_renderer.update_all(world.debris_fields)
+	_cached_remote_preview_specs = build_remote_cluster_preview_specs(_galaxy_state, _active_cluster_session)
+	_cached_marker_payload = build_registered_cluster_debug_markers(_galaxy_state, _active_cluster_session)
 	if _preview_renderer != null:
-		_preview_renderer.update_preview_specs(
-			build_remote_cluster_preview_specs(_galaxy_state, _active_cluster_session)
-		)
+		_preview_renderer.update_preview_specs(_cached_remote_preview_specs)
 	if _cluster_marker_renderer != null:
 		_cluster_marker_renderer.update_marker_payload(
-			build_registered_cluster_debug_markers(_galaxy_state, _active_cluster_session),
+			_cached_marker_payload,
 			_debug_marker_canvas_scale()
 		)
 	if _debug_overlays_visible:
@@ -171,6 +175,16 @@ func _debug_marker_canvas_scale() -> float:
 	var canvas_scale: Vector2 = get_canvas_transform().get_scale()
 	return maxf(maxf(absf(canvas_scale.x), absf(canvas_scale.y)), 0.001)
 
+func pick_remote_cluster_at_canvas_position(canvas_position: Vector2) -> Dictionary:
+	return pick_remote_cluster_from_payloads(
+		_cached_remote_preview_specs,
+		_cached_marker_payload,
+		_galaxy_state,
+		_active_cluster_session,
+		canvas_position,
+		_debug_marker_canvas_scale()
+	)
+
 static func build_registered_cluster_debug_markers(
 		galaxy_state: GalaxyState,
 		active_cluster_session: ActiveClusterSession) -> Dictionary:
@@ -234,6 +248,123 @@ static func build_remote_cluster_preview_specs(
 			preview_spec["state"] = activation_state_debug_name(cluster_state.activation_state)
 			preview_specs.append(preview_spec)
 	return preview_specs
+
+static func pick_remote_cluster_from_payloads(
+		preview_specs: Array,
+		marker_payload: Dictionary,
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession,
+		canvas_position: Vector2,
+		canvas_scale: float = 1.0) -> Dictionary:
+	var preview_hit: Dictionary = _pick_remote_cluster_from_preview_specs(
+		preview_specs,
+		galaxy_state,
+		active_cluster_session,
+		canvas_position,
+		canvas_scale
+	)
+	if not preview_hit.is_empty():
+		return preview_hit
+	return _pick_remote_cluster_from_marker_payload(
+		marker_payload,
+		galaxy_state,
+		active_cluster_session,
+		canvas_position,
+		canvas_scale
+	)
+
+static func _pick_remote_cluster_from_preview_specs(
+		preview_specs: Array,
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession,
+		canvas_position: Vector2,
+		canvas_scale: float) -> Dictionary:
+	if galaxy_state == null or active_cluster_session == null:
+		return {}
+	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var best_spec: Dictionary = {}
+	var best_distance_sq: float = INF
+	for preview_spec in preview_specs:
+		var cluster_id: int = int(preview_spec.get("cluster_id", -1))
+		if cluster_id < 0 or cluster_id == active_cluster_session.cluster_id:
+			continue
+		var body_type: int = int(preview_spec.get("body_type", SimBody.BodyType.ASTEROID))
+		var body_radius: float = float(preview_spec.get("radius", 1.0))
+		var preview_position: Vector2 = BodyRenderer.sim_to_screen(
+			Vector2(preview_spec.get("local_position", Vector2.ZERO))
+		)
+		var preview_radius: float = maxf(
+			BodyRenderer.screen_radius_for_body_traits(body_type, body_radius),
+			10.0 / safe_canvas_scale
+		)
+		var distance_sq: float = preview_position.distance_squared_to(canvas_position)
+		if distance_sq > preview_radius * preview_radius or distance_sq >= best_distance_sq:
+			continue
+		best_distance_sq = distance_sq
+		best_spec = preview_spec
+	if best_spec.is_empty():
+		return {}
+	return _remote_cluster_pick_result(
+		galaxy_state,
+		active_cluster_session,
+		int(best_spec.get("cluster_id", -1))
+	)
+
+static func _pick_remote_cluster_from_marker_payload(
+		marker_payload: Dictionary,
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession,
+		canvas_position: Vector2,
+		canvas_scale: float) -> Dictionary:
+	if galaxy_state == null or active_cluster_session == null:
+		return {}
+	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var best_marker: Dictionary = {}
+	var best_distance_sq: float = INF
+	for marker in marker_payload.get("markers", []):
+		if bool(marker.get("is_active", false)):
+			continue
+		var marker_position: Vector2 = BodyRenderer.sim_to_screen(
+			Vector2(marker.get("local_center", Vector2.ZERO))
+		)
+		var marker_radius_world: float = cluster_debug_marker_world_radius(
+			float(marker.get("radius", 0.0)),
+			safe_canvas_scale,
+			false
+		)
+		var marker_radius: float = maxf(
+			BodyRenderer.sim_dist_to_screen(marker_radius_world),
+			12.0 / safe_canvas_scale
+		)
+		var distance_sq: float = marker_position.distance_squared_to(canvas_position)
+		if distance_sq > marker_radius * marker_radius or distance_sq >= best_distance_sq:
+			continue
+		best_distance_sq = distance_sq
+		best_marker = marker
+	if best_marker.is_empty():
+		return {}
+	return _remote_cluster_pick_result(
+		galaxy_state,
+		active_cluster_session,
+		int(best_marker.get("cluster_id", -1))
+	)
+
+static func _remote_cluster_pick_result(
+		galaxy_state: GalaxyState,
+		active_cluster_session: ActiveClusterSession,
+		cluster_id: int) -> Dictionary:
+	if galaxy_state == null or active_cluster_session == null or cluster_id < 0:
+		return {}
+	var cluster_state: ClusterState = galaxy_state.get_cluster(cluster_id)
+	if cluster_state == null or cluster_id == active_cluster_session.cluster_id:
+		return {}
+	return {
+		"cluster_id": cluster_id,
+		"global_center": cluster_state.global_center,
+		"local_center": active_cluster_session.to_local(cluster_state.global_center),
+		"authoritative_radius": cluster_state.get_authoritative_radius(),
+		"state": activation_state_debug_name(cluster_state.activation_state),
+	}
 
 static func _remote_cluster_preview_source_specs(cluster_state: ClusterState) -> Array:
 	var preview_specs: Array = []
