@@ -98,11 +98,13 @@ func render_frame(world: SimWorld) -> void:
 		_debris_renderer.update_all(world.debris_fields)
 	var canvas_scale: float = _debug_marker_canvas_scale()
 	var visible_canvas_rect: Rect2 = _visible_canvas_rect()
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
 	_cached_remote_preview_specs = build_remote_cluster_preview_specs(
 		_galaxy_state,
 		_active_cluster_session,
 		visible_canvas_rect,
-		canvas_scale
+		canvas_scale,
+		viewport_size
 	)
 	_cached_marker_payload = build_registered_cluster_debug_markers(
 		_galaxy_state,
@@ -295,7 +297,8 @@ static func build_remote_cluster_preview_specs(
 		galaxy_state: GalaxyState,
 		active_cluster_session: ActiveClusterSession,
 		visible_canvas_rect: Rect2 = Rect2(),
-		canvas_scale: float = 1.0) -> Array:
+		canvas_scale: float = 1.0,
+		viewport_size: Vector2 = Vector2.ZERO) -> Array:
 	var preview_specs: Array = []
 	if galaxy_state == null or active_cluster_session == null:
 		return preview_specs
@@ -314,7 +317,11 @@ static func build_remote_cluster_preview_specs(
 			preview_cull_margin
 		):
 			continue
-		var cluster_screen_radius: float = cluster_radius_canvas * safe_canvas_scale
+		var cluster_screen_radius: float = _cluster_canvas_radius_to_screen_radius(
+			cluster_radius_canvas,
+			visible_canvas_rect,
+			viewport_size
+		)
 		var preview_lod: int = cluster_preview_lod_for_screen_radius(cluster_screen_radius)
 		if preview_lod == PREVIEW_LOD_MARKER_ONLY:
 			continue
@@ -581,6 +588,18 @@ static func _is_cluster_visible_in_canvas_rect(
 		Vector2.ONE * extent * 2.0
 	)
 	return visible_canvas_rect.intersects(cluster_rect)
+
+static func _cluster_canvas_radius_to_screen_radius(
+		cluster_canvas_radius: float,
+		visible_canvas_rect: Rect2,
+		viewport_size: Vector2) -> float:
+	if cluster_canvas_radius <= 0.0:
+		return 0.0
+	if not visible_canvas_rect.has_area() or viewport_size == Vector2.ZERO:
+		return cluster_canvas_radius
+	var px_per_canvas_x: float = viewport_size.x / maxf(visible_canvas_rect.size.x, 0.001)
+	var px_per_canvas_y: float = viewport_size.y / maxf(visible_canvas_rect.size.y, 0.001)
+	return cluster_canvas_radius * maxf(px_per_canvas_x, px_per_canvas_y)
 
 static func cluster_debug_marker_world_radius(
 		cluster_radius: float,

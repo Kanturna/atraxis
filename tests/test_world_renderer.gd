@@ -215,7 +215,8 @@ func test_offscreen_cluster_payloads_are_culled_before_rendering() -> void:
 		galaxy_state,
 		session,
 		visible_canvas_rect,
-		1.0
+		1.0,
+		visible_canvas_rect.size
 	)
 	var marker_cluster_ids: Array = marker_payload.get("markers", []).map(func(marker): return int(marker.get("cluster_id", -1)))
 	var preview_cluster_ids: Array = preview_specs.map(func(spec): return int(spec.get("cluster_id", -1)))
@@ -235,25 +236,31 @@ func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
 
 	var session := ActiveClusterSession.new()
 	session.bind(galaxy_state, active_cluster, SimWorld.new())
-	var visible_canvas_rect := Rect2(Vector2(-4_000.0, -4_000.0), Vector2(8_000.0, 8_000.0))
+	var far_visible_canvas_rect := Rect2(Vector2(-4_000.0, -4_000.0), Vector2(8_000.0, 8_000.0))
+	var mid_visible_canvas_rect := Rect2(Vector2(-900.0, -675.0), Vector2(1_800.0, 1_350.0))
+	var near_visible_canvas_rect := Rect2(Vector2(-430.0, -305.0), Vector2(860.0, 610.0))
+	var viewport_size := Vector2(1_600.0, 900.0)
 
 	var far_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
 		galaxy_state,
 		session,
-		visible_canvas_rect,
-		0.25
+		far_visible_canvas_rect,
+		1.0,
+		viewport_size
 	)
 	var mid_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
 		galaxy_state,
 		session,
-		visible_canvas_rect,
-		1.0
+		mid_visible_canvas_rect,
+		1.0,
+		viewport_size
 	)
 	var near_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
 		galaxy_state,
 		session,
-		visible_canvas_rect,
-		2.5
+		near_visible_canvas_rect,
+		1.0,
+		viewport_size
 	)
 	var mid_kinds: Array = mid_specs.map(func(spec): return str(spec.get("kind", "")))
 	var near_kinds: Array = near_specs.map(func(spec): return str(spec.get("kind", "")))
