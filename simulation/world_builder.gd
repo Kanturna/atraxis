@@ -76,7 +76,7 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 	if world == null or cluster_state == null:
 		return
 	world.time_elapsed = cluster_state.simulated_time
-	if _has_runtime_snapshot(cluster_state):
+	if _can_materialize_from_runtime_snapshot(cluster_state):
 		_materialize_runtime_snapshot(world, cluster_state)
 		return
 
@@ -499,6 +499,28 @@ static func _compute_simplified_black_hole_acceleration(object_state: ClusterObj
 
 static func _has_runtime_snapshot(cluster_state: ClusterState) -> bool:
 	return bool(cluster_state.simulation_profile.get("has_runtime_snapshot", false))
+
+static func _can_materialize_from_runtime_snapshot(cluster_state: ClusterState) -> bool:
+	if not _has_runtime_snapshot(cluster_state):
+		return false
+	# A remote cluster can become SIMPLIFIED and receive a BH-only runtime snapshot
+	# before it has ever been ACTIVE. Remote previews supplement that sparse registry
+	# with blueprint stars/planets, but activation must not reload the incomplete
+	# BH-only snapshot or the visible star system disappears on cluster entry.
+	if cluster_state.last_activated_runtime_time >= 0.0:
+		return true
+	return _runtime_snapshot_has_non_black_hole_content(cluster_state)
+
+static func _runtime_snapshot_has_non_black_hole_content(cluster_state: ClusterState) -> bool:
+	if cluster_state == null:
+		return false
+	for object_state in cluster_state.object_registry.values():
+		if object_state == null:
+			continue
+		if object_state.kind != "black_hole" \
+				and object_state.residency_state != ObjectResidencyState.State.IN_TRANSIT:
+			return true
+	return false
 
 static func _materialize_runtime_snapshot(world: SimWorld, cluster_state: ClusterState) -> void:
 	var object_states: Array = cluster_state.object_registry.values()

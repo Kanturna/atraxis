@@ -329,6 +329,62 @@ func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays
 		"relevant simplified clusters should keep refreshing their relevance timestamp"
 	)
 
+func test_activating_a_never_visited_simplified_remote_cluster_materializes_planets_from_blueprint_content() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 1337
+	config.cluster_density = 0.92
+	config.void_strength = 0.16
+	config.bh_richness = 0.55
+	config.star_richness = 0.80
+	config.rare_zone_frequency = 1.0
+	config.planets_per_star = 4
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var active_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var target_cluster: ClusterState = null
+	for cluster_state in runtime.galaxy_state.get_clusters():
+		if cluster_state.cluster_id == active_cluster_id:
+			continue
+		if int(cluster_state.simulation_profile.get("star_count", 0)) <= 0:
+			continue
+		if int(cluster_state.simulation_profile.get("planets_per_star", 0)) <= 0:
+			continue
+		target_cluster = cluster_state
+		break
+
+	assert_not_null(target_cluster, "the activation regression needs a remote star-bearing cluster with planets")
+
+	runtime.update_focus_context(target_cluster.global_center, target_cluster.get_authoritative_radius())
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		target_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"hovering a remote star-bearing cluster should promote it into simplified preview state before activation"
+	)
+	assert_true(
+		bool(target_cluster.simulation_profile.get("has_runtime_snapshot", false)),
+		"the regression setup expects the remote cluster to have received a runtime snapshot before first activation"
+	)
+	assert_lt(
+		target_cluster.last_activated_runtime_time,
+		0.0,
+		"the bug only applies to clusters that have never been active before activation"
+	)
+
+	runtime.activate_cluster(target_cluster.cluster_id)
+
+	var active_planets: Array = []
+	for body in runtime.get_active_sim_world().bodies:
+		if body.body_type == SimBody.BodyType.PLANET and body.active:
+			active_planets.append(body)
+
+	assert_gt(
+		active_planets.size(),
+		0,
+		"activating a never-visited simplified remote cluster should materialize its planet content instead of loading a BH-only snapshot"
+	)
+
 func test_manual_activation_request_switches_cluster_without_focus_rollback() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
