@@ -4,6 +4,7 @@
 ##
 ## Phase 1 keeps this Camera2D implementation on purpose.
 ## Phantom Camera stays installed but is intentionally not integrated yet.
+class_name SimCamera
 extends Camera2D
 
 const MIN_PAN_SPEED: float = 600.0
@@ -71,3 +72,13 @@ func _update_smooth_zoom(delta: float) -> void:
 	var new_world_point: Vector2 = get_screen_center_position() + \
 			(_zoom_focus_screen - viewport_center) / zoom
 	position += world_point - new_world_point
+
+func get_focus_world_position() -> Vector2:
+	return get_screen_center_position()
+
+func get_visible_world_radius() -> float:
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	return 0.5 * max(viewport_size.x, viewport_size.y) / max(zoom.x, 0.001)
+
+func set_focus_world_position(world_position: Vector2) -> void:
+	position = world_position

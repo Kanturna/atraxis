@@ -203,12 +203,21 @@ static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> v
 		return a.object_id < b.object_id
 	)
 	var object_by_id: Dictionary = {}
+	var black_hole_states: Array = []
 	for object_state in object_states:
 		object_by_id[object_state.object_id] = object_state
+		if object_state.kind == "black_hole":
+			black_hole_states.append(object_state)
 
 	for object_state in object_states:
 		if _is_simplified_analytic_orbiter(object_state):
 			continue
+		if object_state.kind == "black_hole" or bool(object_state.descriptor.get("kinematic", false)):
+			object_state.local_position += object_state.local_velocity * dt
+			object_state.age += dt
+			continue
+		var acceleration: Vector2 = _compute_simplified_black_hole_acceleration(object_state, black_hole_states)
+		object_state.local_velocity += acceleration * dt
 		object_state.local_position += object_state.local_velocity * dt
 		object_state.age += dt
 
@@ -240,6 +249,22 @@ static func step_simplified_cluster(cluster_state: ClusterState, dt: float) -> v
 	cluster_state.simulated_time += dt
 	cluster_state.simulation_profile["has_runtime_snapshot"] = true
 	cluster_state.radius = _estimate_runtime_cluster_radius(cluster_state.object_registry)
+
+static func _compute_simplified_black_hole_acceleration(object_state: ClusterObjectState, black_hole_states: Array) -> Vector2:
+	var acceleration: Vector2 = Vector2.ZERO
+	for black_hole_state in black_hole_states:
+		if black_hole_state == null or black_hole_state.object_id == object_state.object_id:
+			continue
+		var delta: Vector2 = black_hole_state.local_position - object_state.local_position
+		var dist_sq: float = delta.length_squared() + SimConstants.GRAVITY_SOFTENING_SQ
+		if dist_sq <= 0.0:
+			continue
+		var inv_dist: float = 1.0 / sqrt(dist_sq)
+		var accel_scale: float = SimConstants.G \
+			* float(black_hole_state.descriptor.get("mass", SimConstants.BLACK_HOLE_MASS)) \
+			/ dist_sq
+		acceleration += delta * inv_dist * accel_scale
+	return acceleration
 
 static func _has_runtime_snapshot(cluster_state: ClusterState) -> bool:
 	return bool(cluster_state.simulation_profile.get("has_runtime_snapshot", false))

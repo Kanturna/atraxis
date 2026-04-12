@@ -8,12 +8,18 @@ var galaxy_state: GalaxyState = null
 var active_cluster_session: ActiveClusterSession = null
 var runtime_time_elapsed: float = 0.0
 var pending_activation_cluster_id: int = -1
+var focus_global_position: Vector2 = Vector2.ZERO
+var focus_visible_world_radius: float = 0.0
+var has_focus_context: bool = false
 
 func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) -> void:
 	galaxy_state = next_galaxy_state
 	active_cluster_session = null
 	runtime_time_elapsed = 0.0
 	pending_activation_cluster_id = -1
+	has_focus_context = false
+	focus_global_position = Vector2.ZERO
+	focus_visible_world_radius = 0.0
 	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
 		return
 
@@ -23,7 +29,9 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
+	_apply_focus_relevance_policy()
 	_flush_pending_activation_request()
+	_apply_focus_relevance_policy()
 	if active_cluster_session != null and active_cluster_session.sim_world != null:
 		active_cluster_session.sim_world.step_sim(dt)
 		WorldBuilder.writeback_world_into_cluster(
@@ -34,6 +42,11 @@ func step(dt: float) -> void:
 	_step_simplified_clusters(dt)
 	runtime_time_elapsed += dt
 	_apply_simplified_unload_policy()
+
+func update_focus_context(next_focus_global_position: Vector2, visible_world_radius: float) -> void:
+	focus_global_position = next_focus_global_position
+	focus_visible_world_radius = maxf(visible_world_radius, 0.0)
+	has_focus_context = true
 
 func activate_cluster(target_cluster_id: int) -> void:
 	if galaxy_state == null:
@@ -125,8 +138,12 @@ func _apply_simplified_unload_policy() -> void:
 	if galaxy_state == null:
 		return
 	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
+	var context: Dictionary = _resolve_focus_context()
+	var relevance_radius: float = _simplified_relevance_radius(float(context["visible_world_radius"]))
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state.cluster_id == active_cluster_id:
+			continue
+		if _is_cluster_simplified_relevant(cluster_state, context["focus_global_position"], relevance_radius):
 			continue
 		if not cluster_state.can_unload_from_simplified(
 			runtime_time_elapsed,
@@ -134,3 +151,98 @@ func _apply_simplified_unload_policy() -> void:
 		):
 			continue
 		cluster_state.mark_unloaded(runtime_time_elapsed)
+
+func _apply_focus_relevance_policy() -> void:
+	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
+		return
+	var context: Dictionary = _resolve_focus_context()
+	var ranked_clusters: Array = _rank_clusters_by_focus_distance(context["focus_global_position"])
+	if ranked_clusters.is_empty():
+		return
+	var desired_active_cluster_id: int = _determine_focus_active_cluster_id(
+		ranked_clusters,
+		float(context["visible_world_radius"])
+	)
+	if desired_active_cluster_id >= 0:
+		request_cluster_activation(desired_active_cluster_id)
+
+	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
+	var relevance_radius: float = _simplified_relevance_radius(float(context["visible_world_radius"]))
+	for rank_index in range(ranked_clusters.size()):
+		var entry: Dictionary = ranked_clusters[rank_index]
+		var cluster_state: ClusterState = entry["cluster_state"]
+		if cluster_state == null:
+			continue
+		if cluster_state.cluster_id == active_cluster_id:
+			cluster_state.mark_relevant(runtime_time_elapsed)
+			continue
+		if not _is_cluster_simplified_relevant(cluster_state, context["focus_global_position"], relevance_radius) \
+				and rank_index > SimConstants.CLUSTER_SIMPLIFIED_NEAREST_COUNT:
+			continue
+		if cluster_state.activation_state == ClusterActivationState.State.UNLOADED:
+			cluster_state.mark_simplified(runtime_time_elapsed)
+		elif cluster_state.activation_state == ClusterActivationState.State.SIMPLIFIED:
+			cluster_state.mark_relevant(runtime_time_elapsed)
+
+func _resolve_focus_context() -> Dictionary:
+	if has_focus_context:
+		return {
+			"focus_global_position": focus_global_position,
+			"visible_world_radius": focus_visible_world_radius,
+		}
+	if active_cluster_session != null and active_cluster_session.active_cluster_state != null:
+		return {
+			"focus_global_position": active_cluster_session.active_cluster_state.global_center,
+			"visible_world_radius": 0.0,
+		}
+	return {
+		"focus_global_position": Vector2.ZERO,
+		"visible_world_radius": 0.0,
+	}
+
+func _rank_clusters_by_focus_distance(target_focus_global_position: Vector2) -> Array:
+	var ranked_clusters: Array = []
+	for cluster_state in galaxy_state.get_clusters():
+		ranked_clusters.append({
+			"cluster_state": cluster_state,
+			"distance": cluster_state.global_center.distance_to(target_focus_global_position),
+		})
+	ranked_clusters.sort_custom(func(a, b): return a["distance"] < b["distance"])
+	return ranked_clusters
+
+func _determine_focus_active_cluster_id(ranked_clusters: Array, visible_world_radius: float) -> int:
+	if ranked_clusters.is_empty():
+		return -1
+	var nearest_cluster: ClusterState = ranked_clusters[0]["cluster_state"]
+	if nearest_cluster == null:
+		return -1
+	if active_cluster_session == null or active_cluster_session.active_cluster_state == null:
+		return nearest_cluster.cluster_id
+	var active_cluster_id: int = active_cluster_session.cluster_id
+	if active_cluster_id == nearest_cluster.cluster_id:
+		return nearest_cluster.cluster_id
+	var active_distance: float = _find_ranked_cluster_distance(ranked_clusters, active_cluster_id)
+	if active_distance == INF:
+		return nearest_cluster.cluster_id
+	var switch_margin: float = visible_world_radius * SimConstants.CLUSTER_ACTIVE_SWITCH_HYSTERESIS_FACTOR
+	if active_distance <= float(ranked_clusters[0]["distance"]) + switch_margin:
+		return active_cluster_id
+	return nearest_cluster.cluster_id
+
+func _find_ranked_cluster_distance(ranked_clusters: Array, cluster_id: int) -> float:
+	for entry in ranked_clusters:
+		var cluster_state: ClusterState = entry["cluster_state"]
+		if cluster_state != null and cluster_state.cluster_id == cluster_id:
+			return float(entry["distance"])
+	return INF
+
+func _simplified_relevance_radius(visible_world_radius: float) -> float:
+	return visible_world_radius * SimConstants.CLUSTER_SIMPLIFIED_RANGE_FACTOR
+
+func _is_cluster_simplified_relevant(
+		cluster_state: ClusterState,
+		target_focus_global_position: Vector2,
+		relevance_radius: float) -> bool:
+	if cluster_state == null:
+		return false
+	return cluster_state.global_center.distance_to(target_focus_global_position) <= relevance_radius

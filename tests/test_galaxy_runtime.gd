@@ -126,7 +126,7 @@ func test_runtime_cluster_switch_writes_back_and_reloads_from_snapshot() -> void
 		"reactivation should restore the cluster's persisted simulation time into SimWorld"
 	)
 
-func test_simplified_cluster_step_advances_deactivated_dynamic_body_linearly() -> void:
+func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic_body() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
@@ -150,11 +150,14 @@ func test_simplified_cluster_step_advances_deactivated_dynamic_body_linearly() -
 	var old_position: Vector2 = simplified_star.local_position
 	var old_velocity: Vector2 = simplified_star.local_velocity
 	var old_time: float = first_cluster.simulated_time
+	var black_hole_states: Array = first_cluster.get_objects_by_kind("black_hole")
+	var expected_acceleration: Vector2 = _compute_black_hole_only_acceleration(simplified_star, black_hole_states)
+	var expected_velocity: Vector2 = old_velocity + expected_acceleration * SimConstants.FIXED_DT
+	var expected_position: Vector2 = old_position + expected_velocity * SimConstants.FIXED_DT
 
 	runtime.step(SimConstants.FIXED_DT)
 
 	var advanced_star: ClusterObjectState = first_cluster.get_object(saved_object_id)
-	var expected_position: Vector2 = old_position + old_velocity * SimConstants.FIXED_DT
 	assert_eq(
 		first_cluster.activation_state,
 		ClusterActivationState.State.SIMPLIFIED,
@@ -170,18 +173,89 @@ func test_simplified_cluster_step_advances_deactivated_dynamic_body_linearly() -
 		advanced_star.local_position.x,
 		expected_position.x,
 		0.01,
-		"simplified stepping should advance remote dynamic bodies along their stored x velocity"
+		"simplified stepping should advance remote dynamic bodies with the stored BH pull on x"
 	)
 	assert_almost_eq(
 		advanced_star.local_position.y,
 		expected_position.y,
 		0.01,
-		"simplified stepping should advance remote dynamic bodies along their stored y velocity"
+		"simplified stepping should advance remote dynamic bodies with the stored BH pull on y"
+	)
+	assert_almost_eq(
+		advanced_star.local_velocity.x,
+		expected_velocity.x,
+		0.01,
+		"simplified stepping should update remote dynamic x velocity from black-hole pull"
+	)
+	assert_almost_eq(
+		advanced_star.local_velocity.y,
+		expected_velocity.y,
+		0.01,
+		"simplified stepping should update remote dynamic y velocity from black-hole pull"
 	)
 	assert_eq(
 		advanced_star.residency_state,
 		ObjectResidencyState.State.SIMPLIFIED,
 		"simplified stepping should keep remote objects marked as simplified"
+	)
+
+func test_focus_relevance_switches_active_cluster_to_nearest_focus_cluster() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
+
+	runtime.update_focus_context(second_cluster.global_center, 0.0)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		second_cluster_id,
+		"focus relevance should promote the cluster nearest the focus position into the active bubble"
+	)
+
+func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays_relevant() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 1
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
+	var focus_radius: float = first_cluster.global_center.distance_to(second_cluster.global_center)
+
+	runtime.update_focus_context(first_cluster.global_center, focus_radius)
+
+	var steps_to_cover_unload_delay: int = int(ceil(
+		SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY / SimConstants.FIXED_DT
+	)) + 2
+	for _i in range(steps_to_cover_unload_delay):
+		runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		second_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"clusters that remain relevant to the current focus should stay simplified instead of unloading"
+	)
+	assert_true(
+		second_cluster.last_relevance_runtime_time > second_cluster.last_unloaded_runtime_time,
+		"relevant simplified clusters should keep refreshing their relevance timestamp"
 	)
 
 func test_simplified_cluster_unloads_after_idle_delay() -> void:
@@ -319,3 +393,17 @@ func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: in
 		if cluster_state.cluster_id != active_cluster_id:
 			return cluster_state.cluster_id
 	return -1
+
+func _compute_black_hole_only_acceleration(object_state: ClusterObjectState, black_hole_states: Array) -> Vector2:
+	var acceleration: Vector2 = Vector2.ZERO
+	for black_hole_state in black_hole_states:
+		var delta: Vector2 = black_hole_state.local_position - object_state.local_position
+		var dist_sq: float = delta.length_squared() + SimConstants.GRAVITY_SOFTENING_SQ
+		if dist_sq <= 0.0:
+			continue
+		var inv_dist: float = 1.0 / sqrt(dist_sq)
+		var accel_scale: float = SimConstants.G \
+			* float(black_hole_state.descriptor.get("mass", SimConstants.BLACK_HOLE_MASS)) \
+			/ dist_sq
+		acceleration += delta * inv_dist * accel_scale
+	return acceleration

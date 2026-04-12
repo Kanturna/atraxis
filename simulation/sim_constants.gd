@@ -92,6 +92,9 @@ const MAX_GALAXY_BLACK_HOLES: int = 300             # separate cap for galaxy to
 # the active bubble. Once they have been remote-only for this many runtime
 # seconds, they are frozen back into the durable UNLOADED source state.
 const CLUSTER_SIMPLIFIED_UNLOAD_DELAY: float = 2.0
+const CLUSTER_ACTIVE_SWITCH_HYSTERESIS_FACTOR: float = 0.5
+const CLUSTER_SIMPLIFIED_RANGE_FACTOR: float = 2.5
+const CLUSTER_SIMPLIFIED_NEAREST_COUNT: int = 1
 
 # --- Dominant BH adaptive integration ---
 # Dynamic bodies keep the raw inverse-square gravity law. We only adapt the

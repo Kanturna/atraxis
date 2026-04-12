@@ -99,6 +99,7 @@ static func _build_chaos_galaxy(galaxy_state: GalaxyState, config) -> void:
 	cluster_state.classification = "chaos_cluster"
 	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
 	cluster_state.last_unloaded_runtime_time = 0.0
+	cluster_state.last_relevance_runtime_time = 0.0
 	cluster_state.cluster_blueprint = {
 		"local_black_hole_specs": [],
 		"primary_black_hole_object_id": "",
@@ -123,6 +124,7 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 	cluster_state.classification = classification
 	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
 	cluster_state.last_unloaded_runtime_time = 0.0
+	cluster_state.last_relevance_runtime_time = 0.0
 	cluster_state.cluster_blueprint = {
 		"local_black_hole_specs": local_black_hole_specs.duplicate(true),
 		"primary_black_hole_object_id": "",

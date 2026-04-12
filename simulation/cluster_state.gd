@@ -12,6 +12,7 @@ var simulated_time: float = 0.0
 var last_activated_runtime_time: float = -1.0
 var last_deactivated_runtime_time: float = -1.0
 var last_unloaded_runtime_time: float = -1.0
+var last_relevance_runtime_time: float = -1.0
 var cluster_blueprint: Dictionary = {}
 var simulation_profile: Dictionary = {}
 var object_registry: Dictionary = {}
@@ -40,14 +41,19 @@ func set_object_residency_state(next_state: int) -> void:
 	for object_state in object_registry.values():
 		object_state.residency_state = next_state
 
+func mark_relevant(runtime_time: float) -> void:
+	last_relevance_runtime_time = runtime_time
+
 func mark_active(runtime_time: float) -> void:
 	activation_state = ClusterActivationState.State.ACTIVE
 	last_activated_runtime_time = runtime_time
+	mark_relevant(runtime_time)
 	set_object_residency_state(ObjectResidencyState.State.ACTIVE)
 
 func mark_simplified(runtime_time: float) -> void:
 	activation_state = ClusterActivationState.State.SIMPLIFIED
 	last_deactivated_runtime_time = runtime_time
+	mark_relevant(runtime_time)
 	set_object_residency_state(ObjectResidencyState.State.SIMPLIFIED)
 
 func mark_unloaded(runtime_time: float) -> void:
@@ -58,11 +64,11 @@ func mark_unloaded(runtime_time: float) -> void:
 func can_unload_from_simplified(runtime_time: float, unload_delay: float) -> bool:
 	if activation_state != ClusterActivationState.State.SIMPLIFIED:
 		return false
-	if last_deactivated_runtime_time < 0.0:
+	if last_relevance_runtime_time < 0.0:
 		return false
 	if not bool(simulation_profile.get("has_runtime_snapshot", false)):
 		return false
-	return runtime_time - last_deactivated_runtime_time >= unload_delay
+	return runtime_time - last_relevance_runtime_time >= unload_delay
 
 func copy() -> ClusterState:
 	var duplicate_state := ClusterState.new()
@@ -76,6 +82,7 @@ func copy() -> ClusterState:
 	duplicate_state.last_activated_runtime_time = last_activated_runtime_time
 	duplicate_state.last_deactivated_runtime_time = last_deactivated_runtime_time
 	duplicate_state.last_unloaded_runtime_time = last_unloaded_runtime_time
+	duplicate_state.last_relevance_runtime_time = last_relevance_runtime_time
 	duplicate_state.cluster_blueprint = cluster_blueprint.duplicate(true)
 	duplicate_state.simulation_profile = simulation_profile.duplicate(true)
 	for object_id in object_registry.keys():

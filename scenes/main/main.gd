@@ -10,6 +10,7 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 # -------------------------------------------------------------------------
 
 @onready var _world_renderer: WorldRenderer = $WorldRenderer
+@onready var _sim_camera: SimCamera = $Camera2D
 @onready var _debug_overlay: DebugOverlay = $DebugOverlay
 @onready var _hud: HUD = $HUD
 
@@ -51,6 +52,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if sim_world == null:
 		return
+	var preserved_focus_global_position: Vector2 = _camera_focus_global_position()
+	_update_runtime_focus_context()
 	_accumulated_dt += delta
 	var steps: int = 0
 	while _accumulated_dt >= SimConstants.FIXED_DT and steps < MAX_STEPS_PER_FRAME:
@@ -60,6 +63,7 @@ func _process(delta: float) -> void:
 	var previous_world: SimWorld = sim_world
 	var world_switched: bool = _sync_runtime_aliases()
 	if world_switched:
+		_restore_camera_focus_global_position(preserved_focus_global_position)
 		_rebind_active_world(previous_world, _hud.get_current_time_scale(), _debug_overlay.visible)
 
 	# Render the current sim state (after all steps for this frame)
@@ -161,3 +165,21 @@ func _rebind_active_world(previous_world: SimWorld, time_scale: float, debug_vis
 	_world_renderer.set_gravity_debug_visible(debug_visible)
 	_world_renderer.render_frame(sim_world)
 	_hud.update_display(sim_world)
+
+func _update_runtime_focus_context() -> void:
+	if galaxy_runtime == null or _sim_camera == null or active_cluster_session == null:
+		return
+	galaxy_runtime.update_focus_context(
+		_camera_focus_global_position(),
+		_sim_camera.get_visible_world_radius()
+	)
+
+func _camera_focus_global_position() -> Vector2:
+	if _sim_camera == null or active_cluster_session == null:
+		return Vector2.ZERO
+	return active_cluster_session.to_global(_sim_camera.get_focus_world_position())
+
+func _restore_camera_focus_global_position(global_focus_position: Vector2) -> void:
+	if _sim_camera == null or active_cluster_session == null:
+		return
+	_sim_camera.set_focus_world_position(active_cluster_session.to_local(global_focus_position))
