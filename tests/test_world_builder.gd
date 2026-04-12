@@ -1,39 +1,36 @@
 extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const GALAXY_BUILDER_SCRIPT := preload("res://simulation/galaxy_builder.gd")
 
-func test_world_builder_creates_orbital_reference_layout() -> void:
-	var world := SimWorld.new()
-	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
-	config.star_count = 2
-	config.planets_per_star = 2
-	config.disturbance_body_count = 3
+func test_internal_reference_fixture_creates_analytic_reference_layout() -> void:
+	var world := _build_fixture_world(func(config):
+		config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
+		config.star_count = 2
+		config.planets_per_star = 2
+		config.disturbance_body_count = 3
+	)
 
-	WorldBuilder.build_from_config(world, config)
-
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 1, "orbital reference should create one black hole")
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), config.star_count, "orbital reference should create the configured stars")
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), config.star_count * config.planets_per_star, "orbital reference should create planets for each star")
-	assert_eq(world.count_bodies_by_type(SimBody.BodyType.ASTEROID), config.disturbance_body_count, "orbital reference should create the configured disturbance bodies")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 1, "internal reference fixture should create one black hole")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 2, "internal reference fixture should create the configured stars")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 4, "internal reference fixture should create planets for each star")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.ASTEROID), 3, "internal reference fixture should create the configured disturbance bodies")
 
 	for body in world.bodies:
 		if body.body_type == SimBody.BodyType.STAR:
-			assert_true(body.kinematic, "orbital reference stars should remain analytic carriers")
-			assert_true(body.scripted_orbit_enabled, "orbital reference stars should use analytic orbiting")
+			assert_true(body.kinematic, "internal reference fixture stars should remain analytic carriers")
+			assert_true(body.scripted_orbit_enabled, "internal reference fixture stars should use analytic orbiting")
 		elif body.body_type == SimBody.BodyType.PLANET:
-			assert_true(body.kinematic, "orbital reference core planets remain kinematic")
-			assert_true(body.scripted_orbit_enabled, "orbital reference core planets should use analytic orbiting")
+			assert_true(body.kinematic, "internal reference fixture core planets remain kinematic")
+			assert_true(body.scripted_orbit_enabled, "internal reference fixture core planets should use analytic orbiting")
 			assert_eq(body.orbit_binding_state, SimBody.OrbitBindingState.BOUND_ANALYTIC, "core planets should advertise their bound state")
 			assert_gt(body.orbit_radius, 0.0, "planet should have a configured orbit radius")
 			assert_gt(body.orbit_angular_speed, 0.0, "planet should have a configured orbit speed")
 
-func test_bound_core_planet_advances_with_moving_parent() -> void:
-	var world := SimWorld.new()
-	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
-
-	WorldBuilder.build_from_config(world, config)
+func test_bound_core_planet_advances_with_moving_parent_in_internal_reference_fixture() -> void:
+	var world := _build_fixture_world(func(config):
+		config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
+	)
 	var star: SimBody = world.get_star()
 	var planet: SimBody = null
 	for body in world.bodies:
@@ -41,7 +38,7 @@ func test_bound_core_planet_advances_with_moving_parent() -> void:
 			planet = body
 			break
 
-	assert_not_null(planet, "world builder should create at least one core planet")
+	assert_not_null(planet, "fixture world should create at least one core planet")
 
 	var old_planet_position: Vector2 = planet.position
 	var old_star_position: Vector2 = star.position
@@ -57,12 +54,13 @@ func test_bound_core_planet_advances_with_moving_parent() -> void:
 		"bound core planets should stay on their configured parent-relative orbit radius"
 	)
 
-func test_live_black_hole_mass_updates_analytic_star_carrier_speed() -> void:
-	var world := SimWorld.new()
+func test_live_black_hole_mass_updates_analytic_star_carrier_speed_in_internal_reference_fixture() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
-
-	WorldBuilder.build_from_config(world, config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(
+		GALAXY_BUILDER_SCRIPT.build_fixture_from_config(config)
+	)
+	var world: SimWorld = session.sim_world
 	var star: SimBody = world.get_star()
 	var old_speed: float = star.orbit_angular_speed
 
@@ -73,7 +71,6 @@ func test_live_black_hole_mass_updates_analytic_star_carrier_speed() -> void:
 func test_field_patch_layout_keeps_central_bh_at_origin_and_outer_ring_spaced() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	config.black_hole_count = 7
 	config.field_spacing_au = 9.0
@@ -99,7 +96,6 @@ func test_field_patch_layout_keeps_central_bh_at_origin_and_outer_ring_spaced() 
 func test_field_patch_accepts_single_black_hole_count_as_center_only() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	config.black_hole_count = 1
 
@@ -111,7 +107,6 @@ func test_field_patch_accepts_single_black_hole_count_as_center_only() -> void:
 func test_live_black_hole_mass_updates_every_field_patch_anchor() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 
 	WorldBuilder.build_from_config(world, config)
@@ -119,3 +114,10 @@ func test_live_black_hole_mass_updates_every_field_patch_anchor() -> void:
 
 	for black_hole in world.get_black_holes():
 		assert_almost_eq(black_hole.mass, config.black_hole_mass * 1.25, 0.001, "live BH mass changes should affect all anchors in the field patch")
+
+func _build_fixture_world(configure: Callable) -> SimWorld:
+	var config = START_CONFIG_SCRIPT.new()
+	configure.call(config)
+	var galaxy_state: GalaxyState = GALAXY_BUILDER_SCRIPT.build_fixture_from_config(config)
+	var session: ActiveClusterSession = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state)
+	return session.sim_world

@@ -13,16 +13,29 @@ static func build_from_config(start_config) -> GalaxyState:
 	var galaxy_state := GalaxyState.new()
 	galaxy_state.galaxy_seed = safe_config.seed
 
-	if safe_config.uses_inflow_lab_profile():
-		_build_inflow_lab_galaxy(galaxy_state, safe_config)
-	else:
-		_build_anchor_profile_galaxy(galaxy_state, safe_config)
+	_build_main_universe_galaxy(galaxy_state, safe_config)
 
 	return galaxy_state
 
-static func _build_anchor_profile_galaxy(galaxy_state: GalaxyState, config) -> void:
-	var resolved_anchor_topology: int = config.resolved_anchor_topology()
-	match resolved_anchor_topology:
+static func build_fixture_from_config(start_config) -> GalaxyState:
+	var config = start_config if start_config != null else START_CONFIG_SCRIPT.new()
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+
+	var galaxy_state := GalaxyState.new()
+	galaxy_state.galaxy_seed = safe_config.seed
+
+	if safe_config.uses_inflow_lab_profile():
+		_build_inflow_lab_fixture_galaxy(galaxy_state, safe_config)
+	elif safe_config.uses_reference_star_carriers():
+		_build_reference_fixture_galaxy(galaxy_state, safe_config)
+	else:
+		_build_main_universe_galaxy(galaxy_state, safe_config)
+
+	return galaxy_state
+
+static func _build_main_universe_galaxy(galaxy_state: GalaxyState, config) -> void:
+	match config.anchor_topology:
 		START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH:
 			var local_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
 				config.black_hole_count,
@@ -62,19 +75,40 @@ static func _build_anchor_profile_galaxy(galaxy_state: GalaxyState, config) -> v
 				config.field_spacing_au,
 				config.black_hole_mass
 			)
-			var classification: String = "orbital_reference_cluster" \
-				if config.uses_reference_star_carriers() else "central_anchor_cluster"
 			var cluster_state: ClusterState = _make_cluster_state(
 				config,
 				0,
 				Vector2.ZERO,
-				classification,
+				"central_anchor_cluster",
 				central_specs,
-				true
+				true,
+				{
+					"fixture_profile": "main_universe",
+				}
 			)
 			galaxy_state.add_cluster(cluster_state)
 
-static func _build_inflow_lab_galaxy(galaxy_state: GalaxyState, config) -> void:
+static func _build_reference_fixture_galaxy(galaxy_state: GalaxyState, config) -> void:
+	var local_specs: Array = ANCHOR_FIELD_SCRIPT.build_local_black_hole_specs(
+		1,
+		config.field_spacing_au,
+		config.black_hole_mass
+	)
+	var cluster_state: ClusterState = _make_cluster_state(
+		config,
+		0,
+		Vector2.ZERO,
+		"orbital_reference_fixture",
+		local_specs,
+		true,
+		{
+			"analytic_star_carriers": true,
+			"fixture_profile": "orbital_reference",
+		}
+	)
+	galaxy_state.add_cluster(cluster_state)
+
+static func _build_inflow_lab_fixture_galaxy(galaxy_state: GalaxyState, config) -> void:
 	var cluster_state := ClusterState.new()
 	cluster_state.cluster_id = 0
 	cluster_state.global_center = Vector2.ZERO
@@ -95,12 +129,21 @@ static func _build_inflow_lab_galaxy(galaxy_state: GalaxyState, config) -> void:
 			ObjectResidencyState.State.IN_TRANSIT,
 		],
 	}
-	cluster_state.simulation_profile = _build_simulation_profile(config, false, 0)
+	cluster_state.simulation_profile = _build_simulation_profile(
+		config,
+		false,
+		0,
+		{
+			"content_archetype": "inflow_lab",
+			"fixture_profile": "inflow_lab",
+		}
+	)
 	cluster_state.radius = _estimate_cluster_radius([], cluster_state.simulation_profile)
 	galaxy_state.add_cluster(cluster_state)
 
 static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
-		classification: String, local_black_hole_specs: Array, spawn_anchor_content: bool) -> ClusterState:
+		classification: String, local_black_hole_specs: Array, spawn_anchor_content: bool,
+		simulation_profile_overrides: Dictionary = {}) -> ClusterState:
 	var cluster_state := ClusterState.new()
 	cluster_state.cluster_id = cluster_id
 	cluster_state.global_center = global_center
@@ -124,7 +167,8 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 	cluster_state.simulation_profile = _build_simulation_profile(
 		config,
 		spawn_anchor_content,
-		local_black_hole_specs.size()
+		local_black_hole_specs.size(),
+		simulation_profile_overrides
 	)
 	cluster_state.radius = _estimate_cluster_radius(local_black_hole_specs, cluster_state.simulation_profile)
 
@@ -146,16 +190,20 @@ static func _make_cluster_state(config, cluster_id: int, global_center: Vector2,
 
 	return cluster_state
 
-static func _build_simulation_profile(config, spawn_anchor_content: bool, local_black_hole_count: int) -> Dictionary:
+static func _build_simulation_profile(
+		config,
+		spawn_anchor_content: bool,
+		local_black_hole_count: int,
+		overrides: Dictionary = {}) -> Dictionary:
 	var star_count: int = config.star_count if spawn_anchor_content else 0
 	var planets_per_star: int = config.planets_per_star if spawn_anchor_content else 0
 	var disturbance_body_count: int = config.disturbance_body_count if spawn_anchor_content else 0
 
-	return {
-		"world_profile": config.world_profile,
-		"content_archetype": "inflow_lab" if config.uses_inflow_lab_profile() else "anchor_orbital",
-		"resolved_anchor_topology": config.resolved_anchor_topology(),
-		"analytic_star_carriers": config.uses_reference_star_carriers(),
+	var simulation_profile := {
+		"content_archetype": "anchor_orbital",
+		"analytic_star_carriers": false,
+		"fixture_profile": "main_universe",
+		"anchor_topology": config.anchor_topology,
 		"has_runtime_snapshot": false,
 		"spawn_anchor_content": spawn_anchor_content,
 		"seed": config.seed,
@@ -172,6 +220,9 @@ static func _build_simulation_profile(config, spawn_anchor_content: bool, local_
 		"tangential_bias": config.tangential_bias,
 		"chaos_body_count": config.chaos_body_count,
 	}
+	for key in overrides.keys():
+		simulation_profile[key] = overrides[key]
+	return simulation_profile
 
 static func _estimate_cluster_radius(local_black_hole_specs: Array, simulation_profile: Dictionary) -> float:
 	var max_black_hole_offset: float = 0.0

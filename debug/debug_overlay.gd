@@ -85,11 +85,8 @@ var _galaxy_hint_label: Label = null
 @onready var _restart_button: Button = $RightPanelScroll/RightPanelVBox/StartPanel/VBox/RestartButton
 
 func _ready() -> void:
-	_mode_label.text = "World preset"
-	_mode_option.clear()
-	_mode_option.add_item("Orbital Sandbox", START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX)
-	_mode_option.add_item("Orbital Reference", START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE)
-	_mode_option.add_item("Inflow Lab", START_CONFIG_SCRIPT.WorldProfile.INFLOW_LAB)
+	_mode_label.visible = false
+	_mode_option.visible = false
 	_anchor_topology_option.clear()
 	_anchor_topology_option.add_item("Central BH", START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH)
 	_anchor_topology_option.add_item("Field Patch", START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH)
@@ -106,8 +103,6 @@ func _ready() -> void:
 		+ "set spacing above that value to keep gravity fields separate."
 	)
 	_create_galaxy_controls()
-	if not _mode_option.item_selected.is_connected(_on_world_profile_selected):
-		_mode_option.item_selected.connect(_on_world_profile_selected)
 	if not _anchor_topology_option.item_selected.is_connected(_on_anchor_topology_selected):
 		_anchor_topology_option.item_selected.connect(_on_anchor_topology_selected)
 	if not _restart_button.pressed.is_connected(_on_restart_button_pressed):
@@ -345,11 +340,10 @@ func _create_galaxy_controls() -> void:
 	vbox.move_child(_galaxy_hint_label, _restart_button.get_index())
 
 func _sync_start_controls(config) -> void:
-	if _mode_option == null:
+	if _anchor_topology_option == null:
 		return
 	var safe_config = config.copy()
 	safe_config.clamp_values()
-	_mode_option.select(safe_config.world_profile)
 	_anchor_topology_option.select(safe_config.anchor_topology)
 	_seed_spin.value = safe_config.seed
 	_bh_mass_spin.value = safe_config.black_hole_mass
@@ -369,7 +363,7 @@ func _sync_start_controls(config) -> void:
 	_speed_scale_spin.value = safe_config.inflow_speed_scale
 	_tangential_bias_spin.value = safe_config.tangential_bias
 	_chaos_body_count_spin.value = safe_config.chaos_body_count
-	_update_profile_specific_inputs()
+	_update_start_inputs()
 
 func _sync_live_anchor_controls(config) -> void:
 	var safe_config = config.copy()
@@ -379,7 +373,6 @@ func _sync_live_anchor_controls(config) -> void:
 
 func _read_start_config():
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = _mode_option.get_selected_id()
 	config.anchor_topology = _anchor_topology_option.get_selected_id()
 	config.seed = int(_seed_spin.value)
 	config.black_hole_mass = _bh_mass_spin.value
@@ -402,15 +395,10 @@ func _read_start_config():
 	config.clamp_values()
 	return config
 
-func _update_profile_specific_inputs() -> void:
-	var selected_profile: int = _mode_option.get_selected_id()
-	var inflow_lab_enabled: bool = selected_profile == START_CONFIG_SCRIPT.WorldProfile.INFLOW_LAB
-	var orbital_sandbox_enabled: bool = selected_profile == START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
+func _update_start_inputs() -> void:
 	var selected_topology: int = _anchor_topology_option.get_selected_id()
-	var field_patch_enabled: bool = orbital_sandbox_enabled \
-		and selected_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
-	var galaxy_cluster_enabled: bool = orbital_sandbox_enabled \
-		and selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	var field_patch_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
+	var galaxy_cluster_enabled: bool = selected_topology == START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	var multi_black_hole_enabled: bool = field_patch_enabled or galaxy_cluster_enabled
 	var shared_anchor_nodes: Array[CanvasItem] = [
 		_bh_mass_label,
@@ -451,9 +439,9 @@ func _update_profile_specific_inputs() -> void:
 		_chaos_body_count_spin,
 	]
 	for node in shared_anchor_nodes:
-		node.visible = not inflow_lab_enabled
+		node.visible = true
 	for node in dynamic_nodes:
-		node.visible = orbital_sandbox_enabled
+		node.visible = true
 	for node in multi_black_hole_nodes:
 		node.visible = multi_black_hole_enabled
 	for node in field_patch_nodes:
@@ -473,15 +461,12 @@ func _update_profile_specific_inputs() -> void:
 	if _galaxy_hint_label != null:
 		_galaxy_hint_label.visible = galaxy_cluster_enabled
 	for node in chaos_nodes:
-		node.visible = inflow_lab_enabled
+		node.visible = false
 	_field_patch_hint_label.visible = field_patch_enabled
 	_update_panel_group_visibility()
 
-func _on_world_profile_selected(_index: int) -> void:
-	_update_profile_specific_inputs()
-
 func _on_anchor_topology_selected(_index: int) -> void:
-	_update_profile_specific_inputs()
+	_update_start_inputs()
 
 func _on_live_bh_mass_changed(value: float) -> void:
 	_bh_mass_spin.set_value_no_signal(value)

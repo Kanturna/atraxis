@@ -1,17 +1,18 @@
 ## Small debug-facing start configuration for rebuilding the simulation.
-## The runtime now follows one canonical world path; these values only select
-## a generation preset/profile for that shared path.
+## Public startup now follows one canonical universe path.
+## The profile aliases below remain only as internal fixture compatibility.
 class_name SimulationStartConfig
 extends RefCounted
 
+# Internal fixture compatibility only. Public startup ignores this selection
+# and always follows the canonical universe builder path.
 enum WorldProfile {
 	ORBITAL_SANDBOX = 0,
 	ORBITAL_REFERENCE = 1,
 	INFLOW_LAB = 2,
 }
 
-# Backward-compatible alias for older tests/callers while the project converges
-# on world-profile language instead of equal-status runtime modes.
+# Backward-compatible alias for older tests/callers.
 enum StartMode {
 	DYNAMIC_ANCHOR = WorldProfile.ORBITAL_SANDBOX,
 	STABLE_ANCHOR = WorldProfile.ORBITAL_REFERENCE,
@@ -123,8 +124,5 @@ func uses_inflow_lab_profile() -> bool:
 func uses_reference_star_carriers() -> bool:
 	return world_profile == WorldProfile.ORBITAL_REFERENCE
 
-func supports_anchor_topology_selection() -> bool:
-	return world_profile == WorldProfile.ORBITAL_SANDBOX
-
 func resolved_anchor_topology() -> int:
-	return anchor_topology if supports_anchor_topology_selection() else AnchorTopology.CENTRAL_BH
+	return anchor_topology

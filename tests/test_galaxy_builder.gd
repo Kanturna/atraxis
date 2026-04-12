@@ -4,7 +4,6 @@ const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.g
 
 func test_galaxy_builder_field_patch_is_deterministic_for_same_seed() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	config.seed = 42
 	config.black_hole_count = 7
@@ -24,16 +23,13 @@ func test_galaxy_builder_field_patch_is_deterministic_for_same_seed() -> void:
 
 func test_anchor_topologies_map_to_expected_cluster_counts() -> void:
 	var central_config = START_CONFIG_SCRIPT.new()
-	central_config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	central_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH
 
 	var field_patch_config = START_CONFIG_SCRIPT.new()
-	field_patch_config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	field_patch_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	field_patch_config.black_hole_count = 6
 
 	var galaxy_cluster_config = START_CONFIG_SCRIPT.new()
-	galaxy_cluster_config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	galaxy_cluster_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	galaxy_cluster_config.black_hole_count = 9
 	galaxy_cluster_config.galaxy_cluster_count = 3
@@ -56,34 +52,29 @@ func test_anchor_topologies_map_to_expected_cluster_counts() -> void:
 		"field patch cluster should carry all configured black holes"
 	)
 
-func test_reference_profile_maps_to_central_anchor_preset_on_shared_builder_path() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.star_count = 2
+func test_public_galaxy_builder_ignores_internal_fixture_profile_flags() -> void:
+	var sandbox_config = START_CONFIG_SCRIPT.new()
+	sandbox_config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	sandbox_config.black_hole_count = 9
+	sandbox_config.galaxy_cluster_count = 3
 
-	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
-	var cluster_state: ClusterState = galaxy_state.get_primary_cluster()
+	var reference_config = sandbox_config.copy()
+	reference_config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE
 
-	assert_eq(galaxy_state.get_cluster_count(), 1, "reference preset should not create a separate multi-cluster runtime path")
-	assert_eq(
-		cluster_state.simulation_profile.get("world_profile", -1),
-		START_CONFIG_SCRIPT.WorldProfile.ORBITAL_REFERENCE,
-		"cluster profile should preserve the selected world preset"
-	)
-	assert_eq(
-		cluster_state.simulation_profile.get("resolved_anchor_topology", -1),
-		START_CONFIG_SCRIPT.AnchorTopology.CENTRAL_BH,
-		"reference preset should resolve back onto the central anchor topology"
-	)
-	assert_true(
-		cluster_state.simulation_profile.get("analytic_star_carriers", false),
-		"reference preset should describe analytic star carriers as a content flag instead of a runtime mode"
-	)
+	var inflow_config = sandbox_config.copy()
+	inflow_config.world_profile = START_CONFIG_SCRIPT.WorldProfile.INFLOW_LAB
+
+	var sandbox_galaxy: GalaxyState = WorldBuilder.build_galaxy_state_from_config(sandbox_config)
+	var reference_galaxy: GalaxyState = WorldBuilder.build_galaxy_state_from_config(reference_config)
+	var inflow_galaxy: GalaxyState = WorldBuilder.build_galaxy_state_from_config(inflow_config)
+
+	assert_eq(sandbox_galaxy.get_cluster_count(), reference_galaxy.get_cluster_count(), "reference fixture flags must not change the public cluster topology")
+	assert_eq(sandbox_galaxy.get_cluster_count(), inflow_galaxy.get_cluster_count(), "inflow fixture flags must not change the public cluster topology")
+	_assert_clusters_equivalent(sandbox_galaxy.get_primary_cluster(), reference_galaxy.get_primary_cluster())
+	_assert_clusters_equivalent(sandbox_galaxy.get_primary_cluster(), inflow_galaxy.get_primary_cluster())
 
 func test_galaxy_cluster_keeps_remote_clusters_unloaded_and_data_only() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	config.seed = 99
 	config.black_hole_count = 9
@@ -140,7 +131,6 @@ func test_galaxy_cluster_keeps_remote_clusters_unloaded_and_data_only() -> void:
 
 func test_cluster_black_holes_start_resident_and_expose_lifecycle_scaffold() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	config.black_hole_count = 5
 
@@ -183,7 +173,6 @@ func test_cluster_black_holes_start_resident_and_expose_lifecycle_scaffold() -> 
 
 func test_active_cluster_session_activates_primary_cluster_and_maps_local_to_global() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	config.black_hole_count = 9
 	config.galaxy_cluster_count = 3
@@ -229,7 +218,6 @@ func test_active_cluster_session_activates_primary_cluster_and_maps_local_to_glo
 
 func test_active_cluster_session_switch_marks_previous_cluster_simplified() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
 	config.black_hole_count = 9
 	config.galaxy_cluster_count = 3
@@ -266,7 +254,6 @@ func test_active_cluster_session_switch_marks_previous_cluster_simplified() -> v
 
 func test_compatibility_build_from_config_matches_active_session_projection() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	config.seed = 123
 	config.black_hole_count = 5
@@ -307,7 +294,6 @@ func test_compatibility_build_from_config_matches_active_session_projection() ->
 
 func test_active_cluster_session_black_hole_mass_updates_source_of_truth_and_projection() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.world_profile = START_CONFIG_SCRIPT.WorldProfile.ORBITAL_SANDBOX
 	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.FIELD_PATCH
 	config.black_hole_count = 4
 
@@ -339,9 +325,14 @@ func _assert_clusters_equivalent(cluster_a: ClusterState, cluster_b: ClusterStat
 	assert_eq(cluster_a.classification, cluster_b.classification, "cluster classification should be deterministic")
 	assert_eq(cluster_a.activation_state, cluster_b.activation_state, "cluster activation default should be deterministic")
 	assert_eq(
-		cluster_a.simulation_profile.get("world_profile", -1),
-		cluster_b.simulation_profile.get("world_profile", -2),
-		"cluster world profile should be deterministic"
+		cluster_a.simulation_profile.get("content_archetype", ""),
+		cluster_b.simulation_profile.get("content_archetype", "mismatch"),
+		"cluster content archetype should be deterministic"
+	)
+	assert_eq(
+		cluster_a.simulation_profile.get("analytic_star_carriers", true),
+		cluster_b.simulation_profile.get("analytic_star_carriers", false),
+		"cluster carrier mode flags should be deterministic"
 	)
 	assert_eq(
 		cluster_a.simulation_profile.get("local_black_hole_count", -1),
