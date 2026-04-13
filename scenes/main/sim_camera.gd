@@ -10,10 +10,10 @@ extends Camera2D
 const MIN_PAN_SPEED: float = 600.0
 const PAN_SCREEN_FRACTION_PER_SECOND: float = 0.85
 const FAST_PAN_MULTIPLIER: float = 4.0
-const ZOOM_SPEED: float = 0.15
+const ZOOM_SPEED: float = 0.12
 const ZOOM_SMOOTHNESS: float = 10.0
-const ZOOM_MIN: float = 0.015
-const ZOOM_MAX: float = 5.0
+const ZOOM_MIN: float = 0.005
+const ZOOM_MAX: float = 8.0
 const FOCUS_TRANSITION_POSITION_SMOOTHNESS: float = 8.0
 const FOCUS_TRANSITION_ZOOM_SMOOTHNESS: float = 8.0
 const FOCUS_TRANSITION_POSITION_EPSILON: float = 12.0

@@ -466,10 +466,16 @@ func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
 		1.0,
 		viewport_size
 	)
+	var far_system_hints: Array = far_specs.filter(func(spec): return bool(spec.get("render_as_system_hint", false)))
 	var mid_kinds: Array = mid_specs.map(func(spec): return str(spec.get("kind", "")))
 	var near_kinds: Array = near_specs.map(func(spec): return str(spec.get("kind", "")))
 
-	assert_true(far_specs.is_empty(), "marker-only LOD should skip building remote preview specs entirely")
+	assert_eq(far_specs.size(), far_system_hints.size(), "marker-only LOD should now build only minimal system hints")
+	assert_false(far_system_hints.is_empty(), "very distant occupied sectors should stay minimally visible in the normal view")
+	assert_true(
+		far_system_hints.all(func(spec): return str(spec.get("kind", "")) == "system_hint"),
+		"marker-only LOD should use explicit system hints instead of full preview bodies"
+	)
 	assert_true(mid_kinds.has("black_hole"), "mid-distance LOD should keep black-hole previews visible")
 	assert_true(mid_kinds.has("star"), "mid-distance LOD should keep star previews visible")
 	assert_false(mid_kinds.has("planet"), "mid-distance LOD should drop planet previews")
@@ -555,6 +561,10 @@ func test_macro_sector_preview_rules_keep_ambient_planets_and_strip_far_planets_
 	)
 
 func test_far_star_preview_style_is_dimmer_tighter_and_without_halo() -> void:
+	var local_style: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.preview_visual_profile({
+		"body_type": SimBody.BodyType.STAR,
+		"sector_relevance": "local",
+	})
 	var ambient_style: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.preview_visual_profile({
 		"body_type": SimBody.BodyType.STAR,
 		"macro_sector_zone": "ambient",
@@ -573,13 +583,17 @@ func test_far_star_preview_style_is_dimmer_tighter_and_without_halo() -> void:
 
 	assert_lt(
 		float(far_style.get("radius_scale", 1.0)),
-		float(ambient_style.get("radius_scale", 1.0)),
-		"far stars should render as tighter points than ambient stars"
+		float(local_style.get("radius_scale", 1.0)),
+		"far stars should render as tighter points than local stars"
 	)
 	assert_lt(
 		float(far_style.get("alpha_scale", 1.0)),
-		float(ambient_style.get("alpha_scale", 1.0)),
-		"far stars should render dimmer than ambient stars"
+		float(local_style.get("alpha_scale", 1.0)),
+		"far stars should render dimmer than local stars"
+	)
+	assert_false(
+		bool(ambient_style.get("draw_star_halo", true)),
+		"neighbor-sector star previews should now drop halos so the rectangular tile structure stays dominant"
 	)
 	assert_false(
 		bool(far_style.get("draw_star_halo", true)),
@@ -591,14 +605,24 @@ func test_far_star_preview_style_is_dimmer_tighter_and_without_halo() -> void:
 		"outside previews should stay weaker than far macro-structure instead of competing with it"
 	)
 	assert_gt(
-		float(ambient_accent.get("fill_alpha", 0.0)),
-		float(far_accent.get("fill_alpha", 0.0)),
-		"ambient cluster accents should read stronger than far macro-structure accents"
+		float(local_style.get("halo_alpha_scale", 0.0)),
+		float(far_style.get("halo_alpha_scale", 0.0)),
+		"local stars should keep the richer halo treatment while far previews stay austere"
 	)
-	assert_gt(
-		float(far_accent.get("fill_alpha", 0.0)),
-		float(outside_accent.get("fill_alpha", 0.0)),
-		"outside cluster accents should stay weaker than far macro-structure accents"
+	assert_eq(
+		float(ambient_accent.get("ring_alpha", -1.0)),
+		0.0,
+		"neighbor-sector preview accents should not draw circular rings anymore"
+	)
+	assert_eq(
+		float(far_accent.get("ring_alpha", -1.0)),
+		0.0,
+		"far-sector preview accents should not draw circular rings anymore"
+	)
+	assert_eq(
+		float(outside_accent.get("ring_alpha", -1.0)),
+		0.0,
+		"remote preview accents should not draw circular rings anymore"
 	)
 
 func _make_manual_preview_cluster(

@@ -392,26 +392,39 @@ func _draw_quiet_sector_atmosphere(
 		line_width: float) -> void:
 	if color.a <= 0.0:
 		return
-	var center: Vector2 = sector_rect.get_center()
-	var calm_radius: float = minf(sector_rect.size.x, sector_rect.size.y) * 0.055
-	draw_circle(center, calm_radius, Color(color.r, color.g, color.b, color.a * 0.32))
-	for index in range(3):
+	var signal_count: int = 1
+	if _sector_hash01(sector_coord, 73) > 0.64:
+		signal_count = 2
+	for index in range(signal_count):
 		var hash_a: float = _sector_hash01(sector_coord, index * 13 + 1)
 		var hash_b: float = _sector_hash01(sector_coord, index * 13 + 2)
 		var hash_c: float = _sector_hash01(sector_coord, index * 13 + 3)
+		var hash_d: float = _sector_hash01(sector_coord, index * 13 + 4)
 		var point := sector_rect.position + Vector2(
-			lerpf(sector_rect.size.x * 0.20, sector_rect.size.x * 0.80, hash_a),
-			lerpf(sector_rect.size.y * 0.22, sector_rect.size.y * 0.78, hash_b)
+			lerpf(sector_rect.size.x * 0.24, sector_rect.size.x * 0.76, hash_a),
+			lerpf(sector_rect.size.y * 0.26, sector_rect.size.y * 0.74, hash_b)
 		)
-		var direction: Vector2 = Vector2(1.0, -0.55 if hash_c < 0.5 else 0.55).normalized()
-		var segment_length: float = lerpf(sector_rect.size.x * 0.04, sector_rect.size.x * 0.08, hash_c)
-		draw_line(
-			point - direction * segment_length * 0.5,
-			point + direction * segment_length * 0.5,
-			color,
-			line_width,
-			true
-		)
+		if hash_d < 0.5:
+			var pip_extent: float = maxf(2.4 / _debug_marker_canvas_scale(), 1.2)
+			var pip_rect := Rect2(
+				point - Vector2.ONE * pip_extent * 0.5,
+				Vector2.ONE * pip_extent
+			)
+			draw_rect(pip_rect, Color(color.r, color.g, color.b, color.a * 0.72), true)
+		else:
+			var direction: Vector2 = Vector2.RIGHT if hash_c < 0.5 else Vector2.DOWN
+			var segment_length: float = lerpf(
+				minf(sector_rect.size.x, sector_rect.size.y) * 0.015,
+				minf(sector_rect.size.x, sector_rect.size.y) * 0.024,
+				hash_c
+			)
+			draw_line(
+				point - direction * segment_length * 0.5,
+				point + direction * segment_length * 0.5,
+				Color(color.r, color.g, color.b, color.a * 0.68),
+				line_width,
+				true
+			)
 
 func _draw_sector_debug_label(
 		sector_rect: Rect2,
@@ -652,6 +665,27 @@ static func build_remote_cluster_preview_specs(
 		)
 		var preview_lod: int = cluster_preview_lod_for_screen_radius(cluster_screen_radius)
 		if preview_lod == PREVIEW_LOD_MARKER_ONLY:
+			preview_specs.append({
+				"object_id": "cluster_%d:system_hint" % cluster_state.cluster_id,
+				"kind": "system_hint",
+				"body_type": SimBody.BodyType.STAR,
+				"material_type": SimBody.MaterialType.STELLAR,
+				"local_position": local_center,
+				"cluster_local_center": local_center,
+				"cluster_radius": cluster_state.get_authoritative_radius(),
+				"radius": SimConstants.STAR_RADIUS,
+				"seed": int(cluster_state.cluster_seed),
+				"cluster_id": cluster_state.cluster_id,
+				"state": activation_state_debug_name(cluster_state.activation_state),
+				"preview_lod": preview_lod,
+				"sector_coord": sector_coord,
+				"sector_relation": sector_relation,
+				"sector_relevance": sector_relevance,
+				"sector_relevance_label": sector_content_relevance_label(sector_relevance),
+				"macro_sector_zone": MACRO_SECTOR_ZONE_SCRIPT.debug_name(macro_sector_zone),
+				"is_macro_sector_member": macro_sector_zone != MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE,
+				"render_as_system_hint": true,
+			})
 			continue
 		var source_specs: Array = _remote_cluster_preview_source_specs(
 			cluster_state,

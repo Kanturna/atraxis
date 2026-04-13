@@ -80,6 +80,22 @@ func test_rebase_focus_transition_keeps_motion_continuous() -> void:
 
 	_dispose_camera(camera)
 
+func test_zoom_range_opens_up_for_sector_scale_overview_and_close_inspection() -> void:
+	var camera: SimCamera = _make_camera()
+	camera.zoom = Vector2.ONE
+
+	camera._request_zoom(Vector2(320.0, 180.0), 0.0001)
+	assert_almost_eq(camera._target_zoom, 0.005, 0.0001, "wheel zoom-out should clamp to the expanded minimum zoom")
+
+	camera._target_zoom = 1.0
+	camera._request_zoom(Vector2(320.0, 180.0), 999.0)
+	assert_almost_eq(camera._target_zoom, 8.0, 0.0001, "wheel zoom-in should clamp to the expanded maximum zoom")
+
+	var far_radius_zoom: float = camera._zoom_for_visible_world_radius(camera.get_visible_world_radius() * 400.0)
+	assert_almost_eq(far_radius_zoom, 0.005, 0.0001, "focus framing should now allow a much wider sector-scale overview")
+
+	_dispose_camera(camera)
+
 func _make_camera() -> SimCamera:
 	var camera: SimCamera = SIM_CAMERA_SCRIPT.new()
 	add_child(camera)

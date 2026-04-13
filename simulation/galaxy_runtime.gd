@@ -16,6 +16,7 @@ const FAR_ZONE_STEP_INTERVAL_TICKS: int = 4
 const ACTIVE_SECTOR_DISCOVERY_RADIUS: int = 2
 const AMBIENT_SECTOR_RADIUS: int = 1
 const FAR_SECTOR_RADIUS: int = 2
+const ACTIVE_SECTOR_SWITCH_HYSTERESIS_FACTOR: float = 0.06
 
 var galaxy_state: GalaxyState = null
 var active_sector_session = null
@@ -420,7 +421,8 @@ func _sync_active_sector_to_focus_context() -> void:
 	if galaxy_state == null or worldgen == null:
 		return
 	var context: Dictionary = _resolve_focus_context()
-	var focus_sector: Vector2i = worldgen.sector_coord_for_global_position(context["focus_global_position"])
+	var focus_global_position: Vector2 = context["focus_global_position"]
+	var focus_sector: Vector2i = worldgen.sector_coord_for_global_position(focus_global_position)
 	if active_sector_session == null or active_sector_session.sector_state == null:
 		_activate_sector_internal(focus_sector)
 		_rebuild_active_macro_sector(
@@ -430,7 +432,30 @@ func _sync_active_sector_to_focus_context() -> void:
 		return
 	if focus_sector == active_sector_session.sector_state.sector_coord:
 		return
+	if _should_keep_current_sector_during_boundary_hysteresis(focus_global_position, focus_sector):
+		return
 	activate_sector(focus_sector)
+
+func _should_keep_current_sector_during_boundary_hysteresis(
+		focus_global_position: Vector2,
+		focus_sector: Vector2i) -> bool:
+	if active_sector_session == null or active_sector_session.sector_state == null:
+		return false
+	var current_sector_coord: Vector2i = active_sector_session.sector_state.sector_coord
+	if focus_sector == current_sector_coord:
+		return false
+	var sector_delta := focus_sector - current_sector_coord
+	if maxi(absi(sector_delta.x), absi(sector_delta.y)) != 1:
+		return false
+	var sector_size: float = float(active_sector_session.sector_state.size)
+	if sector_size <= 0.0:
+		return false
+	var hysteresis_margin: float = sector_size * ACTIVE_SECTOR_SWITCH_HYSTERESIS_FACTOR
+	var hysteresis_rect := Rect2(
+		active_sector_session.sector_state.global_origin - Vector2.ONE * hysteresis_margin,
+		Vector2.ONE * (sector_size + hysteresis_margin * 2.0)
+	)
+	return hysteresis_rect.has_point(focus_global_position)
 
 func _should_keep_cluster_simplified(cluster_state: ClusterState) -> bool:
 	if cluster_state == null:

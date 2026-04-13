@@ -23,6 +23,15 @@ func update_preview_specs(
 func _draw() -> void:
 	_draw_cluster_accents()
 	for spec in _preview_specs:
+		if bool(spec.get("render_as_system_hint", false)):
+			var hint_position: Vector2 = BodyRenderer.sim_to_screen(
+				Vector2(spec.get("local_position", Vector2.ZERO))
+			)
+			var hint_extent: float = _system_hint_extent(spec)
+			if not _is_preview_body_visible(hint_position, hint_extent):
+				continue
+			_draw_system_hint(hint_position, hint_extent, _system_hint_color(spec))
+			continue
 		var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
 		var body_radius: float = float(spec.get("radius", 1.0))
 		var visual_profile: Dictionary = preview_visual_profile(spec)
@@ -38,9 +47,10 @@ func _draw() -> void:
 			continue
 		var color: Color = _preview_color(spec)
 		color.a *= float(visual_profile.get("alpha_scale", 1.0))
+		var preview_relevance: String = _preview_relevance_name(spec)
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
-				_draw_black_hole_preview(screen_position, screen_radius, color)
+				_draw_black_hole_preview(screen_position, screen_radius, color, preview_relevance)
 			SimBody.BodyType.STAR:
 				draw_circle(screen_position, screen_radius, color)
 				if bool(visual_profile.get("draw_star_halo", true)):
@@ -69,6 +79,8 @@ func _draw_cluster_accents() -> void:
 	for spec in _preview_specs:
 		var cluster_id: int = int(spec.get("cluster_id", -1))
 		if cluster_id < 0 or drawn_cluster_ids.has(cluster_id):
+			continue
+		if bool(spec.get("render_as_system_hint", false)):
 			continue
 		drawn_cluster_ids[cluster_id] = true
 		var cluster_center: Vector2 = BodyRenderer.sim_to_screen(
@@ -100,23 +112,30 @@ func _draw_cluster_accents() -> void:
 				maxf(float(accent_profile.get("ring_width", 1.0)) / _canvas_scale, 0.9 / _canvas_scale)
 			)
 
-func _draw_black_hole_preview(screen_position: Vector2, screen_radius: float, color: Color) -> void:
-	draw_circle(
-		screen_position,
-		screen_radius * 1.24,
-		Color(color.r, color.g, color.b, color.a * 0.28)
-	)
+func _draw_black_hole_preview(
+		screen_position: Vector2,
+		screen_radius: float,
+		color: Color,
+		preview_relevance: String = "remote") -> void:
+	preview_relevance = _normalize_preview_relevance_name(preview_relevance)
+	if preview_relevance in ["active", "local"]:
+		draw_circle(
+			screen_position,
+			screen_radius * 1.24,
+			Color(color.r, color.g, color.b, color.a * 0.28)
+		)
 	draw_circle(screen_position, screen_radius, Color(0.90, 0.95, 1.0, 0.24))
 	draw_circle(screen_position, screen_radius * 0.56, Color(0.04, 0.04, 0.08, 0.84))
-	draw_arc(
-		screen_position,
-		screen_radius * 1.06,
-		0.0,
-		TAU,
-		48,
-		Color(0.92, 0.96, 1.0, 0.26),
-		1.4
-	)
+	if preview_relevance in ["active", "local"]:
+		draw_arc(
+			screen_position,
+			screen_radius * 1.06,
+			0.0,
+			TAU,
+			48,
+			Color(0.92, 0.96, 1.0, 0.26),
+			1.4
+		)
 
 func _preview_color(spec: Dictionary) -> Color:
 	var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
@@ -177,7 +196,7 @@ static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 				profile["halo_alpha_scale"] = 1.30
 			SimBody.BodyType.PLANET:
 				profile["alpha_scale"] = 1.18
-	elif preview_relevance == "local" or preview_relevance == "neighbor":
+	elif preview_relevance == "local":
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
 				profile["alpha_scale"] = 1.08
@@ -187,6 +206,17 @@ static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 				profile["halo_alpha_scale"] = 1.25
 			SimBody.BodyType.PLANET:
 				profile["alpha_scale"] = 1.14
+	elif preview_relevance == "neighbor":
+		match body_type:
+			SimBody.BodyType.BLACK_HOLE:
+				profile["alpha_scale"] = 0.98
+			SimBody.BodyType.STAR:
+				profile["radius_scale"] = 0.94
+				profile["alpha_scale"] = 0.72
+				profile["draw_star_halo"] = false
+				profile["halo_alpha_scale"] = 0.0
+			SimBody.BodyType.PLANET:
+				profile["alpha_scale"] = 0.72
 	elif preview_relevance == "far":
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
@@ -231,8 +261,8 @@ static func cluster_accent_profile(preview_relevance: String) -> Dictionary:
 				"radius_scale": 0.26,
 				"min_radius_px": 22.0,
 				"max_radius_px": 56.0,
-				"fill_alpha": 0.040,
-				"ring_alpha": 0.11,
+				"fill_alpha": 0.026,
+				"ring_alpha": 0.0,
 				"ring_width": 1.4,
 			}
 		"local":
@@ -240,8 +270,8 @@ static func cluster_accent_profile(preview_relevance: String) -> Dictionary:
 				"radius_scale": 0.24,
 				"min_radius_px": 20.0,
 				"max_radius_px": 52.0,
-				"fill_alpha": 0.034,
-				"ring_alpha": 0.10,
+				"fill_alpha": 0.018,
+				"ring_alpha": 0.0,
 				"ring_width": 1.3,
 			}
 		"neighbor":
@@ -249,8 +279,8 @@ static func cluster_accent_profile(preview_relevance: String) -> Dictionary:
 				"radius_scale": 0.24,
 				"min_radius_px": 20.0,
 				"max_radius_px": 52.0,
-				"fill_alpha": 0.034,
-				"ring_alpha": 0.10,
+				"fill_alpha": 0.0,
+				"ring_alpha": 0.0,
 				"ring_width": 1.3,
 			}
 		"far":
@@ -258,8 +288,8 @@ static func cluster_accent_profile(preview_relevance: String) -> Dictionary:
 				"radius_scale": 0.18,
 				"min_radius_px": 16.0,
 				"max_radius_px": 34.0,
-				"fill_alpha": 0.016,
-				"ring_alpha": 0.055,
+				"fill_alpha": 0.0,
+				"ring_alpha": 0.0,
 				"ring_width": 0.9,
 			}
 		_:
@@ -267,10 +297,53 @@ static func cluster_accent_profile(preview_relevance: String) -> Dictionary:
 				"radius_scale": 0.12,
 				"min_radius_px": 12.0,
 				"max_radius_px": 24.0,
-				"fill_alpha": 0.008,
-				"ring_alpha": 0.028,
+				"fill_alpha": 0.0,
+				"ring_alpha": 0.0,
 				"ring_width": 0.8,
 			}
+
+func _system_hint_extent(spec: Dictionary) -> float:
+	var preview_relevance: String = _preview_relevance_name(spec)
+	var base_extent: float = 3.2 / _canvas_scale
+	match preview_relevance:
+		"neighbor":
+			base_extent = 3.8 / _canvas_scale
+		"far":
+			base_extent = 3.3 / _canvas_scale
+		"remote":
+			base_extent = 2.9 / _canvas_scale
+	return maxf(base_extent, 1.6)
+
+func _system_hint_color(spec: Dictionary) -> Color:
+	match _preview_relevance_name(spec):
+		"neighbor":
+			return Color(0.54, 0.86, 0.78, 0.52)
+		"far":
+			return Color(0.60, 0.78, 0.96, 0.42)
+		"remote":
+			return Color(0.72, 0.76, 0.82, 0.34)
+		"local":
+			return Color(0.98, 0.88, 0.72, 0.56)
+		_:
+			return Color(1.0, 0.92, 0.68, 0.62)
+
+func _draw_system_hint(screen_position: Vector2, hint_extent: float, color: Color) -> void:
+	var points := PackedVector2Array([
+		screen_position + Vector2(0.0, -hint_extent),
+		screen_position + Vector2(hint_extent, 0.0),
+		screen_position + Vector2(0.0, hint_extent),
+		screen_position + Vector2(-hint_extent, 0.0),
+	])
+	draw_colored_polygon(points, color)
+	var outline_color := Color(color.r, color.g, color.b, minf(color.a + 0.18, 1.0))
+	for index in range(points.size()):
+		draw_line(
+			points[index],
+			points[(index + 1) % points.size()],
+			outline_color,
+			maxf(1.0 / _canvas_scale, 0.7),
+			true
+		)
 
 static func _preview_relevance_name(spec: Dictionary) -> String:
 	return _normalize_preview_relevance_name(

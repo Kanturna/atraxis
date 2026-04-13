@@ -464,6 +464,72 @@ func test_sector_boundary_switch_preserves_view_frame_and_focus_projection() -> 
 		"the same global focus position should keep the same local projection after the sector switch"
 	)
 
+func test_sector_boundary_hysteresis_keeps_neighbor_transition_soft_without_getting_sticky() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var initial_sector_state = runtime.get_active_sector_state()
+	assert_not_null(initial_sector_state, "the hysteresis test needs an active rectangular sector")
+	var initial_sector_coord: Vector2i = initial_sector_state.sector_coord
+	var focus_just_over_boundary: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 1.03,
+		initial_sector_state.size * 0.5
+	)
+
+	runtime.update_focus_context(focus_just_over_boundary, 0.0)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		initial_sector_coord,
+		"moving only slightly into a neighboring tile should stay on the current sector inside the soft boundary buffer"
+	)
+
+	var focus_clear_of_boundary: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 1.08,
+		initial_sector_state.size * 0.5
+	)
+	runtime.update_focus_context(focus_clear_of_boundary, 0.0)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		initial_sector_coord + Vector2i(1, 0),
+		"once the camera clears the small buffer, the active sector should advance normally without feeling sticky"
+	)
+
+func test_sector_boundary_hysteresis_does_not_delay_multi_sector_focus_jumps() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var initial_sector_state = runtime.get_active_sector_state()
+	assert_not_null(initial_sector_state, "the multi-sector jump test needs an active rectangular sector")
+	var jumped_focus: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 2.45,
+		initial_sector_state.size * 0.5
+	)
+
+	runtime.update_focus_context(jumped_focus, 0.0)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		initial_sector_state.sector_coord + Vector2i(2, 0),
+		"multi-sector jumps should bypass boundary hysteresis and land directly on the true target tile"
+	)
+
 func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_frozen() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(5, 2_000.0, true)
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
