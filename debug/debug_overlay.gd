@@ -219,6 +219,8 @@ func update_runtime_metrics(frame_delta: float, steps_this_frame: int) -> void:
 func try_select_body_at_screen(screen_pos: Vector2, world: SimWorld) -> bool:
 	# Convert screen position to sim-space
 	var sim_pos: Vector2 = screen_pos / SimConstants.SIM_TO_SCREEN
+	if _active_sector_session != null and _active_sector_session.has_method("cluster_frame_offset"):
+		sim_pos -= Vector2(_active_sector_session.cluster_frame_offset())
 	var best: SimBody = null
 	var best_dist_sq: float = INF
 
@@ -348,6 +350,7 @@ func _build_cluster_diagnostics_lines() -> String:
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	var materialized_bodies: int = _sim.get_active_body_count() if _sim != null else 0
 	var content_markers: Array = active_cluster.cluster_blueprint.get("content_markers", []) if active_cluster != null else []
+	var frame_origin: Vector2 = _active_sector_session.frame_global_origin if _active_sector_session != null else Vector2.ZERO
 	var macro_sector_lines: String = _build_macro_sector_diagnostics_lines()
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
@@ -376,7 +379,8 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Clear margin   %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_primary_clearance_margin_au", -1.0)))
 		+ "Start band     %s\n" % _format_layout_metric_au(float(profile.get("layout_reserved_start_band_au", -1.0)))
 		+ "Radius margin  %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_cluster_radius_margin_au", -1.0)))
-		+ "Cluster global  %s\n" % (
+		+ "Frame origin   %.0f, %.0f\n" % [frame_origin.x, frame_origin.y]
+		+ "System anchor  %s\n" % (
 			"%.0f, %.0f" % [
 				_active_cluster_session.cluster_global_origin.x,
 				_active_cluster_session.cluster_global_origin.y,

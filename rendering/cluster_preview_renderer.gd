@@ -75,12 +75,12 @@ func _draw_cluster_accents() -> void:
 			Vector2(spec.get("cluster_local_center", Vector2.ZERO))
 		)
 		var cluster_radius: float = BodyRenderer.sim_dist_to_screen(float(spec.get("cluster_radius", 0.0)))
-		var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
-		var accent_profile: Dictionary = cluster_accent_profile(macro_sector_zone)
+		var preview_relevance: String = _preview_relevance_name(spec)
+		var accent_profile: Dictionary = cluster_accent_profile(preview_relevance)
 		var accent_radius: float = _cluster_accent_radius(cluster_radius, accent_profile)
 		if not _is_preview_body_visible(cluster_center, accent_radius):
 			continue
-		var accent_color: Color = cluster_accent_color(macro_sector_zone)
+		var accent_color: Color = cluster_accent_color(preview_relevance)
 		var fill_alpha: float = float(accent_profile.get("fill_alpha", 0.0))
 		var ring_alpha: float = float(accent_profile.get("ring_alpha", 0.0))
 		if fill_alpha > 0.0:
@@ -121,20 +121,24 @@ func _draw_black_hole_preview(screen_position: Vector2, screen_radius: float, co
 func _preview_color(spec: Dictionary) -> Color:
 	var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
 	var material_type: int = int(spec.get("material_type", SimBody.MaterialType.MIXED))
-	var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
+	var preview_relevance: String = _preview_relevance_name(spec)
 	match body_type:
 		SimBody.BodyType.BLACK_HOLE:
-			if macro_sector_zone == "outside":
+			if preview_relevance == "remote":
 				return Color(0.74, 0.78, 0.86, 0.34)
-			if macro_sector_zone == "far":
+			if preview_relevance == "far":
 				return Color(0.84, 0.90, 1.0, 0.44)
-			return Color(0.92, 0.97, 1.0, 0.58)
+			if preview_relevance == "neighbor":
+				return Color(0.90, 0.97, 1.0, 0.56)
+			return Color(0.96, 0.98, 1.0, 0.64)
 		SimBody.BodyType.STAR:
-			if macro_sector_zone == "outside":
+			if preview_relevance == "remote":
 				return Color(0.74, 0.78, 0.84, 0.34)
-			if macro_sector_zone == "far":
+			if preview_relevance == "far":
 				return Color(0.84, 0.90, 1.0, 0.46)
-			return Color(1.0, 0.94, 0.58, 0.68)
+			if preview_relevance == "neighbor":
+				return Color(0.96, 0.97, 0.88, 0.62)
+			return Color(1.0, 0.95, 0.62, 0.74)
 		SimBody.BodyType.PLANET:
 			match material_type:
 				SimBody.MaterialType.ROCKY:
@@ -156,14 +160,24 @@ func _cluster_accent_radius(cluster_radius_screen: float, accent_profile: Dictio
 
 static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 	var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
-	var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
+	var preview_relevance: String = _preview_relevance_name(spec)
 	var profile := {
 		"radius_scale": 1.0,
 		"alpha_scale": 1.0,
 		"draw_star_halo": body_type == SimBody.BodyType.STAR,
 		"halo_alpha_scale": 1.0,
 	}
-	if macro_sector_zone == "ambient":
+	if preview_relevance == "active":
+		match body_type:
+			SimBody.BodyType.BLACK_HOLE:
+				profile["alpha_scale"] = 1.14
+			SimBody.BodyType.STAR:
+				profile["radius_scale"] = 1.10
+				profile["alpha_scale"] = 1.16
+				profile["halo_alpha_scale"] = 1.30
+			SimBody.BodyType.PLANET:
+				profile["alpha_scale"] = 1.18
+	elif preview_relevance == "local" or preview_relevance == "neighbor":
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
 				profile["alpha_scale"] = 1.08
@@ -173,7 +187,7 @@ static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 				profile["halo_alpha_scale"] = 1.25
 			SimBody.BodyType.PLANET:
 				profile["alpha_scale"] = 1.14
-	elif macro_sector_zone == "far":
+	elif preview_relevance == "far":
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
 				profile["alpha_scale"] = 0.95
@@ -182,7 +196,7 @@ static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 				profile["alpha_scale"] = 0.56
 				profile["draw_star_halo"] = false
 				profile["halo_alpha_scale"] = 0.0
-	elif macro_sector_zone == "outside":
+	elif preview_relevance == "remote":
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
 				profile["alpha_scale"] = 0.62
@@ -195,18 +209,42 @@ static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 				profile["alpha_scale"] = 0.58
 	return profile
 
-static func cluster_accent_color(macro_sector_zone: String) -> Color:
-	match macro_sector_zone:
-		"ambient":
+static func cluster_accent_color(preview_relevance: String) -> Color:
+	preview_relevance = _normalize_preview_relevance_name(preview_relevance)
+	match preview_relevance:
+		"active":
+			return Color(1.0, 0.86, 0.60, 1.0)
+		"local":
+			return Color(0.98, 0.88, 0.72, 1.0)
+		"neighbor":
 			return Color(0.32, 0.92, 0.78, 1.0)
 		"far":
 			return Color(0.56, 0.78, 1.0, 1.0)
 		_:
 			return Color(0.72, 0.76, 0.82, 1.0)
 
-static func cluster_accent_profile(macro_sector_zone: String) -> Dictionary:
-	match macro_sector_zone:
-		"ambient":
+static func cluster_accent_profile(preview_relevance: String) -> Dictionary:
+	preview_relevance = _normalize_preview_relevance_name(preview_relevance)
+	match preview_relevance:
+		"active":
+			return {
+				"radius_scale": 0.26,
+				"min_radius_px": 22.0,
+				"max_radius_px": 56.0,
+				"fill_alpha": 0.040,
+				"ring_alpha": 0.11,
+				"ring_width": 1.4,
+			}
+		"local":
+			return {
+				"radius_scale": 0.24,
+				"min_radius_px": 20.0,
+				"max_radius_px": 52.0,
+				"fill_alpha": 0.034,
+				"ring_alpha": 0.10,
+				"ring_width": 1.3,
+			}
+		"neighbor":
 			return {
 				"radius_scale": 0.24,
 				"min_radius_px": 20.0,
@@ -233,6 +271,20 @@ static func cluster_accent_profile(macro_sector_zone: String) -> Dictionary:
 				"ring_alpha": 0.028,
 				"ring_width": 0.8,
 			}
+
+static func _preview_relevance_name(spec: Dictionary) -> String:
+	return _normalize_preview_relevance_name(
+		str(spec.get("sector_relevance", spec.get("macro_sector_zone", "remote")))
+	)
+
+static func _normalize_preview_relevance_name(preview_relevance: String) -> String:
+	match preview_relevance:
+		"ambient":
+			return "neighbor"
+		"outside":
+			return "remote"
+		_:
+			return preview_relevance
 
 static func _min_preview_screen_px(body_type: int) -> float:
 	match body_type:

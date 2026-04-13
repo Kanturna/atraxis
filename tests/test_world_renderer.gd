@@ -92,7 +92,10 @@ func test_sector_debug_marker_payload_uses_sector_relation_labels_and_hides_clus
 	var cluster_session := ActiveClusterSession.new()
 	cluster_session.bind(galaxy_state, active_cluster, SimWorld.new())
 	var active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
-	active_sector_session.bind(galaxy_state, galaxy_state.get_sector_state(Vector2i(0, 0)), cluster_session)
+	var sector_state = galaxy_state.get_sector_state(Vector2i(0, 0))
+	sector_state.global_origin = Vector2(-800.0, -800.0)
+	sector_state.size = 1_600.0
+	active_sector_session.bind(galaxy_state, sector_state, cluster_session)
 	var payload: Dictionary = WORLD_RENDERER_SCRIPT.build_registered_cluster_debug_markers(
 		galaxy_state,
 		cluster_session,
@@ -118,6 +121,63 @@ func test_sector_debug_marker_payload_uses_sector_relation_labels_and_hides_clus
 	assert_true(
 		str(active_marker.get("debug_label", "")).contains("SYS"),
 		"sector-mode markers should use a sector-first system label instead of a macro-zone label"
+	)
+
+func test_active_world_layer_offset_uses_sector_frame_instead_of_cluster_origin() -> void:
+	var galaxy_state := GalaxyState.new()
+	var sector_state = galaxy_state.get_or_create_sector_state(Vector2i(0, 0))
+	sector_state.global_origin = Vector2(-1_000.0, -1_000.0)
+	sector_state.size = 2_000.0
+
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2(250.0, -150.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	var cluster_session := ActiveClusterSession.new()
+	cluster_session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	active_sector_session.bind(galaxy_state, sector_state, cluster_session)
+
+	var local_offset: Vector2 = WORLD_RENDERER_SCRIPT.active_world_layer_local_offset(
+		active_sector_session,
+		cluster_session
+	)
+
+	assert_true(
+		local_offset.is_equal_approx(active_cluster.global_center - sector_state.center()),
+		"active-world render layers should place the system inside the sector frame instead of recentering the frame on the system"
+	)
+
+func test_sector_mode_remote_preview_specs_expose_sector_native_relevance() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var neighbor_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(1_000.0, 0.0), 100.0)
+	active_cluster.simulation_profile["sector_coord"] = Vector2i(0, 0)
+	neighbor_cluster.simulation_profile["sector_coord"] = Vector2i(1, 0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(neighbor_cluster)
+
+	var cluster_session := ActiveClusterSession.new()
+	cluster_session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	var sector_state = galaxy_state.get_sector_state(Vector2i(0, 0))
+	sector_state.global_origin = Vector2(-800.0, -800.0)
+	sector_state.size = 1_600.0
+	active_sector_session.bind(galaxy_state, sector_state, cluster_session)
+
+	var preview_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		cluster_session,
+		Rect2(Vector2(-600.0, -450.0), Vector2(1_200.0, 900.0)),
+		1.0,
+		Vector2(1_600.0, 900.0),
+		null,
+		active_sector_session
+	)
+
+	assert_false(preview_specs.is_empty(), "sector-mode remote previews should remain visible under the sector frame")
+	assert_eq(
+		str(preview_specs[0].get("sector_relevance", "")),
+		"neighbor",
+		"sector-mode preview payloads should expose sector-native relevance instead of only the legacy macro-zone wording"
 	)
 
 func test_cluster_debug_marker_radius_stays_visible_across_zoom_scales() -> void:

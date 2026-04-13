@@ -69,6 +69,7 @@ func initialize(
 	_cached_marker_payload = {}
 	_worldgen = GalaxyWorldgen.new(galaxy_state.worldgen_config) \
 		if galaxy_state != null and galaxy_state.worldgen_config != null else null
+	_sync_active_world_layer_offsets()
 
 	_body_renderer = BodyRenderer.new()
 	_trail_renderer = TrailRenderer.new()
@@ -100,6 +101,7 @@ func initialize(
 		_on_body_added(body)
 
 func render_frame(world: SimWorld) -> void:
+	_sync_active_world_layer_offsets()
 	for star_id in _zone_renderers:
 		var star: SimBody = world.get_body_by_id(star_id)
 		_zone_renderers[star_id].update_for_star(star)
@@ -178,6 +180,20 @@ func _ensure_overlay_layers() -> void:
 		_marker_layer.name = "MarkerLayer"
 		add_child(_marker_layer)
 		move_child(_marker_layer, get_child_count() - 1)
+
+func _sync_active_world_layer_offsets() -> void:
+	var local_offset: Vector2 = active_world_layer_local_offset(
+		_active_sector_session,
+		_active_cluster_session
+	)
+	var screen_offset: Vector2 = BodyRenderer.sim_to_screen(local_offset)
+	for layer in [_zone_layer, _gravity_debug_layer, _trail_layer, _body_layer, _debris_layer]:
+		if layer != null:
+			layer.position = screen_offset
+	if _preview_layer != null:
+		_preview_layer.position = Vector2.ZERO
+	if _marker_layer != null:
+		_marker_layer.position = Vector2.ZERO
 
 func _draw() -> void:
 	if _galaxy_state == null or (_active_cluster_session == null and _active_sector_session == null):
@@ -508,6 +524,10 @@ static func build_registered_cluster_debug_markers(
 		) if has_macro_sector_overlay else MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE
 		var sector_coord: Vector2i = _resolve_cluster_sector_coord(galaxy_state, cluster_state)
 		var sector_relation: String = sector_relation_name(sector_coord, active_sector_coord) if sector_mode else ""
+		var sector_relevance: String = sector_content_relevance_name(
+			sector_relation,
+			is_active
+		) if sector_mode else sector_relevance_from_macro_zone(macro_sector_zone, is_active)
 		var sector_state = galaxy_state.get_sector_state(sector_coord) if sector_mode else null
 		var sector_cluster_count: int = sector_state.cluster_ids.size() if sector_state != null else 1
 		var zone_profile: Dictionary = sector_marker_debug_profile(
@@ -550,6 +570,8 @@ static func build_registered_cluster_debug_markers(
 			"zone_label": macro_sector_zone_label(macro_sector_zone) if has_macro_sector_overlay else "",
 			"sector_coord": sector_coord,
 			"sector_relation": sector_relation,
+			"sector_relevance": sector_relevance,
+			"sector_relevance_label": sector_content_relevance_label(sector_relevance),
 			"sector_relation_label": sector_relation_short_label(sector_relation) if sector_mode else "",
 			"sector_contains_systems": sector_cluster_count > 0,
 			"sector_cluster_count": sector_cluster_count,
@@ -569,7 +591,7 @@ static func build_registered_cluster_debug_markers(
 		var marker_state: String = str(marker.get("state", ""))
 		var label_prefix: String = ""
 		if sector_mode:
-			label_prefix = "%s SYS" % str(marker.get("sector_relation_label", "REMOTE"))
+			label_prefix = "%s SYS" % str(marker.get("sector_relevance_label", "REMOTE"))
 		elif has_macro_sector_overlay:
 			label_prefix = str(marker.get("zone_label", ""))
 		elif bool(marker.get("is_active", false)):
@@ -604,6 +626,15 @@ static func build_remote_cluster_preview_specs(
 			active_macro_sector_session,
 			cluster_state.cluster_id
 		)
+		var sector_coord: Vector2i = _resolve_cluster_sector_coord(galaxy_state, cluster_state)
+		var sector_relation: String = sector_relation_name(
+			sector_coord,
+			active_sector_session.sector_state.sector_coord
+		) if active_sector_session != null and active_sector_session.sector_state != null else ""
+		var sector_relevance: String = sector_content_relevance_name(
+			sector_relation,
+			false
+		) if active_sector_session != null and active_sector_session.sector_state != null else sector_relevance_from_macro_zone(macro_sector_zone)
 		var local_center: Vector2 = reference_session.to_local(cluster_state.global_center)
 		var cluster_center_canvas: Vector2 = BodyRenderer.sim_to_screen(local_center)
 		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(cluster_state.get_authoritative_radius())
@@ -644,6 +675,10 @@ static func build_remote_cluster_preview_specs(
 				"cluster_id": cluster_state.cluster_id,
 				"state": activation_state_debug_name(cluster_state.activation_state),
 				"preview_lod": preview_lod,
+				"sector_coord": sector_coord,
+				"sector_relation": sector_relation,
+				"sector_relevance": sector_relevance,
+				"sector_relevance_label": sector_content_relevance_label(sector_relevance),
 				"macro_sector_zone": MACRO_SECTOR_ZONE_SCRIPT.debug_name(macro_sector_zone),
 				"is_macro_sector_member": macro_sector_zone != MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE,
 			}
@@ -944,6 +979,15 @@ static func cluster_debug_marker_world_radius(
 	)
 	return clampf(target_marker_radius, min_marker_radius, max_marker_radius)
 
+static func active_world_layer_local_offset(
+		active_sector_session = null,
+		active_cluster_session: ActiveClusterSession = null) -> Vector2:
+	if active_sector_session != null and active_sector_session.has_method("cluster_frame_offset"):
+		return Vector2(active_sector_session.cluster_frame_offset())
+	if active_cluster_session != null:
+		return Vector2.ZERO
+	return Vector2.ZERO
+
 static func uses_macro_sector_debug_overlay(active_macro_sector_session) -> bool:
 	return active_macro_sector_session != null and active_macro_sector_session.descriptor != null
 
@@ -970,6 +1014,45 @@ static func sector_relation_short_label(sector_relation: String) -> String:
 			return "FAR"
 		_:
 			return "REMOTE"
+
+static func sector_content_relevance_name(sector_relation: String, is_active: bool = false) -> String:
+	if is_active:
+		return "active"
+	match sector_relation:
+		"active":
+			return "local"
+		"neighbor":
+			return "neighbor"
+		"far":
+			return "far"
+		_:
+			return "remote"
+
+static func sector_content_relevance_label(sector_relevance: String) -> String:
+	match sector_relevance:
+		"active":
+			return "ACTIVE"
+		"local":
+			return "LOCAL"
+		"neighbor":
+			return "NEAR"
+		"far":
+			return "FAR"
+		_:
+			return "REMOTE"
+
+static func sector_relevance_from_macro_zone(zone: int, is_active: bool = false) -> String:
+	if is_active:
+		return "active"
+	match zone:
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS:
+			return "local"
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT:
+			return "neighbor"
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR:
+			return "far"
+		_:
+			return "remote"
 
 static func sector_visual_profile(
 		sector_relation: String,

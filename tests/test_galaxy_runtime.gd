@@ -1,6 +1,7 @@
 extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
+const ACTIVE_SECTOR_SESSION_SCRIPT := preload("res://simulation/active_sector_session.gd")
 const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
 const TRANSIT_OBJECT_STATE_SCRIPT := preload("res://simulation/transit_object_state.gd")
@@ -327,6 +328,30 @@ func test_focus_context_keeps_active_sector_stable_within_sector_bounds() -> voi
 		runtime.active_cluster_session.cluster_id,
 		initial_cluster_id,
 		"the contained system should stay loaded while the camera moves around inside the same sector"
+	)
+
+func test_active_sector_session_anchors_local_frame_to_sector_center_even_with_loaded_system() -> void:
+	var galaxy_state := GalaxyState.new()
+	var sector_state = galaxy_state.get_or_create_sector_state(Vector2i(0, 0))
+	sector_state.global_origin = Vector2(-800.0, -800.0)
+	sector_state.size = 1_600.0
+
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_id = 7
+	cluster_state.global_center = Vector2(320.0, -140.0)
+	var cluster_session := ActiveClusterSession.new()
+	cluster_session.bind(galaxy_state, cluster_state, SimWorld.new())
+
+	var sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	sector_session.bind(galaxy_state, sector_state, cluster_session)
+
+	assert_true(
+		sector_session.frame_global_origin.is_equal_approx(sector_state.center()),
+		"the active rectangular-sector frame should stay pinned to the sector center even when a system is loaded"
+	)
+	assert_true(
+		sector_session.cluster_frame_offset().is_equal_approx(cluster_state.global_center - sector_state.center()),
+		"loaded systems should become contained offsets inside the sector frame instead of redefining the frame origin"
 	)
 
 func test_focus_context_switches_active_sector_once_when_crossing_sector_boundary() -> void:

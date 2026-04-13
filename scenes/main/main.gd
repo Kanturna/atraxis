@@ -239,6 +239,11 @@ func _rebind_active_world(
 	_world_renderer.set_debug_overlays_visible(debug_visible)
 	_world_renderer.render_frame(sim_world)
 	_hud.update_display(sim_world)
+	if previous_world == null and _sim_camera != null:
+		var initial_focus_local: Vector2 = Vector2.ZERO
+		if active_cluster_session != null and active_sector_session != null:
+			initial_focus_local = active_sector_session.to_local(active_cluster_session.cluster_global_origin)
+		_sim_camera.set_focus_world_position(initial_focus_local * SimConstants.SIM_TO_SCREEN)
 	if previous_world != null and previous_world != sim_world:
 		previous_world.dispose()
 
@@ -383,12 +388,12 @@ func _should_rebase_pending_cluster_transition() -> bool:
 
 func _rebase_pending_cluster_transition_after_world_switch(
 		current_focus_global_position: Vector2) -> void:
-	if _sim_camera == null or active_cluster_session == null:
+	if _sim_camera == null or active_sector_session == null:
 		return
-	var rebased_current_focus: Vector2 = active_cluster_session.to_local(
+	var rebased_current_focus: Vector2 = active_sector_session.to_local(
 		current_focus_global_position
 	) * SimConstants.SIM_TO_SCREEN
-	var rebased_target_focus: Vector2 = active_cluster_session.to_local(
+	var rebased_target_focus: Vector2 = active_sector_session.to_local(
 		_pending_click_activation_focus_global_position
 	) * SimConstants.SIM_TO_SCREEN
 	_sim_camera.rebase_focus_transition(rebased_current_focus, rebased_target_focus)
