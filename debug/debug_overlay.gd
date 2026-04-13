@@ -379,7 +379,7 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Clear margin   %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_primary_clearance_margin_au", -1.0)))
 		+ "Start band     %s\n" % _format_layout_metric_au(float(profile.get("layout_reserved_start_band_au", -1.0)))
 		+ "Radius margin  %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_cluster_radius_margin_au", -1.0)))
-		+ "Frame origin   %.0f, %.0f\n" % [frame_origin.x, frame_origin.y]
+		+ "View frame     %.0f, %.0f\n" % [frame_origin.x, frame_origin.y]
 		+ "System anchor  %s\n" % (
 			"%.0f, %.0f" % [
 				_active_cluster_session.cluster_global_origin.x,

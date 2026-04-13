@@ -233,6 +233,8 @@ func get_discovered_sector_count() -> int:
 func _activate_sector_internal(target_sector_coord: Vector2i, preferred_cluster_id: int = -1) -> void:
 	if galaxy_state == null:
 		return
+	var preserved_frame_global_origin = active_sector_session.frame_global_origin \
+		if active_sector_session != null else null
 	if worldgen != null:
 		GalaxyBuilder.discover_sector_neighborhood(
 			galaxy_state,
@@ -258,7 +260,12 @@ func _activate_sector_internal(target_sector_coord: Vector2i, preferred_cluster_
 	if active_sector_world == null:
 		active_sector_world = SimWorld.new()
 	active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
-	active_sector_session.bind(galaxy_state, sector_state, active_cluster_session)
+	active_sector_session.bind(
+		galaxy_state,
+		sector_state,
+		active_cluster_session,
+		preserved_frame_global_origin
+	)
 	if sector_state != null:
 		sector_state.mark_active(runtime_time_elapsed)
 	galaxy_state.sync_world_entity_bindings()
@@ -389,7 +396,7 @@ func _resolve_focus_context() -> Dictionary:
 		}
 	if active_sector_session != null and active_sector_session.sector_state != null:
 		return {
-			"focus_global_position": active_sector_session.to_global(Vector2.ZERO),
+			"focus_global_position": active_sector_session.sector_center(),
 			"visible_world_radius": 0.0,
 		}
 	if active_cluster_session != null and active_cluster_session.active_cluster_state != null:

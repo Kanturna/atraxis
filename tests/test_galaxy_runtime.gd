@@ -354,6 +354,43 @@ func test_active_sector_session_anchors_local_frame_to_sector_center_even_with_l
 		"loaded systems should become contained offsets inside the sector frame instead of redefining the frame origin"
 	)
 
+func test_active_sector_session_can_preserve_existing_view_frame_origin_across_sector_switch() -> void:
+	var galaxy_state := GalaxyState.new()
+	var first_sector_state = galaxy_state.get_or_create_sector_state(Vector2i(0, 0))
+	first_sector_state.global_origin = Vector2(-800.0, -800.0)
+	first_sector_state.size = 1_600.0
+	var second_sector_state = galaxy_state.get_or_create_sector_state(Vector2i(1, 0))
+	second_sector_state.global_origin = Vector2(800.0, -800.0)
+	second_sector_state.size = 1_600.0
+
+	var first_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	first_sector_session.bind(galaxy_state, first_sector_state)
+
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_id = 8
+	cluster_state.global_center = Vector2(1_360.0, -120.0)
+	var cluster_session := ActiveClusterSession.new()
+	cluster_session.bind(galaxy_state, cluster_state, SimWorld.new())
+
+	var second_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	second_sector_session.bind(
+		galaxy_state,
+		second_sector_state,
+		cluster_session,
+		first_sector_session.frame_global_origin
+	)
+
+	assert_true(
+		second_sector_session.frame_global_origin.is_equal_approx(first_sector_session.frame_global_origin),
+		"sector switches should be able to preserve the existing view-frame origin instead of snapping to the new tile center"
+	)
+	assert_true(
+		second_sector_session.cluster_frame_offset().is_equal_approx(
+			cluster_state.global_center - first_sector_session.frame_global_origin
+		),
+		"contained systems in the new sector should be localized against the preserved view frame"
+	)
+
 func test_focus_context_switches_active_sector_once_when_crossing_sector_boundary() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 144
@@ -388,6 +425,43 @@ func test_focus_context_switches_active_sector_once_when_crossing_sector_boundar
 		runtime.get_active_sector_state().sector_coord,
 		target_sector_coord,
 		"once the camera is inside the new sector, follow-up steps should keep the new top-level sector stable"
+	)
+
+func test_sector_boundary_switch_preserves_view_frame_and_focus_projection() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var initial_sector_state = runtime.get_active_sector_state()
+	assert_not_null(initial_sector_state, "the view-frame continuity test needs an active rectangular sector")
+	var initial_view_frame: Vector2 = runtime.active_sector_session.frame_global_origin
+	var target_sector_coord: Vector2i = initial_sector_state.sector_coord + Vector2i(1, 0)
+	var crossed_focus: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 1.5,
+		initial_sector_state.size * 0.5
+	)
+	var local_focus_before_switch: Vector2 = runtime.active_sector_session.to_local(crossed_focus)
+
+	runtime.update_focus_context(crossed_focus, 0.0)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		target_sector_coord,
+		"crossing the sector boundary should still switch the semantic active tile"
+	)
+	assert_true(
+		runtime.active_sector_session.frame_global_origin.is_equal_approx(initial_view_frame),
+		"the visible view frame should stay stable across the sector switch to avoid a camera-frame jump"
+	)
+	assert_true(
+		runtime.active_sector_session.to_local(crossed_focus).is_equal_approx(local_focus_before_switch),
+		"the same global focus position should keep the same local projection after the sector switch"
 	)
 
 func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_frozen() -> void:
@@ -460,6 +534,7 @@ func test_focus_context_can_enter_empty_sector_without_creating_a_fallback_clust
 	)
 
 	var sector_state = runtime.galaxy_state.get_sector_state(empty_sector_coord)
+	var preserved_view_frame: Vector2 = runtime.active_sector_session.frame_global_origin
 	runtime.update_focus_context(sector_state.center(), sector_state.size * 0.35)
 	runtime.step(SimConstants.FIXED_DT)
 
@@ -477,6 +552,10 @@ func test_focus_context_can_enter_empty_sector_without_creating_a_fallback_clust
 		runtime.get_active_sim_world().bodies.size(),
 		0,
 		"empty active sectors should stay empty instead of inventing system content"
+	)
+	assert_true(
+		runtime.active_sector_session.frame_global_origin.is_equal_approx(preserved_view_frame),
+		"entering an empty sector should also preserve the visible view frame instead of snapping to the empty tile center"
 	)
 
 func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays_relevant() -> void:

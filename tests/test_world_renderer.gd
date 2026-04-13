@@ -146,6 +146,40 @@ func test_active_world_layer_offset_uses_sector_frame_instead_of_cluster_origin(
 		"active-world render layers should place the system inside the sector frame instead of recentering the frame on the system"
 	)
 
+func test_active_world_layer_offset_respects_preserved_view_frame_origin_across_sector_switch() -> void:
+	var galaxy_state := GalaxyState.new()
+	var first_sector_state = galaxy_state.get_or_create_sector_state(Vector2i(0, 0))
+	first_sector_state.global_origin = Vector2(-1_000.0, -1_000.0)
+	first_sector_state.size = 2_000.0
+	var second_sector_state = galaxy_state.get_or_create_sector_state(Vector2i(1, 0))
+	second_sector_state.global_origin = Vector2(1_000.0, -1_000.0)
+	second_sector_state.size = 2_000.0
+
+	var first_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	first_sector_session.bind(galaxy_state, first_sector_state)
+
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2(1_260.0, -180.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	var cluster_session := ActiveClusterSession.new()
+	cluster_session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var second_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	second_sector_session.bind(
+		galaxy_state,
+		second_sector_state,
+		cluster_session,
+		first_sector_session.frame_global_origin
+	)
+
+	var local_offset: Vector2 = WORLD_RENDERER_SCRIPT.active_world_layer_local_offset(
+		second_sector_session,
+		cluster_session
+	)
+
+	assert_true(
+		local_offset.is_equal_approx(active_cluster.global_center - first_sector_session.frame_global_origin),
+		"renderer layer offsets should continue to use the preserved view frame after a sector switch"
+	)
+
 func test_sector_mode_remote_preview_specs_expose_sector_native_relevance() -> void:
 	var galaxy_state := GalaxyState.new()
 	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)

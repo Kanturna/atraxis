@@ -13,12 +13,15 @@ var active_cluster_local_origin: Vector2 = Vector2.ZERO
 func bind(
 		next_galaxy_state,
 		next_sector_state,
-		next_active_cluster_session = null) -> void:
+		next_active_cluster_session = null,
+		preserved_frame_global_origin = null) -> void:
 	galaxy_state = next_galaxy_state
 	sector_state = next_sector_state
 	active_cluster_session = next_active_cluster_session
 	active_cluster_id = next_active_cluster_session.cluster_id if next_active_cluster_session != null else -1
-	if next_sector_state != null:
+	if preserved_frame_global_origin is Vector2:
+		frame_global_origin = preserved_frame_global_origin
+	elif next_sector_state != null:
 		frame_global_origin = next_sector_state.center()
 	elif next_active_cluster_session != null:
 		frame_global_origin = next_active_cluster_session.cluster_global_origin
@@ -36,6 +39,9 @@ func to_local(global_position: Vector2) -> Vector2:
 
 func cluster_frame_offset() -> Vector2:
 	return active_cluster_local_origin
+
+func sector_center() -> Vector2:
+	return sector_state.center() if sector_state != null else frame_global_origin
 
 func has_active_cluster() -> bool:
 	return active_cluster_id >= 0
