@@ -447,7 +447,7 @@ static func _build_content_profile(
 		float(content_profile["disturbance_eccentricity_min"]) + 0.01,
 		clampf(float(content_profile["disturbance_eccentricity_max"]), 0.02, 0.85)
 	)
-	content_profile["star_count"] = clampi(int(content_profile["star_count"]), 0, SimConstants.MAX_START_STAR_COUNT)
+	content_profile["star_count"] = clampi(int(content_profile["star_count"]), 0, 3)
 	content_profile["planets_per_star"] = clampi(int(content_profile["planets_per_star"]), 0, SimConstants.MAX_PLANETS_PER_STAR)
 	content_profile["disturbance_body_count"] = clampi(
 		int(content_profile["disturbance_body_count"]),

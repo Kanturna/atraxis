@@ -3,6 +3,7 @@ class_name GalaxyState
 extends RefCounted
 
 const OBJECT_RESIDENCY_POLICY_SCRIPT := preload("res://simulation/object_residency_policy.gd")
+const SECTOR_STATE_SCRIPT := preload("res://simulation/sector_state.gd")
 const TRANSIT_GROUP_STATE_SCRIPT := preload("res://simulation/transit_group_state.gd")
 const WORLD_ENTITY_STATE_SCRIPT := preload("res://simulation/world_entity_state.gd")
 
@@ -15,6 +16,7 @@ var discovered_sector_order: Array = []
 var region_descriptors_by_sector_key: Dictionary = {}
 var candidate_descriptors_by_sector_key: Dictionary = {}
 var cluster_ids_by_sector_key: Dictionary = {}
+var sector_states_by_key: Dictionary = {}
 var transit_order: Array = []
 var transit_objects_by_id: Dictionary = {}
 var transit_group_order: Array = []
@@ -40,6 +42,9 @@ func add_cluster(cluster_state: ClusterState) -> void:
 		var sector_cluster_ids: Array = cluster_ids_by_sector_key[sector_key]
 		if not sector_cluster_ids.has(cluster_state.cluster_id):
 			sector_cluster_ids.append(cluster_state.cluster_id)
+		var sector_state = get_or_create_sector_state(sector_coord)
+		if sector_state != null:
+			sector_state.add_cluster(cluster_state.cluster_id)
 	if primary_cluster_id < 0:
 		primary_cluster_id = cluster_state.cluster_id
 
@@ -99,6 +104,41 @@ func get_cluster_ids_for_sector(sector_coord: Vector2i) -> Array:
 	var cluster_ids: Array = cluster_ids_by_sector_key.get(_sector_key_from_coord(sector_coord), [])
 	return cluster_ids.duplicate()
 
+func get_sector_state(sector_coord: Vector2i):
+	return sector_states_by_key.get(_sector_key_from_coord(sector_coord), null)
+
+func get_or_create_sector_state(sector_coord: Vector2i):
+	var sector_key: String = _sector_key_from_coord(sector_coord)
+	var sector_state = sector_states_by_key.get(sector_key, null)
+	if sector_state != null:
+		return sector_state
+	sector_state = SECTOR_STATE_SCRIPT.new()
+	sector_state.sector_coord = sector_coord
+	sector_state.global_origin = Vector2(
+		float(sector_coord.x) * _sector_scale(),
+		float(sector_coord.y) * _sector_scale()
+	)
+	sector_state.size = _sector_scale()
+	sector_states_by_key[sector_key] = sector_state
+	if not discovered_sector_order.has(sector_key):
+		discovered_sector_order.append(sector_key)
+	return sector_state
+
+func get_sector_states() -> Array:
+	var ordered: Array = []
+	for sector_key in discovered_sector_order:
+		var sector_state = sector_states_by_key.get(sector_key, null)
+		if sector_state != null:
+			ordered.append(sector_state)
+	return ordered
+
+func find_sector_for_global_position(global_position: Vector2) -> Vector2i:
+	var scale: float = maxf(_sector_scale(), 1.0)
+	return Vector2i(
+		int(floor(global_position.x / scale)),
+		int(floor(global_position.y / scale))
+	)
+
 func discover_sector(sector_coord: Vector2i, worldgen):
 	if worldgen == null:
 		return null
@@ -122,8 +162,10 @@ func discover_sector(sector_coord: Vector2i, worldgen):
 	region_descriptors_by_sector_key[sector_key] = descriptor.copy() if descriptor.has_method("copy") else descriptor
 	candidate_descriptors_by_sector_key[sector_key] = stored_candidates
 	cluster_ids_by_sector_key[sector_key] = cluster_ids.duplicate()
-	if not discovered_sector_order.has(sector_key):
-		discovered_sector_order.append(sector_key)
+	_sync_sector_state_from_region_descriptor(descriptor)
+	var sector_state = get_or_create_sector_state(sector_coord)
+	if sector_state != null:
+		sector_state.cluster_ids = cluster_ids.duplicate()
 	return descriptor.copy() if descriptor.has_method("copy") else descriptor
 
 func count_clusters_by_activation_state(state: int) -> int:
@@ -443,3 +485,27 @@ func _resolve_entity_anchor_object_id(entity_state, primary_object_id: String, a
 
 func _sector_key_from_coord(sector_coord: Vector2i) -> String:
 	return "%d:%d" % [sector_coord.x, sector_coord.y]
+
+func _sync_sector_state_from_region_descriptor(region_descriptor) -> void:
+	if region_descriptor == null:
+		return
+	var sector_state = get_or_create_sector_state(region_descriptor.sector_coord)
+	if sector_state == null:
+		return
+	sector_state.sector_seed = int(region_descriptor.region_seed)
+	sector_state.region_archetype = str(region_descriptor.region_archetype)
+	sector_state.density = float(region_descriptor.density)
+	sector_state.void_strength = float(region_descriptor.void_strength)
+	sector_state.bh_richness = float(region_descriptor.bh_richness)
+	sector_state.star_richness = float(region_descriptor.star_richness)
+	sector_state.rare_zone_weight = float(region_descriptor.rare_zone_weight)
+	sector_state.global_origin = Vector2(
+		float(region_descriptor.sector_coord.x) * _sector_scale(),
+		float(region_descriptor.sector_coord.y) * _sector_scale()
+	)
+	sector_state.size = _sector_scale()
+
+func _sector_scale() -> float:
+	if worldgen_config != null:
+		return float(worldgen_config.sector_scale)
+	return SimConstants.DEFAULT_WORLDGEN_SECTOR_SCALE

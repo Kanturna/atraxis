@@ -18,6 +18,7 @@ signal cluster_activation_override_cleared()
 
 var _sim: SimWorld = null
 var _galaxy_state: GalaxyState = null
+var _active_sector_session = null
 var _active_cluster_session: ActiveClusterSession = null
 var _active_macro_sector_session = null
 var _selected_id: int = -1
@@ -157,11 +158,13 @@ func initialize(
 		start_config = null,
 		galaxy_state: GalaxyState = null,
 		active_cluster_session: ActiveClusterSession = null,
-		active_macro_sector_session = null) -> void:
+		active_macro_sector_session = null,
+		active_sector_session = null) -> void:
 	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
 		_sim.collision_occurred.disconnect(_on_collision_occurred)
 	_sim = world
 	_galaxy_state = galaxy_state
+	_active_sector_session = active_sector_session
 	_active_cluster_session = active_cluster_session
 	_active_macro_sector_session = active_macro_sector_session
 	if _sim != null:
@@ -184,6 +187,7 @@ func clear_world_reference() -> void:
 		_sim.collision_occurred.disconnect(_on_collision_occurred)
 	_sim = null
 	_galaxy_state = null
+	_active_sector_session = null
 	_active_cluster_session = null
 	_active_macro_sector_session = null
 	_selected_id = -1
@@ -331,12 +335,13 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 	)
 
 func _build_cluster_diagnostics_lines() -> String:
-	if _galaxy_state == null or _active_cluster_session == null:
+	if _galaxy_state == null or (_active_cluster_session == null and _active_sector_session == null):
 		return ""
-	var active_cluster: ClusterState = _active_cluster_session.active_cluster_state
+	var active_cluster: ClusterState = _active_cluster_session.active_cluster_state if _active_cluster_session != null else null
 	var profile: Dictionary = active_cluster.simulation_profile if active_cluster != null else {}
-	var sector_coord_variant = profile.get("sector_coord", Vector2i.ZERO)
-	var sector_coord: Vector2i = sector_coord_variant if sector_coord_variant is Vector2i else Vector2i.ZERO
+	var sector_coord: Vector2i = _active_sector_session.sector_state.sector_coord \
+		if _active_sector_session != null and _active_sector_session.sector_state != null \
+		else Vector2i.ZERO
 	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	var materialized_bodies: int = _sim.get_active_body_count() if _sim != null else 0
@@ -345,7 +350,7 @@ func _build_cluster_diagnostics_lines() -> String:
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
 		+ "Sector         %s\n" % _format_sector_coord(sector_coord)
-		+ "Archetype      %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else ""))
+		+ "Archetype      %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else (_active_sector_session.sector_state.region_archetype if _active_sector_session != null and _active_sector_session.sector_state != null else "")))
 		+ "Content        %s\n" % str(profile.get("content_archetype", ""))
 		+ "Spawn priority %d\n" % int(profile.get("spawn_priority", 0))
 		+ "Spawn viable   %s\n" % ("yes" if bool(profile.get("spawn_viable", false)) else "no")
@@ -366,15 +371,24 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Clear margin   %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_primary_clearance_margin_au", -1.0)))
 		+ "Start band     %s\n" % _format_layout_metric_au(float(profile.get("layout_reserved_start_band_au", -1.0)))
 		+ "Radius margin  %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_cluster_radius_margin_au", -1.0)))
-		+ "Cluster active  %d\n" % _active_cluster_session.cluster_id
-		+ "Cluster global  %.0f, %.0f\n" % [
-			_active_cluster_session.cluster_global_origin.x,
-			_active_cluster_session.cluster_global_origin.y,
-		]
+		+ "Cluster active  %s\n" % (str(_active_cluster_session.cluster_id) if _active_cluster_session != null else "--")
+		+ "Cluster global  %s\n" % (
+			"%.0f, %.0f" % [
+				_active_cluster_session.cluster_global_origin.x,
+				_active_cluster_session.cluster_global_origin.y,
+			] if _active_cluster_session != null else "--"
+		)
 		+ macro_sector_lines
 	)
 
 func _build_macro_sector_diagnostics_lines() -> String:
+	if _active_sector_session != null and _active_sector_session.sector_state != null:
+		var sector_state = _active_sector_session.sector_state
+		return (
+			"Sector state   %s\n" % ("active" if int(sector_state.activation_state) == 1 else "remote")
+			+ "Sector center  %.0f, %.0f\n" % [sector_state.center().x, sector_state.center().y]
+			+ "Sector systems %s\n" % _format_cluster_id_list(sector_state.cluster_ids)
+		)
 	if _active_macro_sector_session == null or _active_macro_sector_session.descriptor == null:
 		return ""
 	var descriptor = _active_macro_sector_session.descriptor

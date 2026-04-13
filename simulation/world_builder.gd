@@ -27,7 +27,7 @@ static func build_runtime_from_galaxy_state(
 		galaxy_state: GalaxyState,
 		target_cluster_id: int = -1) -> GalaxyRuntime:
 	var runtime := GalaxyRuntime.new()
-	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
+	if galaxy_state == null:
 		return runtime
 	var resolved_cluster_id: int = target_cluster_id if target_cluster_id >= 0 else galaxy_state.primary_cluster_id
 	runtime.initialize(galaxy_state, resolved_cluster_id)

@@ -9,10 +9,12 @@ const CANDIDATE_DESCRIPTOR_SCRIPT := preload("res://simulation/cluster_candidate
 const WORLDGEN_MAPPING_SCRIPT := preload("res://simulation/galaxy_worldgen_mapping.gd")
 const WORLDGEN_CONFIG_SCRIPT := preload("res://simulation/galaxy_worldgen_config.gd")
 
-const MAX_CLUSTER_CANDIDATES_PER_SECTOR_V1: int = 3
+const MAX_CLUSTER_CANDIDATES_PER_SECTOR_V1: int = 1
 const SECTOR_ID_OFFSET: int = 524_288
 const SECTOR_ID_RANGE: int = 1_048_576
-const STARTER_FALLBACK_CANDIDATE_INDEX: int = 3
+const STARTER_FALLBACK_CANDIDATE_INDEX: int = 0
+const PRIMARY_SYSTEM_MIN_DISTANCE_FACTOR: float = 0.45
+const PRIMARY_SYSTEM_SECTOR_INSET_FACTOR: float = 0.20
 
 var config = null
 
@@ -113,22 +115,25 @@ func build_cluster_candidates(
 	var candidates: Array = []
 	if region_descriptor == null:
 		return candidates
-	for candidate_index in range(MAX_CLUSTER_CANDIDATES_PER_SECTOR_V1):
-		var candidate_rng := RandomNumberGenerator.new()
-		candidate_rng.seed = _candidate_seed(galaxy_seed, region_descriptor.sector_coord, candidate_index)
-		var threshold: float = WORLDGEN_MAPPING_SCRIPT.candidate_slot_threshold(
-			region_descriptor,
-			candidate_index
-		)
-		if candidate_rng.randf() > threshold:
-			continue
-		candidates.append(_build_cluster_candidate(
-			galaxy_seed,
-			region_descriptor,
-			candidate_index,
-			candidate_rng,
-			candidates
-		))
+	var candidate_index: int = 0
+	var candidate_rng := RandomNumberGenerator.new()
+	candidate_rng.seed = _candidate_seed(galaxy_seed, region_descriptor.sector_coord, candidate_index)
+	var threshold: float = WORLDGEN_MAPPING_SCRIPT.candidate_slot_threshold(
+		region_descriptor,
+		candidate_index
+	)
+	if candidate_rng.randf() > threshold:
+		return candidates
+	var candidate_descriptor = _build_cluster_candidate(
+		galaxy_seed,
+		region_descriptor,
+		candidate_index,
+		candidate_rng,
+		[]
+	)
+	if not _candidate_survives_neighbor_clearance(galaxy_seed, region_descriptor, candidate_descriptor):
+		return candidates
+	candidates.append(candidate_descriptor)
 	return candidates
 
 func build_starter_fallback_candidate(galaxy_seed: int):
@@ -224,12 +229,7 @@ func _build_cluster_candidate(
 	descriptor.rare_zone_weight = region_descriptor.rare_zone_weight
 	descriptor.scrap_potential = region_descriptor.scrap_potential
 	descriptor.life_potential = region_descriptor.life_potential
-	descriptor.bh_count = WORLDGEN_MAPPING_SCRIPT.candidate_bh_count(
-		config,
-		region_descriptor,
-		bh_noise,
-		content_profile
-	)
+	descriptor.bh_count = 1
 	descriptor.bh_spacing_au = WORLDGEN_MAPPING_SCRIPT.candidate_bh_spacing_au(
 		config,
 		region_descriptor,
@@ -288,7 +288,10 @@ func _sample_candidate_local_center(candidate_rng: RandomNumberGenerator, candid
 	)
 
 func _sector_candidate_padding(candidate_radius: float) -> float:
-	return minf(maxf(config.sector_scale * 0.16, candidate_radius * 0.30), config.sector_scale * 0.42)
+	return minf(
+		maxf(config.sector_scale * PRIMARY_SYSTEM_SECTOR_INSET_FACTOR, candidate_radius * 1.5),
+		config.sector_scale * 0.40
+	)
 
 func _candidate_clearance_margin(local_position: Vector2, candidate_descriptor, existing_candidates: Array) -> float:
 	var best_margin: float = INF
@@ -311,6 +314,84 @@ func _candidate_clearance_distance(candidate_descriptor, other_candidate) -> flo
 			or _candidate_requires_readability_clearance(other_candidate) \
 		else 0.85
 	return (candidate_descriptor.radius + other_candidate.radius) * readability_multiplier
+
+func _candidate_survives_neighbor_clearance(
+		galaxy_seed: int,
+		region_descriptor,
+		candidate_descriptor) -> bool:
+	if candidate_descriptor == null or region_descriptor == null:
+		return false
+	var own_priority: int = _candidate_priority(
+		galaxy_seed,
+		region_descriptor.sector_coord,
+		candidate_descriptor.cluster_seed
+	)
+	for offset_y in range(-1, 2):
+		for offset_x in range(-1, 2):
+			if offset_x == 0 and offset_y == 0:
+				continue
+			var neighbor_sector_coord: Vector2i = region_descriptor.sector_coord + Vector2i(offset_x, offset_y)
+			var neighbor_candidate = _build_primary_sector_candidate_without_neighbor_clearance(
+				galaxy_seed,
+				neighbor_sector_coord
+			)
+			if neighbor_candidate == null:
+				continue
+			var min_distance: float = _inter_sector_candidate_clearance_distance(
+				candidate_descriptor,
+				neighbor_candidate
+			)
+			if candidate_descriptor.global_center.distance_to(neighbor_candidate.global_center) >= min_distance:
+				continue
+			var neighbor_priority: int = _candidate_priority(
+				galaxy_seed,
+				neighbor_sector_coord,
+				int(neighbor_candidate.cluster_seed)
+			)
+			if neighbor_priority > own_priority:
+				return false
+			if neighbor_priority == own_priority and _sector_coord_sort_key(neighbor_sector_coord) < _sector_coord_sort_key(region_descriptor.sector_coord):
+				return false
+	return true
+
+func _build_primary_sector_candidate_without_neighbor_clearance(
+		galaxy_seed: int,
+		sector_coord: Vector2i):
+	var region_descriptor = describe_region(galaxy_seed, sector_coord)
+	var candidate_index: int = 0
+	var candidate_rng := RandomNumberGenerator.new()
+	candidate_rng.seed = _candidate_seed(galaxy_seed, sector_coord, candidate_index)
+	var threshold: float = WORLDGEN_MAPPING_SCRIPT.candidate_slot_threshold(region_descriptor, candidate_index)
+	if candidate_rng.randf() > threshold:
+		return null
+	return _build_cluster_candidate(
+		galaxy_seed,
+		region_descriptor,
+		candidate_index,
+		candidate_rng,
+		[]
+	)
+
+func _inter_sector_candidate_clearance_distance(candidate_descriptor, other_candidate) -> float:
+	if candidate_descriptor == null or other_candidate == null:
+		return INF
+	var sector_distance_floor: float = config.sector_scale * PRIMARY_SYSTEM_MIN_DISTANCE_FACTOR
+	return maxf(
+		sector_distance_floor,
+		candidate_descriptor.radius + other_candidate.radius
+	)
+
+func _candidate_priority(galaxy_seed: int, sector_coord: Vector2i, cluster_seed: int) -> int:
+	return _mix_many([
+		galaxy_seed,
+		sector_coord.x,
+		sector_coord.y,
+		cluster_seed,
+		77_917,
+	])
+
+func _sector_coord_sort_key(sector_coord: Vector2i) -> int:
+	return (sector_coord.x + SECTOR_ID_OFFSET) * SECTOR_ID_RANGE + (sector_coord.y + SECTOR_ID_OFFSET)
 
 func _candidate_requires_readability_clearance(candidate_descriptor) -> bool:
 	if candidate_descriptor == null:

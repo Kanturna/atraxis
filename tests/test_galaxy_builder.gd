@@ -21,7 +21,7 @@ func test_public_worldgen_builder_is_deterministic_for_same_seed() -> void:
 	assert_eq(galaxy_a.galaxy_seed, galaxy_b.galaxy_seed, "same seed should rebuild the same galaxy seed")
 	assert_eq(galaxy_a.primary_cluster_id, galaxy_b.primary_cluster_id, "primary cluster selection should stay deterministic")
 	assert_eq(galaxy_a.discovered_sector_order, galaxy_b.discovered_sector_order, "bootstrap sector discovery order should stay deterministic")
-	assert_eq(galaxy_a.get_discovered_sector_count(), 9, "public bootstrap should discover the 3x3 origin sector neighborhood")
+	assert_eq(galaxy_a.get_discovered_sector_count(), 25, "public bootstrap should discover the 5x5 origin sector neighborhood for the sector prototype")
 	assert_eq(galaxy_a.get_discovered_sector_count(), galaxy_b.get_discovered_sector_count(), "same config should discover the same sector count")
 	assert_eq(galaxy_a.get_cluster_ids(), galaxy_b.get_cluster_ids(), "same config should register the same cluster ids")
 	assert_gt(galaxy_a.get_cluster_count(), 0, "public worldgen should bootstrap at least one startable cluster")
@@ -127,7 +127,7 @@ func test_sector_discovery_is_idempotent_and_keeps_cluster_registry_stable() -> 
 
 	var galaxy_state: GalaxyState = WorldBuilder.build_galaxy_state_from_config(config)
 	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(galaxy_state.worldgen_config)
-	var sector_coord := Vector2i(2, -1)
+	var sector_coord := Vector2i(3, -1)
 	var sectors_before: int = galaxy_state.get_discovered_sector_count()
 	var clusters_before: int = galaxy_state.get_cluster_count()
 
@@ -158,7 +158,7 @@ func test_sector_discovery_is_idempotent_and_keeps_cluster_registry_stable() -> 
 		_assert_candidate_descriptors_equivalent(first_candidate, second_candidate)
 		assert_true(
 			first_candidate.candidate_index >= 0 and first_candidate.candidate_index < GALAXY_WORLDGEN_SCRIPT.MAX_CLUSTER_CANDIDATES_PER_SECTOR_V1,
-			"candidate indices should stay inside the explicit V1 0..2 cluster-candidate limit"
+			"candidate indices should stay inside the explicit V1 single-system candidate limit"
 		)
 
 func test_sector_descriptor_getters_return_defensive_copies() -> void:
@@ -249,7 +249,7 @@ func test_registered_worldgen_clusters_keep_candidate_radius_as_authoritative_ex
 		checked_clusters += 1
 	assert_gt(checked_clusters, 0, "the radius-authority test should inspect at least one registered worldgen cluster")
 
-func test_same_sector_candidates_keep_a_small_clearance_margin_in_v1() -> void:
+func test_neighboring_sector_candidates_keep_sparse_primary_system_clearance_in_v1() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 1664
 	config.sector_scale = 180.0 * SimConstants.AU
@@ -261,40 +261,52 @@ func test_same_sector_candidates_keep_a_small_clearance_margin_in_v1() -> void:
 
 	var worldgen_config = GalaxyBuilder._build_public_worldgen_config(config)
 	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
-	var found_multi_candidate_sector: bool = false
-	var found_strict_clearance_pair: bool = false
+	var found_neighbor_pair: bool = false
 	for y in range(-12, 13):
 		for x in range(-12, 13):
+			var sector_coord := Vector2i(x, y)
 			var candidates: Array = worldgen.build_cluster_candidates(
 				config.seed,
-				worldgen.describe_region(config.seed, Vector2i(x, y))
+				worldgen.describe_region(config.seed, sector_coord)
 			)
-			if candidates.size() < 2:
+			assert_lte(
+				candidates.size(),
+				1,
+				"phase-1 worldgen should cap each rectangular sector at one primary system candidate"
+			)
+			if candidates.is_empty():
 				continue
-			found_multi_candidate_sector = true
-			for left_index in range(candidates.size()):
-				for right_index in range(left_index + 1, candidates.size()):
-					var left_candidate = candidates[left_index]
-					var right_candidate = candidates[right_index]
-					var left_layout_targets: Dictionary = left_candidate.descriptor.get("layout_targets", {})
-					var right_layout_targets: Dictionary = right_candidate.descriptor.get("layout_targets", {})
-					var requires_strict_clearance: bool = bool(left_layout_targets.get("readability_clearance", false)) \
-						or bool(right_layout_targets.get("readability_clearance", false))
-					var required_clearance: float = (left_candidate.radius + right_candidate.radius) \
-						* (1.0 if requires_strict_clearance else 0.85)
-					assert_gte(
-						left_candidate.global_center.distance_to(right_candidate.global_center),
-						required_clearance - 0.001,
-						"same-sector cluster candidates should keep the stronger readability clearance instead of reading like one merged center"
+			for neighbor_y in range(y - 1, y + 2):
+				for neighbor_x in range(x - 1, x + 2):
+					var neighbor_coord := Vector2i(neighbor_x, neighbor_y)
+					if neighbor_coord == sector_coord:
+						continue
+					if neighbor_coord.x < sector_coord.x or (neighbor_coord.x == sector_coord.x and neighbor_coord.y < sector_coord.y):
+						continue
+					var neighbor_candidates: Array = worldgen.build_cluster_candidates(
+						config.seed,
+						worldgen.describe_region(config.seed, neighbor_coord)
 					)
-					if requires_strict_clearance:
-						found_strict_clearance_pair = true
-			if found_multi_candidate_sector:
-				break
-		if found_multi_candidate_sector:
-			break
-	assert_true(found_multi_candidate_sector, "dense worldgen settings should expose at least one multi-candidate sector for the clearance test")
-	assert_true(found_strict_clearance_pair, "dense worldgen settings should expose at least one readability-sensitive candidate pair for the stricter clearance tier")
+					assert_lte(
+						neighbor_candidates.size(),
+						1,
+						"phase-1 worldgen should cap neighboring sectors at one primary system candidate as well"
+					)
+					if neighbor_candidates.is_empty():
+						continue
+					found_neighbor_pair = true
+					var candidate = candidates[0]
+					var neighbor_candidate = neighbor_candidates[0]
+					var required_clearance: float = maxf(
+						worldgen_config.sector_scale * GALAXY_WORLDGEN_SCRIPT.PRIMARY_SYSTEM_MIN_DISTANCE_FACTOR,
+						candidate.radius + neighbor_candidate.radius
+					)
+					assert_gte(
+						candidate.global_center.distance_to(neighbor_candidate.global_center),
+						required_clearance - 0.001,
+						"neighboring rectangular sectors should keep their primary systems visibly separated instead of collapsing into one local bubble"
+					)
+	assert_true(found_neighbor_pair, "dense worldgen settings should still expose at least one neighboring pair of primary systems for the sparse-spacing test")
 
 func test_worldgen_candidate_spacing_floors_protect_friendly_and_hostile_cluster_layouts() -> void:
 	var config = START_CONFIG_SCRIPT.new()
@@ -520,7 +532,7 @@ func test_worldgen_bootstrap_discovers_origin_neighborhood_and_materializes_only
 	var visible_black_holes: int = session.sim_world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE)
 	var active_cluster_black_holes: int = session.active_cluster_state.get_objects_by_kind("black_hole").size()
 
-	assert_eq(galaxy_state.get_discovered_sector_count(), 9, "bootstrap should discover exactly the 3x3 origin neighborhood")
+	assert_eq(galaxy_state.get_discovered_sector_count(), 25, "bootstrap should discover exactly the 5x5 origin neighborhood for the sector prototype")
 	assert_gt(galaxy_state.get_cluster_count(), 1, "dense bootstrap settings should produce multiple registered clusters")
 	assert_eq(visible_black_holes, active_cluster_black_holes, "the live sim should materialize exactly the active cluster BH share")
 	assert_gt(total_black_holes, visible_black_holes, "registered galaxy truth should contain more BHs than the active local projection")

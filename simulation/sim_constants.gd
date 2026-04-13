@@ -93,7 +93,7 @@ const MAX_GALAXY_BLACK_HOLES: int = 1200            # separate cap for galaxy to
 # --- Sector worldgen ---
 # Worldgen V1 describes the galaxy as deterministic square sectors. `sector_scale`
 # is the edge length of one sector in global sim/world coordinates.
-const DEFAULT_WORLDGEN_SECTOR_SCALE: float = 180.0 * AU
+const DEFAULT_WORLDGEN_SECTOR_SCALE: float = 720.0 * AU
 const MIN_WORLDGEN_SECTOR_SCALE: float = 60.0 * AU
 const MAX_WORLDGEN_SECTOR_SCALE: float = 720.0 * AU
 const DEFAULT_WORLDGEN_CLUSTER_DENSITY: float = 0.58

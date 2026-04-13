@@ -71,17 +71,8 @@ static func _build_worldgen_main_universe(
 		galaxy_state: GalaxyState,
 		worldgen_config) -> void:
 	var worldgen := WORLDGEN_SCRIPT.new(worldgen_config)
-	discover_sector_neighborhood(galaxy_state, worldgen, Vector2i.ZERO, 1)
-	if galaxy_state.get_cluster_count() == 0:
-		var fallback_candidate = worldgen.build_starter_fallback_candidate(galaxy_state.galaxy_seed)
-		galaxy_state.add_cluster(_build_cluster_state_from_candidate(worldgen_config, fallback_candidate))
+	discover_sector_neighborhood(galaxy_state, worldgen, Vector2i.ZERO, 2)
 	var primary_cluster: ClusterState = _find_preferred_spawn_cluster(galaxy_state)
-	if primary_cluster == null:
-		var fallback_candidate = worldgen.build_starter_fallback_candidate(galaxy_state.galaxy_seed)
-		var fallback_cluster: ClusterState = _build_cluster_state_from_candidate(worldgen_config, fallback_candidate)
-		if not galaxy_state.has_cluster(fallback_cluster.cluster_id):
-			galaxy_state.add_cluster(fallback_cluster)
-		primary_cluster = galaxy_state.get_cluster(fallback_cluster.cluster_id)
 	if primary_cluster != null:
 		galaxy_state.primary_cluster_id = primary_cluster.cluster_id
 
@@ -613,6 +604,7 @@ static func _find_preferred_spawn_cluster(galaxy_state: GalaxyState) -> ClusterS
 	if galaxy_state == null:
 		return null
 	var matched_cluster: ClusterState = null
+	var best_is_hostile: bool = true
 	var best_primary_clearance_margin: float = -INF
 	var best_cluster_radius_margin: float = -INF
 	var best_spawn_priority: int = -9_999
@@ -620,6 +612,8 @@ static func _find_preferred_spawn_cluster(galaxy_state: GalaxyState) -> ClusterS
 	for cluster_state in galaxy_state.get_clusters():
 		if not bool(cluster_state.simulation_profile.get("spawn_viable", false)):
 			continue
+		var archetype: String = str(cluster_state.simulation_profile.get("content_archetype", ""))
+		var is_hostile: bool = WORLDGEN_MAPPING_SCRIPT.is_hostile_cluster_archetype(archetype)
 		var primary_clearance_margin: float = float(cluster_state.simulation_profile.get(
 			"layout_primary_clearance_margin_au",
 			-INF
@@ -631,20 +625,27 @@ static func _find_preferred_spawn_cluster(galaxy_state: GalaxyState) -> ClusterS
 		var spawn_priority: int = int(cluster_state.simulation_profile.get("spawn_priority", 0))
 		var distance: float = cluster_state.global_center.length()
 		if matched_cluster == null \
-				or primary_clearance_margin > best_primary_clearance_margin + 0.001 \
-				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+				or (best_is_hostile and not is_hostile) \
+				or (best_is_hostile == is_hostile
+					and primary_clearance_margin > best_primary_clearance_margin + 0.001) \
+				or (best_is_hostile == is_hostile
+					and absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
 					and cluster_radius_margin > best_cluster_radius_margin + 0.001) \
-				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+				or (best_is_hostile == is_hostile
+					and absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
 					and absf(cluster_radius_margin - best_cluster_radius_margin) <= 0.001
 					and spawn_priority > best_spawn_priority) \
-				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+				or (best_is_hostile == is_hostile
+					and absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
 					and absf(cluster_radius_margin - best_cluster_radius_margin) <= 0.001
 					and spawn_priority == best_spawn_priority
 					and distance < best_distance) \
-				or (absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
+				or (best_is_hostile == is_hostile
+					and absf(primary_clearance_margin - best_primary_clearance_margin) <= 0.001
 					and absf(cluster_radius_margin - best_cluster_radius_margin) <= 0.001
 					and spawn_priority == best_spawn_priority and is_equal_approx(distance, best_distance)
 					and cluster_state.cluster_id < matched_cluster.cluster_id):
+			best_is_hostile = is_hostile
 			best_primary_clearance_margin = primary_clearance_margin
 			best_cluster_radius_margin = cluster_radius_margin
 			best_spawn_priority = spawn_priority

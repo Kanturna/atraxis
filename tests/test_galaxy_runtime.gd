@@ -131,23 +131,15 @@ func test_runtime_cluster_switch_writes_back_and_reloads_from_snapshot() -> void
 	)
 
 func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic_body() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
-	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(3)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var first_cluster_id: int = 0
+	var first_cluster: ClusterState = galaxy_state.get_cluster(first_cluster_id)
 
 	runtime.step(SimConstants.FIXED_DT)
 	var first_star: SimBody = runtime.get_active_sim_world().get_star()
 	var saved_object_id: String = first_star.persistent_object_id
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
+	var second_cluster_id: int = 1
 	runtime.activate_cluster(second_cluster_id)
 
 	var simplified_star: ClusterObjectState = first_cluster.get_object(saved_object_id)
@@ -302,65 +294,75 @@ func test_macro_sector_zone_step_budget_advances_ambient_each_tick_and_far_in_ba
 		"the runtime should still avoid spending simplified steps on non-members"
 	)
 
-func test_focus_promotion_within_macro_sector_preserves_member_set() -> void:
-	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
-	var descriptor_before = runtime.get_active_macro_sector()
-	var promoted_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
-		runtime,
-		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT
+func test_focus_context_keeps_active_sector_stable_within_sector_bounds() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var initial_sector_state = runtime.get_active_sector_state()
+	assert_not_null(initial_sector_state, "the sector continuity test needs an active rectangular sector")
+	assert_not_null(runtime.active_cluster_session, "the sector continuity test needs a loaded contained system")
+	var initial_sector_coord: Vector2i = initial_sector_state.sector_coord
+	var initial_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var in_sector_focus: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 0.78,
+		initial_sector_state.size * 0.24
 	)
 
-	runtime.activate_cluster(promoted_cluster_id)
-
-	var descriptor_after = runtime.get_active_macro_sector()
-	var member_ids_before: Array = descriptor_before.member_cluster_ids.duplicate()
-	var member_ids_after: Array = descriptor_after.member_cluster_ids.duplicate()
-	member_ids_before.sort()
-	member_ids_after.sort()
-
-	assert_eq(member_ids_after, member_ids_before, "focus promotion inside the macro sector should preserve the existing member set")
-	assert_eq(
-		descriptor_after.anchor_cluster_id,
-		descriptor_before.anchor_cluster_id,
-		"promoting an in-sector neighbor should keep the original macro sector anchor instead of rebuilding a new one"
-	)
-	assert_eq(descriptor_after.focus_cluster_id, promoted_cluster_id, "focus promotion should update the descriptor focus id")
-	assert_eq(runtime.active_cluster_session.cluster_id, promoted_cluster_id, "focus promotion should swap the active cluster session to the requested in-sector neighbor")
-	assert_eq(runtime.get_cluster_macro_sector_zone(promoted_cluster_id), MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS, "the promoted cluster should become the new focus zone")
-	assert_true(
-		runtime.is_cluster_in_active_macro_sector(0),
-		"the old focus cluster should remain in the active macro sector after an in-sector promotion"
-	)
-	assert_eq(
-		galaxy_state.get_cluster(0).activation_state,
-		ClusterActivationState.State.SIMPLIFIED,
-		"the previous focus cluster should demote to simplified instead of dropping out of the macro sector"
-	)
-
-func test_focus_promotion_within_macro_sector_preserves_far_tick_progress() -> void:
-	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(5)
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
-	var promoted_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
-		runtime,
-		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT
-	)
-	var far_cluster_id: int = _find_first_cluster_in_macro_sector_zone(
-		runtime,
-		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR
-	)
-
-	for _i in range(3):
+	runtime.update_focus_context(in_sector_focus, initial_sector_state.size * 0.35)
+	for _i in range(4):
 		runtime.step(SimConstants.FIXED_DT)
 
-	runtime.activate_cluster(promoted_cluster_id)
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		initial_sector_coord,
+		"camera movement inside one rectangular sector should not trigger a top-level sector switch"
+	)
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		initial_cluster_id,
+		"the contained system should stay loaded while the camera moves around inside the same sector"
+	)
+
+func test_focus_context_switches_active_sector_once_when_crossing_sector_boundary() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var initial_sector_state = runtime.get_active_sector_state()
+	assert_not_null(initial_sector_state, "the sector-boundary test needs an active rectangular sector")
+	var initial_sector_coord: Vector2i = initial_sector_state.sector_coord
+	var target_sector_coord := initial_sector_coord + Vector2i(1, 0)
+	var crossed_focus: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 1.5,
+		initial_sector_state.size * 0.5
+	)
+
+	runtime.update_focus_context(crossed_focus, 0.0)
 	runtime.step(SimConstants.FIXED_DT)
 
-	assert_almost_eq(
-		galaxy_state.get_cluster(far_cluster_id).simulated_time,
-		SimConstants.FIXED_DT * 4.0,
-		0.0001,
-		"in-sector focus promotion should not restart the far-zone cadence and starve far updates"
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		target_sector_coord,
+		"crossing a rectangular sector boundary should switch the top-level active sector exactly at the new tile"
+	)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		target_sector_coord,
+		"once the camera is inside the new sector, follow-up steps should keep the new top-level sector stable"
 	)
 
 func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_frozen() -> void:
@@ -413,99 +415,43 @@ func test_macro_sector_zone_rules_keep_ambient_planets_live_and_far_planets_froz
 		"far simplified stepping should also avoid any fragment generation"
 	)
 
-func test_never_visited_ambient_cluster_seeds_full_simplified_snapshot_from_blueprint() -> void:
+func test_focus_context_can_enter_empty_sector_without_creating_a_fallback_cluster() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 1
+	config.seed = 911
+	config.cluster_density = 0.18
+	config.void_strength = 0.86
+	config.bh_richness = 0.22
+	config.star_richness = 0.18
+	config.rare_zone_frequency = 0.05
 
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
-	var active_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var ambient_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, active_cluster_id)
-	var ambient_cluster: ClusterState = runtime.galaxy_state.get_cluster(ambient_cluster_id)
+	var current_sector_coord: Vector2i = runtime.get_active_sector_state().sector_coord
+	var empty_sector_coord: Vector2i = _find_empty_discovered_sector_coord(runtime.galaxy_state, current_sector_coord)
 
-	assert_eq(
-		ambient_cluster.activation_state,
-		ClusterActivationState.State.SIMPLIFIED,
-		"macro-sector ambient neighbors should already be promoted into simplified state"
-	)
-	assert_true(
-		bool(ambient_cluster.simulation_profile.get("has_runtime_snapshot", false)),
-		"ambient neighbors should be seeded with a coherent runtime snapshot before first activation"
-	)
-	assert_eq(
-		ambient_cluster.get_objects_by_kind("star").size(),
-		config.star_count,
-		"ambient snapshot seeding should persist the remote cluster's star content"
-	)
-	assert_eq(
-		ambient_cluster.get_objects_by_kind("planet").size(),
-		config.star_count * config.planets_per_star,
-		"ambient snapshot seeding should persist the remote cluster's planet content"
-	)
-	assert_eq(
-		ambient_cluster.get_objects_by_kind("asteroid").size(),
-		config.disturbance_body_count,
-		"ambient snapshot seeding should keep deterministic disturbance bodies instead of leaving a BH-only remote registry"
+	assert_ne(
+		empty_sector_coord,
+		Vector2i(9_999_999, 9_999_999),
+		"the empty-sector test needs at least one discovered sector without a primary system"
 	)
 
-func test_focus_relevance_does_not_switch_active_cluster_without_explicit_request() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
-	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
-	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
-
-	runtime.update_focus_context(second_cluster.global_center, 0.0)
+	var sector_state = runtime.galaxy_state.get_sector_state(empty_sector_coord)
+	runtime.update_focus_context(sector_state.center(), sector_state.size * 0.35)
 	runtime.step(SimConstants.FIXED_DT)
 
 	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		first_cluster_id,
-		"focus relevance alone should no longer switch the active cluster"
+		runtime.get_active_sector_state().sector_coord,
+		empty_sector_coord,
+		"camera focus should be able to enter an empty rectangular sector directly"
 	)
-	assert_eq(
-		second_cluster.activation_state,
-		ClusterActivationState.State.SIMPLIFIED,
-		"the hovered remote cluster should become relevant for previews without turning active"
+	assert_null(
+		runtime.active_cluster_session,
+		"entering an empty sector should not synthesize a fallback cluster bubble"
 	)
-
-func test_focus_relevance_keeps_remote_cluster_in_preview_state_until_zoom_or_entry_threshold() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
-	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
-	var second_cluster: ClusterState = runtime.galaxy_state.get_cluster(second_cluster_id)
-	var focus_position: Vector2 = second_cluster.global_center + Vector2(second_cluster.get_authoritative_radius() * 1.1, 0.0)
-	var wide_visible_radius: float = second_cluster.get_authoritative_radius() * 2.0
-
-	runtime.update_focus_context(focus_position, wide_visible_radius)
-	runtime.step(SimConstants.FIXED_DT)
-
+	assert_not_null(runtime.get_active_sim_world(), "empty active sectors should still expose a valid top-level SimWorld shell")
 	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		first_cluster_id,
-		"wide zoom and outside-cluster focus should keep the nearest remote cluster in preview instead of switching immediately"
+		runtime.get_active_sim_world().bodies.size(),
+		0,
+		"empty active sectors should stay empty instead of inventing system content"
 	)
 
 func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays_relevant() -> void:
@@ -543,7 +489,7 @@ func test_focus_relevance_keeps_nearest_remote_cluster_simplified_while_it_stays
 		"relevant simplified clusters should keep refreshing their relevance timestamp"
 	)
 
-func test_activating_a_never_visited_simplified_remote_cluster_materializes_planets_from_blueprint_content() -> void:
+func test_activating_a_never_visited_remote_cluster_materializes_planets_from_blueprint_content() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 1337
 	config.cluster_density = 0.92
@@ -563,28 +509,12 @@ func test_activating_a_never_visited_simplified_remote_cluster_materializes_plan
 			continue
 		if int(cluster_state.simulation_profile.get("planets_per_star", 0)) <= 0:
 			continue
+		if cluster_state.last_activated_runtime_time >= 0.0:
+			continue
 		target_cluster = cluster_state
 		break
 
 	assert_not_null(target_cluster, "the activation regression needs a remote star-bearing cluster with planets")
-
-	runtime.update_focus_context(target_cluster.global_center, target_cluster.get_authoritative_radius())
-	runtime.step(SimConstants.FIXED_DT)
-
-	assert_eq(
-		target_cluster.activation_state,
-		ClusterActivationState.State.SIMPLIFIED,
-		"hovering a remote star-bearing cluster should promote it into simplified preview state before activation"
-	)
-	assert_true(
-		bool(target_cluster.simulation_profile.get("has_runtime_snapshot", false)),
-		"the regression setup expects the remote cluster to have received a runtime snapshot before first activation"
-	)
-	assert_lt(
-		target_cluster.last_activated_runtime_time,
-		0.0,
-		"the bug only applies to clusters that have never been active before activation"
-	)
 
 	runtime.activate_cluster(target_cluster.cluster_id)
 
@@ -596,114 +526,76 @@ func test_activating_a_never_visited_simplified_remote_cluster_materializes_plan
 	assert_gt(
 		active_planets.size(),
 		0,
-		"activating a never-visited simplified remote cluster should materialize its planet content instead of loading a BH-only snapshot"
+		"activating a never-visited remote cluster should materialize its planet content instead of loading a BH-only snapshot"
 	)
 
-func test_manual_activation_request_switches_cluster_without_focus_rollback() -> void:
+func test_active_cluster_stays_loaded_across_same_sector_camera_motion() -> void:
 	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
 
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
-	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
-
-	runtime.update_focus_context(first_cluster.global_center, 0.0)
-	assert_true(
-		runtime.request_cluster_activation(second_cluster_id),
-		"manual activation requests should be accepted for non-active clusters"
-	)
-
-	runtime.step(SimConstants.FIXED_DT)
-
-	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"manual activation requests should switch the active cluster on the next runtime step"
-	)
-
-	var grace_steps: int = int(ceil(
-		SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD / SimConstants.FIXED_DT
-	)) - 1
-	for _i in range(maxi(grace_steps, 0)):
-		runtime.step(SimConstants.FIXED_DT)
-
-	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"manual activation should remain on the explicitly requested cluster during the hold window"
-	)
-
-	runtime.step(SimConstants.FIXED_DT)
-
-	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"without automatic focus switching, the requested cluster should stay active after the hold window ends"
-	)
-
-func test_activation_override_pins_cluster_until_cleared() -> void:
-	var config = START_CONFIG_SCRIPT.new()
-	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
-	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
-	config.black_hole_count = 9
-	config.galaxy_cluster_count = 3
-	config.star_count = 1
-	config.planets_per_star = 1
-	config.disturbance_body_count = 0
-
-	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
-	var first_cluster_id: int = runtime.active_cluster_session.cluster_id
-	var first_cluster: ClusterState = runtime.galaxy_state.get_cluster(first_cluster_id)
-	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, first_cluster_id)
-
-	runtime.update_focus_context(first_cluster.global_center, 0.0)
-	assert_true(
-		runtime.request_cluster_activation_override(second_cluster_id),
-		"override requests should be accepted for valid clusters"
-	)
-
-	runtime.step(SimConstants.FIXED_DT)
-
-	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"override requests should switch the active cluster even against the current focus"
-	)
-	assert_true(runtime.has_cluster_activation_override(), "override state should stay active until explicitly cleared")
-	assert_eq(
-		runtime.get_cluster_activation_override_id(),
-		second_cluster_id,
-		"runtime should expose which cluster is currently pinned by override"
-	)
-
-	var steps_past_grace: int = int(ceil(
-		(SimConstants.CLUSTER_MANUAL_ACTIVATION_GRACE_PERIOD + SimConstants.FIXED_DT) / SimConstants.FIXED_DT
+	var initial_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var sector_state = runtime.get_active_sector_state()
+	var steps_to_cover_unload_delay: int = int(ceil(
+		SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY / SimConstants.FIXED_DT
 	)) + 2
-	for _i in range(steps_past_grace):
+
+	for step_index in range(steps_to_cover_unload_delay):
+		var blend: float = float(step_index) / maxf(float(steps_to_cover_unload_delay - 1), 1.0)
+		var focus_position: Vector2 = sector_state.global_origin + Vector2(
+			lerpf(sector_state.size * 0.20, sector_state.size * 0.80, blend),
+			sector_state.size * 0.55
+		)
+		runtime.update_focus_context(focus_position, sector_state.size * 0.40)
 		runtime.step(SimConstants.FIXED_DT)
 
 	assert_eq(
 		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"persistent overrides should keep the pinned cluster active after the temporary manual grace period"
+		initial_cluster.cluster_id,
+		"camera motion inside one active sector should not eject the contained system out of the loaded session"
 	)
-
-	runtime.clear_cluster_activation_override()
-	runtime.step(SimConstants.FIXED_DT)
-
-	assert_false(runtime.has_cluster_activation_override(), "override state should clear cleanly")
 	assert_eq(
-		runtime.active_cluster_session.cluster_id,
-		second_cluster_id,
-		"clearing the override should not implicitly switch the active cluster anymore"
+		initial_cluster.activation_state,
+		ClusterActivationState.State.ACTIVE,
+		"the contained system should stay ACTIVE for the full active-sector session"
 	)
+
+func test_activate_sector_can_enter_empty_space_without_fallback_cluster() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 911
+	config.cluster_density = 0.18
+	config.void_strength = 0.86
+	config.bh_richness = 0.22
+	config.star_richness = 0.18
+	config.rare_zone_frequency = 0.05
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var current_sector_coord: Vector2i = runtime.get_active_sector_state().sector_coord
+	var empty_sector_coord: Vector2i = _find_empty_discovered_sector_coord(runtime.galaxy_state, current_sector_coord)
+
+	assert_ne(
+		empty_sector_coord,
+		Vector2i(9_999_999, 9_999_999),
+		"the empty-sector activation test needs a discovered sector without a primary system"
+	)
+
+	runtime.activate_sector(empty_sector_coord)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		empty_sector_coord,
+		"manual sector activation should allow entering a large empty tile directly"
+	)
+	assert_null(
+		runtime.active_cluster_session,
+		"manual sector activation should keep empty sectors truly empty instead of creating a fallback system"
+	)
+	assert_eq(runtime.get_active_sim_world().bodies.size(), 0, "empty active sectors should not materialize any bodies")
 
 func test_simplified_cluster_unloads_after_idle_delay() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
@@ -1492,6 +1384,7 @@ func _make_manual_cluster(cluster_id: int, global_center: Vector2, radius: float
 	cluster_state.cluster_seed = 10_000 + cluster_id
 	cluster_state.classification = "test_cluster"
 	cluster_state.activation_state = ClusterActivationState.State.UNLOADED
+	cluster_state.simulation_profile["sector_coord"] = _manual_sector_coord_for_cluster_id(cluster_id)
 	return cluster_state
 
 func _make_manual_runtime_snapshot_galaxy(
@@ -1611,6 +1504,32 @@ func _find_secondary_cluster_id(galaxy_state: GalaxyState, active_cluster_id: in
 		if cluster_state.cluster_id != active_cluster_id:
 			return cluster_state.cluster_id
 	return -1
+
+func _find_empty_discovered_sector_coord(
+		galaxy_state: GalaxyState,
+		excluded_sector_coord: Vector2i = Vector2i(9_999_998, 9_999_998)) -> Vector2i:
+	if galaxy_state == null:
+		return Vector2i(9_999_999, 9_999_999)
+	for sector_coord in galaxy_state.get_discovered_sector_coords():
+		if sector_coord == excluded_sector_coord:
+			continue
+		if galaxy_state.get_cluster_ids_for_sector(sector_coord).is_empty():
+			return sector_coord
+	return Vector2i(9_999_999, 9_999_999)
+
+func _manual_sector_coord_for_cluster_id(cluster_id: int) -> Vector2i:
+	var layout := [
+		Vector2i(0, 0),
+		Vector2i(1, 0),
+		Vector2i(0, 1),
+		Vector2i(2, 0),
+		Vector2i(0, 2),
+		Vector2i(3, 0),
+		Vector2i(0, 3),
+	]
+	if cluster_id >= 0 and cluster_id < layout.size():
+		return layout[cluster_id]
+	return Vector2i(cluster_id, 0)
 
 func _find_cluster_outside_active_macro_sector(runtime: GalaxyRuntime) -> int:
 	if runtime == null or runtime.galaxy_state == null:

@@ -21,6 +21,7 @@ const CLICK_CLUSTER_ACTIVATION_PROGRESS_THRESHOLD: float = 0.55
 
 var galaxy_runtime: GalaxyRuntime = null
 var galaxy_state: GalaxyState = null
+var active_sector_session: ActiveSectorSession = null
 var active_cluster_session: ActiveClusterSession = null
 var active_macro_sector_session: ActiveMacroSectorSession = null
 var sim_world: SimWorld = null
@@ -188,11 +189,13 @@ func _sync_runtime_aliases() -> bool:
 	var previous_world: SimWorld = sim_world
 	if galaxy_runtime == null:
 		galaxy_state = null
+		active_sector_session = null
 		active_cluster_session = null
 		active_macro_sector_session = null
 		sim_world = null
 		return previous_world != sim_world
 	galaxy_state = galaxy_runtime.galaxy_state
+	active_sector_session = galaxy_runtime.active_sector_session
 	active_cluster_session = galaxy_runtime.active_cluster_session
 	active_macro_sector_session = galaxy_runtime.active_macro_sector_session
 	sim_world = galaxy_runtime.get_active_sim_world()
@@ -218,6 +221,7 @@ func _rebind_active_world(
 		sim_world,
 		zones_by_star,
 		galaxy_state,
+		active_sector_session,
 		active_cluster_session,
 		active_macro_sector_session,
 		preserve_remote_layers
@@ -227,7 +231,8 @@ func _rebind_active_world(
 		_current_start_config,
 		galaxy_state,
 		active_cluster_session,
-		active_macro_sector_session
+		active_macro_sector_session,
+		active_sector_session
 	)
 	_hud.initialize(sim_world, time_scale)
 	_debug_overlay.visible = debug_visible
@@ -250,7 +255,7 @@ func _should_preserve_remote_layers_on_world_switch(previous_macro_sector) -> bo
 	return previous_member_ids == current_member_ids
 
 func _update_runtime_focus_context() -> void:
-	if galaxy_runtime == null or _sim_camera == null or active_cluster_session == null:
+	if galaxy_runtime == null or _sim_camera == null or active_sector_session == null:
 		return
 	galaxy_runtime.update_focus_context(
 		_camera_focus_global_position(),
@@ -258,17 +263,17 @@ func _update_runtime_focus_context() -> void:
 	)
 
 func _camera_focus_global_position() -> Vector2:
-	if _sim_camera == null or active_cluster_session == null:
+	if _sim_camera == null or active_sector_session == null:
 		return Vector2.ZERO
-	return active_cluster_session.to_global(
+	return active_sector_session.to_global(
 		_sim_camera.get_focus_world_position() / max(SimConstants.SIM_TO_SCREEN, 0.001)
 	)
 
 func _restore_camera_focus_global_position(global_focus_position: Vector2) -> void:
-	if _sim_camera == null or active_cluster_session == null:
+	if _sim_camera == null or active_sector_session == null:
 		return
 	_sim_camera.set_focus_world_position(
-		active_cluster_session.to_local(global_focus_position) * SimConstants.SIM_TO_SCREEN
+		active_sector_session.to_local(global_focus_position) * SimConstants.SIM_TO_SCREEN
 	)
 
 func _release_runtime_references() -> void:
@@ -282,15 +287,16 @@ func _release_runtime_references() -> void:
 		sim_world.dispose()
 	galaxy_runtime = null
 	galaxy_state = null
+	active_sector_session = null
 	active_cluster_session = null
 	active_macro_sector_session = null
 	sim_world = null
 
 func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
-	if _sim_camera == null or active_cluster_session == null:
+	if _sim_camera == null or active_sector_session == null:
 		return
 	var cluster_id: int = int(cluster_pick.get("cluster_id", -1))
-	if cluster_id < 0 or cluster_id == active_cluster_session.cluster_id:
+	if cluster_id < 0 or (active_cluster_session != null and cluster_id == active_cluster_session.cluster_id):
 		return
 	var target_global_position: Vector2 = Vector2(
 		cluster_pick.get(
@@ -298,7 +304,7 @@ func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
 			cluster_pick.get("global_center", Vector2.ZERO)
 		)
 	)
-	var target_local_position: Vector2 = active_cluster_session.to_local(target_global_position)
+	var target_local_position: Vector2 = active_sector_session.to_local(target_global_position)
 	var current_visible_radius_sim: float = _sim_camera.get_visible_world_radius() / max(SimConstants.SIM_TO_SCREEN, 0.001)
 	var target_visible_radius_sim: float = current_visible_radius_sim
 	var authoritative_radius: float = maxf(float(cluster_pick.get("authoritative_radius", 0.0)), 0.0)
@@ -321,13 +327,8 @@ func _start_cluster_activation_transition(cluster_pick: Dictionary) -> void:
 func _update_pending_cluster_transition() -> void:
 	if _pending_click_activation_cluster_id < 0 or _sim_camera == null:
 		return
-	if _pending_click_activation_requested:
-		return
-	if _should_request_pending_cluster_activation():
-		if galaxy_runtime != null and galaxy_runtime.request_cluster_activation(_pending_click_activation_cluster_id):
-			_pending_click_activation_requested = true
-		else:
-			_clear_pending_cluster_transition(false)
+	if active_cluster_session != null and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
+		_clear_pending_cluster_transition(false)
 		return
 	if not _sim_camera.is_focus_transition_active():
 		_clear_pending_cluster_transition(false)
