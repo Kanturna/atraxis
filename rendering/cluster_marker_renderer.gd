@@ -29,6 +29,7 @@ func update_marker_payload(
 		var cluster_radius_screen: float = BodyRenderer.sim_dist_to_screen(float(marker.get("radius", 0.0)))
 		var is_active: bool = bool(marker.get("is_active", false))
 		var cluster_color: Color = Color(marker.get("color", Color.WHITE))
+		var show_extent_ring: bool = bool(marker.get("show_extent_ring", true))
 		var marker_radius_world: float = WorldRenderer.cluster_debug_marker_world_radius(
 			float(marker.get("radius", 0.0)),
 			_canvas_scale,
@@ -51,7 +52,9 @@ func update_marker_payload(
 			cluster_radius_screen,
 			cluster_color,
 			extent_width,
-			marker_visible and WorldRenderer.should_draw_cluster_extent_ring(cluster_radius_screen, viewport_diagonal)
+			show_extent_ring \
+				and marker_visible \
+				and WorldRenderer.should_draw_cluster_extent_ring(cluster_radius_screen, viewport_diagonal)
 		)
 		_configure_circle_line(
 			_marker_rings[index],
@@ -104,9 +107,16 @@ func _draw() -> void:
 		draw_circle(
 			center,
 			marker_radius_screen,
-			Color(cluster_color.r, cluster_color.g, cluster_color.b, 0.16 if is_active else 0.11)
+			Color(
+				cluster_color.r,
+				cluster_color.g,
+				cluster_color.b,
+				float(marker.get("marker_fill_alpha", 0.16 if is_active else 0.11))
+			)
 		)
-		var label_text: String = str(marker.get("zone_label", ""))
+		var label_text: String = str(marker.get("debug_label", ""))
+		if label_text == "":
+			label_text = str(marker.get("zone_label", ""))
 		if label_text == "":
 			label_text = str(marker.get("label_prefix", ""))
 		if label_text == "":

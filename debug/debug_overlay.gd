@@ -337,11 +337,13 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 func _build_cluster_diagnostics_lines() -> String:
 	if _galaxy_state == null or (_active_cluster_session == null and _active_sector_session == null):
 		return ""
+	var sector_state = _active_sector_session.sector_state if _active_sector_session != null else null
 	var active_cluster: ClusterState = _active_cluster_session.active_cluster_state if _active_cluster_session != null else null
 	var profile: Dictionary = active_cluster.simulation_profile if active_cluster != null else {}
 	var sector_coord: Vector2i = _active_sector_session.sector_state.sector_coord \
 		if _active_sector_session != null and _active_sector_session.sector_state != null \
 		else Vector2i.ZERO
+	var sector_cluster_ids: Array = sector_state.cluster_ids if sector_state != null else []
 	var active_cluster_black_holes: int = _count_active_cluster_black_holes()
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	var materialized_bodies: int = _sim.get_active_body_count() if _sim != null else 0
@@ -349,9 +351,12 @@ func _build_cluster_diagnostics_lines() -> String:
 	var macro_sector_lines: String = _build_macro_sector_diagnostics_lines()
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
+		+ "Space mode     rect-sector runtime\n"
 		+ "Sector         %s\n" % _format_sector_coord(sector_coord)
-		+ "Archetype      %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else (_active_sector_session.sector_state.region_archetype if _active_sector_session != null and _active_sector_session.sector_state != null else "")))
-		+ "Content        %s\n" % str(profile.get("content_archetype", ""))
+		+ "Sector room    %s\n" % _describe_sector_room(sector_cluster_ids)
+		+ "Sector type    %s\n" % str(profile.get("region_archetype", active_cluster.classification if active_cluster != null else (sector_state.region_archetype if sector_state != null else "")))
+		+ "System content %s\n" % (str(profile.get("content_archetype", "")) if active_cluster != null else "--")
+		+ "Active system  %s\n" % (str(_active_cluster_session.cluster_id) if _active_cluster_session != null else "--")
 		+ "Spawn priority %d\n" % int(profile.get("spawn_priority", 0))
 		+ "Spawn viable   %s\n" % ("yes" if bool(profile.get("spawn_viable", false)) else "no")
 		+ "Spawn reason   %s\n" % str(profile.get("spawn_viability_reason", "unknown"))
@@ -371,7 +376,6 @@ func _build_cluster_diagnostics_lines() -> String:
 		+ "Clear margin   %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_primary_clearance_margin_au", -1.0)))
 		+ "Start band     %s\n" % _format_layout_metric_au(float(profile.get("layout_reserved_start_band_au", -1.0)))
 		+ "Radius margin  %s\n" % _format_signed_layout_metric_au(float(profile.get("layout_cluster_radius_margin_au", -1.0)))
-		+ "Cluster active  %s\n" % (str(_active_cluster_session.cluster_id) if _active_cluster_session != null else "--")
 		+ "Cluster global  %s\n" % (
 			"%.0f, %.0f" % [
 				_active_cluster_session.cluster_global_origin.x,
@@ -384,10 +388,30 @@ func _build_cluster_diagnostics_lines() -> String:
 func _build_macro_sector_diagnostics_lines() -> String:
 	if _active_sector_session != null and _active_sector_session.sector_state != null:
 		var sector_state = _active_sector_session.sector_state
+		var active_sector_coord: Vector2i = sector_state.sector_coord
+		var near_sector_count: int = 0
+		var far_sector_count: int = 0
+		var quiet_sector_count: int = 0
+		for sector_coord in _galaxy_state.get_discovered_sector_coords():
+			var candidate_sector = _galaxy_state.get_sector_state(sector_coord)
+			if candidate_sector != null and candidate_sector.cluster_ids.is_empty():
+				quiet_sector_count += 1
+			var sector_distance: int = maxi(
+				absi(sector_coord.x - active_sector_coord.x),
+				absi(sector_coord.y - active_sector_coord.y)
+			)
+			if sector_distance == 1:
+				near_sector_count += 1
+			elif sector_distance >= 2:
+				far_sector_count += 1
 		return (
-			"Sector state   %s\n" % ("active" if int(sector_state.activation_state) == 1 else "remote")
+			"Top level      active tile\n"
+			+ "Sector state   %s\n" % ("active" if int(sector_state.activation_state) == 1 else "remote")
 			+ "Sector center  %.0f, %.0f\n" % [sector_state.center().x, sector_state.center().y]
 			+ "Sector systems %s\n" % _format_cluster_id_list(sector_state.cluster_ids)
+			+ "Near sectors   %d\n" % near_sector_count
+			+ "Far sectors    %d\n" % far_sector_count
+			+ "Quiet sectors  %d\n" % quiet_sector_count
 		)
 	if _active_macro_sector_session == null or _active_macro_sector_session.descriptor == null:
 		return ""
@@ -734,3 +758,10 @@ func _build_worldgen_help_text() -> String:
 		+ "Star Richness: local star count and orbit band.\n"
 		+ "discovered = sector cache, registered = cluster registry, materialized = active SimWorld."
 	)
+
+func _describe_sector_room(cluster_ids: Array) -> String:
+	if cluster_ids.is_empty():
+		return "quiet / empty"
+	if cluster_ids.size() == 1:
+		return "occupied / 1 system"
+	return "occupied / %d systems" % cluster_ids.size()

@@ -74,13 +74,10 @@ func _draw_cluster_accents() -> void:
 		var cluster_center: Vector2 = BodyRenderer.sim_to_screen(
 			Vector2(spec.get("cluster_local_center", Vector2.ZERO))
 		)
-		var cluster_radius: float = maxf(
-			BodyRenderer.sim_dist_to_screen(float(spec.get("cluster_radius", 0.0))),
-			18.0 / _canvas_scale
-		)
+		var cluster_radius: float = BodyRenderer.sim_dist_to_screen(float(spec.get("cluster_radius", 0.0)))
 		var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
 		var accent_profile: Dictionary = cluster_accent_profile(macro_sector_zone)
-		var accent_radius: float = cluster_radius * float(accent_profile.get("radius_scale", 0.5))
+		var accent_radius: float = _cluster_accent_radius(cluster_radius, accent_profile)
 		if not _is_preview_body_visible(cluster_center, accent_radius):
 			continue
 		var accent_color: Color = cluster_accent_color(macro_sector_zone)
@@ -151,6 +148,12 @@ func _preview_color(spec: Dictionary) -> Color:
 		_:
 			return Color(0.70, 0.72, 0.78, 0.35)
 
+func _cluster_accent_radius(cluster_radius_screen: float, accent_profile: Dictionary) -> float:
+	var min_radius: float = float(accent_profile.get("min_radius_px", 16.0)) / _canvas_scale
+	var max_radius: float = float(accent_profile.get("max_radius_px", 54.0)) / _canvas_scale
+	var scaled_radius: float = cluster_radius_screen * float(accent_profile.get("radius_scale", 0.30))
+	return clampf(scaled_radius, min_radius, max_radius)
+
 static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 	var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
 	var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
@@ -205,24 +208,30 @@ static func cluster_accent_profile(macro_sector_zone: String) -> Dictionary:
 	match macro_sector_zone:
 		"ambient":
 			return {
-				"radius_scale": 0.84,
-				"fill_alpha": 0.090,
-				"ring_alpha": 0.22,
-				"ring_width": 1.8,
+				"radius_scale": 0.24,
+				"min_radius_px": 20.0,
+				"max_radius_px": 52.0,
+				"fill_alpha": 0.034,
+				"ring_alpha": 0.10,
+				"ring_width": 1.3,
 			}
 		"far":
 			return {
-				"radius_scale": 0.62,
-				"fill_alpha": 0.045,
-				"ring_alpha": 0.16,
-				"ring_width": 1.1,
+				"radius_scale": 0.18,
+				"min_radius_px": 16.0,
+				"max_radius_px": 34.0,
+				"fill_alpha": 0.016,
+				"ring_alpha": 0.055,
+				"ring_width": 0.9,
 			}
 		_:
 			return {
-				"radius_scale": 0.48,
-				"fill_alpha": 0.018,
-				"ring_alpha": 0.08,
-				"ring_width": 0.9,
+				"radius_scale": 0.12,
+				"min_radius_px": 12.0,
+				"max_radius_px": 24.0,
+				"fill_alpha": 0.008,
+				"ring_alpha": 0.028,
+				"ring_width": 0.8,
 			}
 
 static func _min_preview_screen_px(body_type: int) -> float:

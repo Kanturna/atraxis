@@ -16,6 +16,8 @@ const PREVIEW_LOD_BH_AND_STARS: int = 1
 const PREVIEW_LOD_FULL: int = 2
 const PREVIEW_LOD_BH_AND_STARS_MAX_SCREEN_RADIUS: float = 32.0
 const PREVIEW_LOD_FULL_MIN_SCREEN_RADIUS: float = 72.0
+const SECTOR_DRAW_CULL_MARGIN_PX: float = 72.0
+const SECTOR_LABEL_FONT_MIN_SIZE: int = 10
 
 @onready var _zone_layer: Node2D = $ZoneLayer
 @onready var _gravity_debug_layer: Node2D = $GravityDebugLayer
@@ -137,7 +139,7 @@ func render_frame(world: SimWorld) -> void:
 			canvas_scale,
 			visible_canvas_rect
 		)
-	if _debug_overlays_visible:
+	if _active_sector_session != null or _debug_overlays_visible:
 		queue_redraw()
 
 func set_debug_overlays_visible(enabled: bool) -> void:
@@ -178,15 +180,13 @@ func _ensure_overlay_layers() -> void:
 		move_child(_marker_layer, get_child_count() - 1)
 
 func _draw() -> void:
-	if not _debug_overlays_visible \
-			or _galaxy_state == null \
-			or (_active_cluster_session == null and _active_sector_session == null):
+	if _galaxy_state == null or (_active_cluster_session == null and _active_sector_session == null):
 		return
 	if _active_sector_session != null and _worldgen != null:
 		_draw_discovered_sectors()
-	elif uses_macro_sector_debug_overlay(_active_macro_sector_session):
+	elif _debug_overlays_visible and uses_macro_sector_debug_overlay(_active_macro_sector_session):
 		_draw_active_macro_sector_overlay()
-	elif _worldgen != null:
+	elif _debug_overlays_visible and _worldgen != null:
 		_draw_discovered_sectors()
 
 func _draw_active_macro_sector_overlay() -> void:
@@ -270,23 +270,173 @@ func _draw_macro_sector_membership_links(markers: Array) -> void:
 func _draw_discovered_sectors() -> void:
 	if _active_sector_session == null or _active_sector_session.sector_state == null:
 		return
+	var visible_canvas_rect: Rect2 = _visible_canvas_rect()
 	var active_sector_coord: Vector2i = _active_sector_session.sector_state.sector_coord
-	var sector_size_screen: Vector2 = Vector2.ONE * BodyRenderer.sim_dist_to_screen(
-		float(_worldgen.config.sector_scale)
-	)
+	var sector_size_screen_scalar: float = BodyRenderer.sim_dist_to_screen(float(_worldgen.config.sector_scale))
+	var sector_size_screen: Vector2 = Vector2.ONE * sector_size_screen_scalar
+	var canvas_scale: float = _debug_marker_canvas_scale()
 	for sector_coord in _galaxy_state.get_discovered_sector_coords():
+		var sector_state = _galaxy_state.get_sector_state(sector_coord)
+		var contains_systems: bool = sector_state != null and not sector_state.cluster_ids.is_empty()
+		var sector_relation: String = sector_relation_name(sector_coord, active_sector_coord)
 		var sector_origin_local: Vector2 = _active_sector_session.to_local(_worldgen.sector_origin(sector_coord))
 		var sector_origin_screen: Vector2 = BodyRenderer.snap_screen_point(
 			BodyRenderer.sim_to_screen(sector_origin_local)
 		)
-		var is_active_sector: bool = sector_coord == active_sector_coord
-		var sector_color: Color = Color(0.36, 0.56, 0.90, 0.32) if is_active_sector else Color(0.36, 0.56, 0.90, 0.12)
-		draw_rect(
-			Rect2(sector_origin_screen, sector_size_screen),
-			sector_color,
-			false,
-			1.5 / _debug_marker_canvas_scale() if is_active_sector else 1.0 / _debug_marker_canvas_scale()
+		var sector_rect := Rect2(sector_origin_screen, sector_size_screen)
+		if visible_canvas_rect.has_area() and not visible_canvas_rect.intersects(
+				sector_rect.grow(SECTOR_DRAW_CULL_MARGIN_PX / canvas_scale)
+		):
+			continue
+		var visual_profile: Dictionary = sector_visual_profile(
+			sector_relation,
+			contains_systems,
+			_debug_overlays_visible
 		)
+		_draw_sector_tile(sector_rect, sector_coord, sector_state, visual_profile)
+
+func _draw_sector_tile(
+		sector_rect: Rect2,
+		sector_coord: Vector2i,
+		sector_state,
+		visual_profile: Dictionary) -> void:
+	var canvas_scale: float = _debug_marker_canvas_scale()
+	var fill_color: Color = Color(visual_profile.get("fill_color", Color.TRANSPARENT))
+	if fill_color.a > 0.0:
+		draw_rect(sector_rect, fill_color, true)
+	var border_color: Color = Color(visual_profile.get("border_color", Color.TRANSPARENT))
+	var border_width: float = maxf(float(visual_profile.get("border_width", 1.0)) / canvas_scale, 0.9 / canvas_scale)
+	if border_color.a > 0.0:
+		draw_rect(sector_rect, border_color, false, border_width)
+	_draw_sector_corner_brackets(
+		sector_rect,
+		Color(visual_profile.get("corner_color", border_color)),
+		maxf(float(visual_profile.get("corner_width", 1.0)) / canvas_scale, 0.9 / canvas_scale)
+	)
+	var cluster_ids: Array = sector_state.cluster_ids if sector_state != null else []
+	if cluster_ids.is_empty():
+		_draw_quiet_sector_atmosphere(
+			sector_rect,
+			sector_coord,
+			Color(visual_profile.get("quiet_color", Color.TRANSPARENT)),
+			maxf(float(visual_profile.get("quiet_width", 1.0)) / canvas_scale, 0.7 / canvas_scale)
+		)
+	else:
+		_draw_sector_system_hint(
+			sector_rect,
+			cluster_ids.size(),
+			Color(visual_profile.get("content_hint_color", Color.TRANSPARENT))
+		)
+	if _debug_overlays_visible:
+		_draw_sector_debug_label(
+			sector_rect,
+			sector_coord,
+			sector_relation_name(sector_coord, _active_sector_session.sector_state.sector_coord),
+			cluster_ids.size(),
+			Color(visual_profile.get("label_color", border_color))
+		)
+
+func _draw_sector_corner_brackets(sector_rect: Rect2, color: Color, width: float) -> void:
+	if color.a <= 0.0:
+		return
+	var corner_extent: float = clampf(minf(sector_rect.size.x, sector_rect.size.y) * 0.09, 12.0 / _debug_marker_canvas_scale(), 42.0 / _debug_marker_canvas_scale())
+	var top_left: Vector2 = sector_rect.position
+	var top_right: Vector2 = sector_rect.position + Vector2(sector_rect.size.x, 0.0)
+	var bottom_left: Vector2 = sector_rect.position + Vector2(0.0, sector_rect.size.y)
+	var bottom_right: Vector2 = sector_rect.position + sector_rect.size
+	draw_line(top_left, top_left + Vector2(corner_extent, 0.0), color, width, true)
+	draw_line(top_left, top_left + Vector2(0.0, corner_extent), color, width, true)
+	draw_line(top_right, top_right + Vector2(-corner_extent, 0.0), color, width, true)
+	draw_line(top_right, top_right + Vector2(0.0, corner_extent), color, width, true)
+	draw_line(bottom_left, bottom_left + Vector2(corner_extent, 0.0), color, width, true)
+	draw_line(bottom_left, bottom_left + Vector2(0.0, -corner_extent), color, width, true)
+	draw_line(bottom_right, bottom_right + Vector2(-corner_extent, 0.0), color, width, true)
+	draw_line(bottom_right, bottom_right + Vector2(0.0, -corner_extent), color, width, true)
+
+func _draw_sector_system_hint(sector_rect: Rect2, system_count: int, color: Color) -> void:
+	if system_count <= 0 or color.a <= 0.0:
+		return
+	var safe_count: int = mini(system_count, 3)
+	var pip_size: float = maxf(6.0 / _debug_marker_canvas_scale(), 3.0)
+	var pip_spacing: float = pip_size * 0.55
+	var start_x: float = sector_rect.position.x + sector_rect.size.x - (pip_size * safe_count) - (pip_spacing * maxi(safe_count - 1, 0)) - (14.0 / _debug_marker_canvas_scale())
+	var pip_y: float = sector_rect.position.y + (12.0 / _debug_marker_canvas_scale())
+	for index in range(safe_count):
+		var pip_rect := Rect2(
+			Vector2(start_x + float(index) * (pip_size + pip_spacing), pip_y),
+			Vector2.ONE * pip_size
+		)
+		draw_rect(pip_rect, color, true)
+		draw_rect(pip_rect, Color(color.r, color.g, color.b, minf(color.a + 0.14, 1.0)), false, maxf(1.1 / _debug_marker_canvas_scale(), 0.8))
+
+func _draw_quiet_sector_atmosphere(
+		sector_rect: Rect2,
+		sector_coord: Vector2i,
+		color: Color,
+		line_width: float) -> void:
+	if color.a <= 0.0:
+		return
+	var center: Vector2 = sector_rect.get_center()
+	var calm_radius: float = minf(sector_rect.size.x, sector_rect.size.y) * 0.055
+	draw_circle(center, calm_radius, Color(color.r, color.g, color.b, color.a * 0.32))
+	for index in range(3):
+		var hash_a: float = _sector_hash01(sector_coord, index * 13 + 1)
+		var hash_b: float = _sector_hash01(sector_coord, index * 13 + 2)
+		var hash_c: float = _sector_hash01(sector_coord, index * 13 + 3)
+		var point := sector_rect.position + Vector2(
+			lerpf(sector_rect.size.x * 0.20, sector_rect.size.x * 0.80, hash_a),
+			lerpf(sector_rect.size.y * 0.22, sector_rect.size.y * 0.78, hash_b)
+		)
+		var direction: Vector2 = Vector2(1.0, -0.55 if hash_c < 0.5 else 0.55).normalized()
+		var segment_length: float = lerpf(sector_rect.size.x * 0.04, sector_rect.size.x * 0.08, hash_c)
+		draw_line(
+			point - direction * segment_length * 0.5,
+			point + direction * segment_length * 0.5,
+			color,
+			line_width,
+			true
+		)
+
+func _draw_sector_debug_label(
+		sector_rect: Rect2,
+		sector_coord: Vector2i,
+		sector_relation: String,
+		system_count: int,
+		color: Color) -> void:
+	if color.a <= 0.0 or ThemeDB.fallback_font == null:
+		return
+	var canvas_scale: float = _debug_marker_canvas_scale()
+	var font_size: int = maxi(
+		int(round(float(ThemeDB.fallback_font_size) / maxf(canvas_scale, 0.9))),
+		SECTOR_LABEL_FONT_MIN_SIZE
+	)
+	var label_position: Vector2 = sector_rect.position + Vector2(
+		12.0 / canvas_scale,
+		20.0 / canvas_scale
+	)
+	var occupancy_label: String = "VOID" if system_count <= 0 else "SYS %d" % system_count
+	var debug_label: String = "%s  %s  %s" % [
+		_format_sector_coord(sector_coord),
+		sector_relation_short_label(sector_relation),
+		occupancy_label,
+	]
+	draw_string(
+		ThemeDB.fallback_font,
+		label_position,
+		debug_label,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		font_size,
+		color
+	)
+
+func _sector_hash01(sector_coord: Vector2i, salt: int) -> float:
+	var raw_hash: int = int(sector_coord.x) * 92_821 + int(sector_coord.y) * 68_917 + salt * 1_301 + 19_937
+	raw_hash = abs(raw_hash % 9_973)
+	return float(raw_hash) / 9_973.0
+
+func _format_sector_coord(sector_coord: Vector2i) -> String:
+	return "%d:%d" % [sector_coord.x, sector_coord.y]
 
 func _debug_marker_canvas_scale() -> float:
 	var canvas_scale: Vector2 = get_canvas_transform().get_scale()
@@ -337,26 +487,37 @@ static func build_registered_cluster_debug_markers(
 	var nearest_remote_cluster_id: int = -1
 	var nearest_remote_distance: float = INF
 	var reference_session = active_sector_session if active_sector_session != null else active_cluster_session
+	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
 	if galaxy_state == null or reference_session == null:
 		return {
 			"markers": markers,
 			"nearest_remote_cluster_id": nearest_remote_cluster_id,
-	}
+		}
 	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var sector_mode: bool = active_sector_session != null and active_sector_session.sector_state != null
+	var active_sector_coord: Vector2i = active_sector_session.sector_state.sector_coord if sector_mode else Vector2i.ZERO
 	var has_macro_sector_overlay: bool = uses_macro_sector_debug_overlay(active_macro_sector_session)
 	var marker_cull_margin: float = REMOTE_CLUSTER_MARKER_CULL_MARGIN_PX / safe_canvas_scale
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state == null:
 			continue
-		var is_active: bool = cluster_state.cluster_id == active_cluster_session.cluster_id
+		var is_active: bool = cluster_state.cluster_id == active_cluster_id
 		var macro_sector_zone: int = _resolve_macro_sector_zone(
 			active_macro_sector_session,
 			cluster_state.cluster_id
 		) if has_macro_sector_overlay else MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE
-		var zone_profile: Dictionary = macro_sector_zone_debug_profile(
+		var sector_coord: Vector2i = _resolve_cluster_sector_coord(galaxy_state, cluster_state)
+		var sector_relation: String = sector_relation_name(sector_coord, active_sector_coord) if sector_mode else ""
+		var sector_state = galaxy_state.get_sector_state(sector_coord) if sector_mode else null
+		var sector_cluster_count: int = sector_state.cluster_ids.size() if sector_state != null else 1
+		var zone_profile: Dictionary = sector_marker_debug_profile(
+			sector_relation,
+			is_active,
+			sector_cluster_count
+		) if sector_mode else (macro_sector_zone_debug_profile(
 			macro_sector_zone,
 			is_active
-		) if has_macro_sector_overlay else {}
+		) if has_macro_sector_overlay else {})
 		var local_center: Vector2 = reference_session.to_local(cluster_state.global_center)
 		var marker_center: Vector2 = BodyRenderer.sim_to_screen(local_center)
 		var marker_radius_world: float = cluster_debug_marker_world_radius(
@@ -381,10 +542,17 @@ static func build_registered_cluster_debug_markers(
 			"is_active": is_active,
 			"state": activation_state_debug_name(cluster_state.activation_state),
 			"color": zone_profile.get("marker_color", cluster_debug_color(cluster_state.activation_state)),
+			"marker_fill_alpha": float(zone_profile.get("marker_fill_alpha", 0.12 if is_active else 0.08)),
+			"show_extent_ring": bool(zone_profile.get("show_extent_ring", true)),
 			"macro_sector_zone_id": macro_sector_zone,
 			"macro_sector_zone": MACRO_SECTOR_ZONE_SCRIPT.debug_name(macro_sector_zone),
 			"is_macro_sector_member": has_macro_sector_overlay and macro_sector_zone != MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE,
 			"zone_label": macro_sector_zone_label(macro_sector_zone) if has_macro_sector_overlay else "",
+			"sector_coord": sector_coord,
+			"sector_relation": sector_relation,
+			"sector_relation_label": sector_relation_short_label(sector_relation) if sector_mode else "",
+			"sector_contains_systems": sector_cluster_count > 0,
+			"sector_cluster_count": sector_cluster_count,
 			"overlay_fill_alpha": float(zone_profile.get("overlay_fill_alpha", 0.0)),
 			"overlay_ring_alpha": float(zone_profile.get("overlay_ring_alpha", 0.0)),
 			"overlay_ring_width": float(zone_profile.get("overlay_ring_width", 1.0)),
@@ -400,13 +568,16 @@ static func build_registered_cluster_debug_markers(
 		var marker_cluster_id: int = int(marker.get("cluster_id", -1))
 		var marker_state: String = str(marker.get("state", ""))
 		var label_prefix: String = ""
-		if has_macro_sector_overlay:
+		if sector_mode:
+			label_prefix = "%s SYS" % str(marker.get("sector_relation_label", "REMOTE"))
+		elif has_macro_sector_overlay:
 			label_prefix = str(marker.get("zone_label", ""))
 		elif bool(marker.get("is_active", false)):
 			label_prefix = "ACTIVE"
 		elif marker_cluster_id == nearest_remote_cluster_id:
 			label_prefix = "PREVIEW" if marker_state == "simplified" else "UNLOADED"
 		marker["label_prefix"] = label_prefix
+		marker["debug_label"] = label_prefix
 	return {
 		"markers": markers,
 		"nearest_remote_cluster_id": nearest_remote_cluster_id,
@@ -775,6 +946,118 @@ static func cluster_debug_marker_world_radius(
 
 static func uses_macro_sector_debug_overlay(active_macro_sector_session) -> bool:
 	return active_macro_sector_session != null and active_macro_sector_session.descriptor != null
+
+static func sector_relation_name(sector_coord: Vector2i, active_sector_coord: Vector2i) -> String:
+	var sector_distance: int = maxi(
+		absi(sector_coord.x - active_sector_coord.x),
+		absi(sector_coord.y - active_sector_coord.y)
+	)
+	if sector_distance <= 0:
+		return "active"
+	if sector_distance == 1:
+		return "neighbor"
+	if sector_distance == 2:
+		return "far"
+	return "remote"
+
+static func sector_relation_short_label(sector_relation: String) -> String:
+	match sector_relation:
+		"active":
+			return "LIVE"
+		"neighbor":
+			return "NEAR"
+		"far":
+			return "FAR"
+		_:
+			return "REMOTE"
+
+static func sector_visual_profile(
+		sector_relation: String,
+		contains_systems: bool,
+		debug_visible: bool = false) -> Dictionary:
+	var profile := {
+		"fill_color": Color(0.08, 0.11, 0.16, 0.040),
+		"border_color": Color(0.34, 0.44, 0.58, 0.14),
+		"border_width": 1.0,
+		"corner_color": Color(0.58, 0.69, 0.86, 0.18),
+		"corner_width": 1.0,
+		"quiet_color": Color(0.64, 0.73, 0.86, 0.10),
+		"quiet_width": 1.0,
+		"content_hint_color": Color(0.93, 0.82, 0.56, 0.18),
+		"label_color": Color(0.84, 0.90, 0.98, 0.0),
+	}
+	match sector_relation:
+		"active":
+			profile["fill_color"] = Color(0.10, 0.18, 0.28, 0.14 if contains_systems else 0.10)
+			profile["border_color"] = Color(0.72, 0.86, 1.0, 0.40)
+			profile["border_width"] = 1.8
+			profile["corner_color"] = Color(0.86, 0.95, 1.0, 0.56)
+			profile["corner_width"] = 1.8
+			profile["quiet_color"] = Color(0.72, 0.83, 0.96, 0.14)
+			profile["content_hint_color"] = Color(1.0, 0.88, 0.62, 0.42)
+			profile["label_color"] = Color(0.94, 0.98, 1.0, 0.90 if debug_visible else 0.0)
+		"neighbor":
+			profile["fill_color"] = Color(0.08, 0.13, 0.20, 0.080 if contains_systems else 0.055)
+			profile["border_color"] = Color(0.52, 0.68, 0.90, 0.24)
+			profile["border_width"] = 1.25
+			profile["corner_color"] = Color(0.74, 0.88, 1.0, 0.28)
+			profile["quiet_color"] = Color(0.66, 0.76, 0.90, 0.12)
+			profile["content_hint_color"] = Color(0.84, 0.90, 1.0, 0.24)
+			profile["label_color"] = Color(0.84, 0.92, 1.0, 0.72 if debug_visible else 0.0)
+		"far":
+			profile["fill_color"] = Color(0.06, 0.10, 0.16, 0.050 if contains_systems else 0.034)
+			profile["border_color"] = Color(0.40, 0.54, 0.72, 0.16)
+			profile["corner_color"] = Color(0.60, 0.74, 0.92, 0.18)
+			profile["quiet_color"] = Color(0.62, 0.72, 0.86, 0.10)
+			profile["content_hint_color"] = Color(0.76, 0.86, 0.98, 0.16)
+			profile["label_color"] = Color(0.76, 0.86, 0.98, 0.52 if debug_visible else 0.0)
+		_:
+			profile["fill_color"] = Color(0.05, 0.08, 0.12, 0.028 if contains_systems else 0.020)
+			profile["border_color"] = Color(0.28, 0.36, 0.48, 0.10)
+			profile["corner_color"] = Color(0.48, 0.58, 0.72, 0.12)
+			profile["quiet_color"] = Color(0.58, 0.66, 0.78, 0.08)
+			profile["content_hint_color"] = Color(0.70, 0.78, 0.88, 0.12)
+			profile["label_color"] = Color(0.72, 0.78, 0.88, 0.40 if debug_visible else 0.0)
+	if debug_visible:
+		var fill_color: Color = profile["fill_color"]
+		profile["fill_color"] = Color(fill_color.r, fill_color.g, fill_color.b, minf(fill_color.a + 0.015, 0.22))
+	return profile
+
+static func sector_marker_debug_profile(
+		sector_relation: String,
+		is_active: bool = false,
+		sector_cluster_count: int = 1) -> Dictionary:
+	var has_multiple_systems: bool = sector_cluster_count > 1
+	var profile := {
+		"marker_color": Color(0.72, 0.78, 0.86, 0.56),
+		"marker_fill_alpha": 0.08,
+		"show_extent_ring": false,
+	}
+	match sector_relation:
+		"active":
+			profile["marker_color"] = Color(1.0, 0.86, 0.54, 0.92 if is_active else 0.72)
+			profile["marker_fill_alpha"] = 0.20 if is_active else 0.13
+		"neighbor":
+			profile["marker_color"] = Color(0.56, 0.90, 0.84, 0.74 if is_active else 0.62)
+			profile["marker_fill_alpha"] = 0.15 if is_active else 0.10
+		"far":
+			profile["marker_color"] = Color(0.62, 0.78, 0.98, 0.54 if is_active else 0.44)
+			profile["marker_fill_alpha"] = 0.10 if is_active else 0.07
+		_:
+			profile["marker_color"] = Color(0.72, 0.76, 0.84, 0.40 if is_active else 0.32)
+			profile["marker_fill_alpha"] = 0.08 if is_active else 0.05
+	if has_multiple_systems:
+		var marker_color: Color = profile["marker_color"]
+		profile["marker_color"] = Color(marker_color.r, marker_color.g, marker_color.b, minf(marker_color.a + 0.08, 1.0))
+	return profile
+
+static func _resolve_cluster_sector_coord(galaxy_state: GalaxyState, cluster_state: ClusterState) -> Vector2i:
+	if cluster_state == null:
+		return Vector2i.ZERO
+	var sector_coord_variant = cluster_state.simulation_profile.get("sector_coord", null)
+	if sector_coord_variant is Vector2i:
+		return sector_coord_variant
+	return galaxy_state.find_sector_for_global_position(cluster_state.global_center) if galaxy_state != null else Vector2i.ZERO
 
 static func macro_sector_zone_label(zone: int) -> String:
 	return MACRO_SECTOR_ZONE_SCRIPT.debug_name(zone).to_upper()

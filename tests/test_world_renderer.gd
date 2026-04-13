@@ -2,6 +2,7 @@ extends GutTest
 
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 const ACTIVE_MACRO_SECTOR_SESSION_SCRIPT := preload("res://simulation/active_macro_sector_session.gd")
+const ACTIVE_SECTOR_SESSION_SCRIPT := preload("res://simulation/active_sector_session.gd")
 const CLUSTER_PREVIEW_RENDERER_SCRIPT := preload("res://rendering/cluster_preview_renderer.gd")
 const MACRO_SECTOR_DESCRIPTOR_SCRIPT := preload("res://simulation/macro_sector_descriptor.gd")
 const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
@@ -79,6 +80,46 @@ func test_registered_cluster_debug_markers_encode_macro_sector_zones_and_members
 	assert_true(bool(markers_by_id[2].get("is_macro_sector_member", false)), "far markers should count as macro-sector members")
 	assert_false(bool(markers_by_id[3].get("is_macro_sector_member", true)), "outside markers should stay outside the active macro-sector")
 
+func test_sector_debug_marker_payload_uses_sector_relation_labels_and_hides_cluster_extent_rings() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var remote_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(1_000.0, 0.0), 100.0)
+	active_cluster.simulation_profile["sector_coord"] = Vector2i(0, 0)
+	remote_cluster.simulation_profile["sector_coord"] = Vector2i(1, 0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(remote_cluster)
+
+	var cluster_session := ActiveClusterSession.new()
+	cluster_session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
+	active_sector_session.bind(galaxy_state, galaxy_state.get_sector_state(Vector2i(0, 0)), cluster_session)
+	var payload: Dictionary = WORLD_RENDERER_SCRIPT.build_registered_cluster_debug_markers(
+		galaxy_state,
+		cluster_session,
+		Rect2(Vector2(-8_000.0, -8_000.0), Vector2(16_000.0, 16_000.0)),
+		1.0,
+		null,
+		active_sector_session
+	)
+	var active_marker: Dictionary = {}
+	var remote_marker: Dictionary = {}
+	for marker in payload.get("markers", []):
+		if bool(marker.get("is_active", false)):
+			active_marker = marker
+		elif remote_marker.is_empty():
+			remote_marker = marker
+
+	assert_false(active_marker.is_empty(), "sector-mode marker payload should still expose the active contained system")
+	assert_false(remote_marker.is_empty(), "sector-mode marker payload should still expose remote systems as content markers")
+	assert_false(bool(active_marker.get("show_extent_ring", true)), "sector-mode markers should suppress large cluster extent rings to avoid bubble reading")
+	assert_false(bool(remote_marker.get("show_extent_ring", true)), "remote sector-mode markers should also suppress large cluster extent rings")
+	assert_eq(str(active_marker.get("sector_relation", "")), "active", "the active contained system should expose the active sector relation")
+	assert_ne(str(remote_marker.get("sector_relation", "")), "", "remote markers should expose a readable sector relation")
+	assert_true(
+		str(active_marker.get("debug_label", "")).contains("SYS"),
+		"sector-mode markers should use a sector-first system label instead of a macro-zone label"
+	)
+
 func test_cluster_debug_marker_radius_stays_visible_across_zoom_scales() -> void:
 	var cluster_radius: float = 1_200.0
 	var zoomed_out_radius: float = WORLD_RENDERER_SCRIPT.cluster_debug_marker_world_radius(cluster_radius, 0.35, false)
@@ -90,6 +131,33 @@ func test_cluster_debug_marker_radius_stays_visible_across_zoom_scales() -> void
 	assert_gt(default_radius, zoomed_in_radius, "ghost markers should shrink in world units when zoomed in instead of ballooning")
 	assert_gt(active_radius, default_radius, "the active cluster marker should stay more prominent than remote ghost markers")
 	assert_gt(zoomed_in_radius, 0.0, "marker radius should remain positive at tight zoom levels")
+
+func test_sector_visual_profile_prioritizes_active_tiles_and_quiet_empty_space() -> void:
+	var active_occupied: Dictionary = WORLD_RENDERER_SCRIPT.sector_visual_profile("active", true, true)
+	var near_occupied: Dictionary = WORLD_RENDERER_SCRIPT.sector_visual_profile("neighbor", true, true)
+	var far_empty: Dictionary = WORLD_RENDERER_SCRIPT.sector_visual_profile("far", false, true)
+	var remote_empty: Dictionary = WORLD_RENDERER_SCRIPT.sector_visual_profile("remote", false, true)
+
+	assert_gt(
+		Color(active_occupied.get("border_color", Color.TRANSPARENT)).a,
+		Color(near_occupied.get("border_color", Color.TRANSPARENT)).a,
+		"active sector tiles should render with the strongest border so the rectangular top-level space reads first"
+	)
+	assert_gt(
+		Color(far_empty.get("quiet_color", Color.TRANSPARENT)).a,
+		Color(remote_empty.get("quiet_color", Color.TRANSPARENT)).a,
+		"quiet empty sectors should keep a readable atmospheric treatment instead of disappearing completely"
+	)
+	assert_gt(
+		Color(active_occupied.get("content_hint_color", Color.TRANSPARENT)).a,
+		Color(far_empty.get("content_hint_color", Color.TRANSPARENT)).a,
+		"occupied active sectors should signal contained systems more strongly than quiet empty space"
+	)
+	assert_gt(
+		Color(active_occupied.get("label_color", Color.TRANSPARENT)).a,
+		0.0,
+		"debug-visible sector profiles should expose readable tile labels"
+	)
 
 func test_remote_cluster_preview_payload_uses_blueprint_specs_for_unloaded_clusters() -> void:
 	var config = START_CONFIG_SCRIPT.new()
