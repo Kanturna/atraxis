@@ -121,7 +121,8 @@ func render_frame(world: SimWorld) -> void:
 		_galaxy_state,
 		_active_cluster_session,
 		visible_canvas_rect,
-		canvas_scale
+		canvas_scale,
+		_active_macro_sector_session
 	)
 	if _preview_renderer != null:
 		_preview_renderer.update_preview_specs(_cached_remote_preview_specs, canvas_scale, visible_canvas_rect)
@@ -174,10 +175,90 @@ func _ensure_overlay_layers() -> void:
 func _draw() -> void:
 	if not _debug_overlays_visible \
 			or _galaxy_state == null \
-			or _active_cluster_session == null \
-			or _worldgen == null:
+			or _active_cluster_session == null:
 		return
-	_draw_discovered_sectors()
+	if uses_macro_sector_debug_overlay(_active_macro_sector_session):
+		_draw_active_macro_sector_overlay()
+	elif _worldgen != null:
+		_draw_discovered_sectors()
+
+func _draw_active_macro_sector_overlay() -> void:
+	var markers: Array = _cached_marker_payload.get("markers", [])
+	if markers.is_empty():
+		return
+	_draw_macro_sector_cluster_zones(markers)
+	_draw_macro_sector_membership_links(markers)
+
+func _draw_macro_sector_cluster_zones(markers: Array) -> void:
+	var canvas_scale: float = _debug_marker_canvas_scale()
+	var viewport_diagonal: float = get_viewport().get_visible_rect().size.length()
+	for marker in markers:
+		var cluster_radius_screen: float = BodyRenderer.sim_dist_to_screen(float(marker.get("radius", 0.0)))
+		if cluster_radius_screen < 0.5 \
+				or not should_draw_cluster_extent_ring(cluster_radius_screen, viewport_diagonal):
+			continue
+		var center: Vector2 = BodyRenderer.snap_screen_point(
+			BodyRenderer.sim_to_screen(Vector2(marker.get("local_center", Vector2.ZERO)))
+		)
+		var cluster_color: Color = Color(marker.get("color", Color.WHITE))
+		var fill_alpha: float = float(marker.get("overlay_fill_alpha", 0.0))
+		var ring_alpha: float = float(marker.get("overlay_ring_alpha", 0.0))
+		if fill_alpha > 0.0:
+			draw_circle(
+				center,
+				cluster_radius_screen,
+				Color(cluster_color.r, cluster_color.g, cluster_color.b, fill_alpha)
+			)
+		if ring_alpha > 0.0:
+			var ring_width: float = maxf(
+				float(marker.get("overlay_ring_width", 1.0)) / canvas_scale,
+				0.9 / canvas_scale
+			)
+			draw_arc(
+				center,
+				cluster_radius_screen,
+				0.0,
+				TAU,
+				80,
+				Color(cluster_color.r, cluster_color.g, cluster_color.b, ring_alpha),
+				ring_width
+			)
+
+func _draw_macro_sector_membership_links(markers: Array) -> void:
+	var canvas_scale: float = _debug_marker_canvas_scale()
+	var focus_marker: Dictionary = {}
+	for marker in markers:
+		if int(marker.get("macro_sector_zone_id", MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE)) == MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS:
+			focus_marker = marker
+			break
+	if focus_marker.is_empty():
+		return
+	var focus_center: Vector2 = BodyRenderer.snap_screen_point(
+		BodyRenderer.sim_to_screen(Vector2(focus_marker.get("local_center", Vector2.ZERO)))
+	)
+	for marker in markers:
+		if int(marker.get("cluster_id", -1)) == int(focus_marker.get("cluster_id", -1)):
+			continue
+		if not bool(marker.get("is_macro_sector_member", false)):
+			continue
+		var link_alpha: float = float(marker.get("link_alpha", 0.0))
+		if link_alpha <= 0.0:
+			continue
+		var center: Vector2 = BodyRenderer.snap_screen_point(
+			BodyRenderer.sim_to_screen(Vector2(marker.get("local_center", Vector2.ZERO)))
+		)
+		var cluster_color: Color = Color(marker.get("color", Color.WHITE))
+		var line_width: float = maxf(
+			float(marker.get("link_width", 1.0)) / canvas_scale,
+			0.9 / canvas_scale
+		)
+		draw_line(
+			focus_center,
+			center,
+			Color(cluster_color.r, cluster_color.g, cluster_color.b, link_alpha),
+			line_width,
+			true
+		)
 
 func _draw_discovered_sectors() -> void:
 	var active_sector_coord_variant = _active_cluster_session.active_cluster_state.simulation_profile.get(
@@ -245,7 +326,8 @@ static func build_registered_cluster_debug_markers(
 		galaxy_state: GalaxyState,
 		active_cluster_session: ActiveClusterSession,
 		visible_canvas_rect: Rect2 = Rect2(),
-		canvas_scale: float = 1.0) -> Dictionary:
+		canvas_scale: float = 1.0,
+		active_macro_sector_session = null) -> Dictionary:
 	var markers: Array = []
 	var nearest_remote_cluster_id: int = -1
 	var nearest_remote_distance: float = INF
@@ -255,11 +337,20 @@ static func build_registered_cluster_debug_markers(
 			"nearest_remote_cluster_id": nearest_remote_cluster_id,
 	}
 	var safe_canvas_scale: float = maxf(canvas_scale, 0.001)
+	var has_macro_sector_overlay: bool = uses_macro_sector_debug_overlay(active_macro_sector_session)
 	var marker_cull_margin: float = REMOTE_CLUSTER_MARKER_CULL_MARGIN_PX / safe_canvas_scale
 	for cluster_state in galaxy_state.get_clusters():
 		if cluster_state == null:
 			continue
 		var is_active: bool = cluster_state.cluster_id == active_cluster_session.cluster_id
+		var macro_sector_zone: int = _resolve_macro_sector_zone(
+			active_macro_sector_session,
+			cluster_state.cluster_id
+		) if has_macro_sector_overlay else MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE
+		var zone_profile: Dictionary = macro_sector_zone_debug_profile(
+			macro_sector_zone,
+			is_active
+		) if has_macro_sector_overlay else {}
 		var local_center: Vector2 = active_cluster_session.to_local(cluster_state.global_center)
 		var marker_center: Vector2 = BodyRenderer.sim_to_screen(local_center)
 		var marker_radius_world: float = cluster_debug_marker_world_radius(
@@ -283,7 +374,16 @@ static func build_registered_cluster_debug_markers(
 			"radius": cluster_state.get_authoritative_radius(),
 			"is_active": is_active,
 			"state": activation_state_debug_name(cluster_state.activation_state),
-			"color": cluster_debug_color(cluster_state.activation_state),
+			"color": zone_profile.get("marker_color", cluster_debug_color(cluster_state.activation_state)),
+			"macro_sector_zone_id": macro_sector_zone,
+			"macro_sector_zone": MACRO_SECTOR_ZONE_SCRIPT.debug_name(macro_sector_zone),
+			"is_macro_sector_member": has_macro_sector_overlay and macro_sector_zone != MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE,
+			"zone_label": macro_sector_zone_label(macro_sector_zone) if has_macro_sector_overlay else "",
+			"overlay_fill_alpha": float(zone_profile.get("overlay_fill_alpha", 0.0)),
+			"overlay_ring_alpha": float(zone_profile.get("overlay_ring_alpha", 0.0)),
+			"overlay_ring_width": float(zone_profile.get("overlay_ring_width", 1.0)),
+			"link_alpha": float(zone_profile.get("link_alpha", 0.0)),
+			"link_width": float(zone_profile.get("link_width", 1.0)),
 		})
 		if not is_active:
 			var center_distance: float = local_center.length()
@@ -294,7 +394,9 @@ static func build_registered_cluster_debug_markers(
 		var marker_cluster_id: int = int(marker.get("cluster_id", -1))
 		var marker_state: String = str(marker.get("state", ""))
 		var label_prefix: String = ""
-		if bool(marker.get("is_active", false)):
+		if has_macro_sector_overlay:
+			label_prefix = str(marker.get("zone_label", ""))
+		elif bool(marker.get("is_active", false)):
 			label_prefix = "ACTIVE"
 		elif marker_cluster_id == nearest_remote_cluster_id:
 			label_prefix = "PREVIEW" if marker_state == "simplified" else "UNLOADED"
@@ -356,12 +458,15 @@ static func build_remote_cluster_preview_specs(
 				"body_type": int(source_spec.get("body_type", SimBody.BodyType.ASTEROID)),
 				"material_type": int(source_spec.get("material_type", SimBody.MaterialType.MIXED)),
 				"local_position": local_position,
+				"cluster_local_center": local_center,
+				"cluster_radius": cluster_state.get_authoritative_radius(),
 				"radius": float(source_spec.get("radius", 1.0)),
 				"seed": int(source_spec.get("seed", 0)),
 				"cluster_id": cluster_state.cluster_id,
 				"state": activation_state_debug_name(cluster_state.activation_state),
 				"preview_lod": preview_lod,
 				"macro_sector_zone": MACRO_SECTOR_ZONE_SCRIPT.debug_name(macro_sector_zone),
+				"is_macro_sector_member": macro_sector_zone != MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE,
 			}
 			preview_specs.append(preview_spec)
 	return preview_specs
@@ -648,6 +753,46 @@ static func cluster_debug_marker_world_radius(
 		min_marker_radius
 	)
 	return clampf(target_marker_radius, min_marker_radius, max_marker_radius)
+
+static func uses_macro_sector_debug_overlay(active_macro_sector_session) -> bool:
+	return active_macro_sector_session != null and active_macro_sector_session.descriptor != null
+
+static func macro_sector_zone_label(zone: int) -> String:
+	return MACRO_SECTOR_ZONE_SCRIPT.debug_name(zone).to_upper()
+
+static func macro_sector_zone_debug_profile(zone: int, is_active: bool = false) -> Dictionary:
+	var profile := {
+		"marker_color": Color(0.72, 0.76, 0.84, 0.34),
+		"overlay_fill_alpha": 0.020,
+		"overlay_ring_alpha": 0.10,
+		"overlay_ring_width": 0.9,
+		"link_alpha": 0.0,
+		"link_width": 0.0,
+	}
+	match zone:
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FOCUS:
+			profile["marker_color"] = Color(1.0, 0.88, 0.34, 0.94)
+			profile["overlay_fill_alpha"] = 0.11
+			profile["overlay_ring_alpha"] = 0.54
+			profile["overlay_ring_width"] = 2.2
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT:
+			profile["marker_color"] = Color(0.34, 0.94, 0.82, 0.80)
+			profile["overlay_fill_alpha"] = 0.075
+			profile["overlay_ring_alpha"] = 0.34
+			profile["overlay_ring_width"] = 1.7
+			profile["link_alpha"] = 0.34
+			profile["link_width"] = 2.2
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR:
+			profile["marker_color"] = Color(0.58, 0.78, 1.0, 0.62)
+			profile["overlay_fill_alpha"] = 0.045
+			profile["overlay_ring_alpha"] = 0.22
+			profile["overlay_ring_width"] = 1.1
+			profile["link_alpha"] = 0.18
+			profile["link_width"] = 1.2
+	if is_active and zone != MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE:
+		var marker_color: Color = profile["marker_color"]
+		profile["marker_color"] = Color(marker_color.r, marker_color.g, marker_color.b, minf(marker_color.a + 0.08, 1.0))
+	return profile
 
 static func should_draw_cluster_extent_ring(cluster_screen_radius: float, viewport_diagonal: float) -> bool:
 	if cluster_screen_radius < 0.5:

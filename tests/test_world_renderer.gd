@@ -41,6 +41,44 @@ func test_registered_cluster_debug_markers_encode_active_simplified_and_unloaded
 	assert_true(marker_states.has("unloaded"), "the marker payload should keep unloaded remote clusters visible as ghosts")
 	assert_true(int(payload.get("nearest_remote_cluster_id", -1)) >= 0, "the marker payload should identify the nearest remote ghost for labeling")
 
+func test_registered_cluster_debug_markers_encode_macro_sector_zones_and_membership() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var ambient_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(1_000.0, 0.0), 100.0)
+	var far_cluster: ClusterState = _make_manual_preview_cluster(2, Vector2(1_260.0, 0.0), 100.0)
+	var outside_cluster: ClusterState = _make_manual_preview_cluster(3, Vector2(1_520.0, 0.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(ambient_cluster)
+	galaxy_state.add_cluster(far_cluster)
+	galaxy_state.add_cluster(outside_cluster)
+
+	var session := ActiveClusterSession.new()
+	session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var macro_sector_session = _make_manual_macro_sector_session(galaxy_state, session, 0, [1], [2])
+	var payload: Dictionary = WORLD_RENDERER_SCRIPT.build_registered_cluster_debug_markers(
+		galaxy_state,
+		session,
+		Rect2(Vector2(-3_000.0, -3_000.0), Vector2(6_000.0, 6_000.0)),
+		1.0,
+		macro_sector_session
+	)
+	var markers_by_id: Dictionary = {}
+	for marker in payload.get("markers", []):
+		markers_by_id[int(marker.get("cluster_id", -1))] = marker
+
+	assert_eq(str(markers_by_id[0].get("macro_sector_zone", "")), "focus", "the active cluster should expose the focus macro-sector zone")
+	assert_eq(str(markers_by_id[1].get("macro_sector_zone", "")), "ambient", "ambient neighbors should expose their macro-sector zone")
+	assert_eq(str(markers_by_id[2].get("macro_sector_zone", "")), "far", "far members should expose their macro-sector zone")
+	assert_eq(str(markers_by_id[3].get("macro_sector_zone", "")), "outside", "non-members should expose the outside macro-sector zone")
+	assert_eq(str(markers_by_id[0].get("zone_label", "")), "FOCUS", "focus markers should carry the readable macro-zone label")
+	assert_eq(str(markers_by_id[1].get("zone_label", "")), "AMBIENT", "ambient markers should carry the readable macro-zone label")
+	assert_eq(str(markers_by_id[2].get("zone_label", "")), "FAR", "far markers should carry the readable macro-zone label")
+	assert_eq(str(markers_by_id[3].get("zone_label", "")), "OUTSIDE", "outside markers should carry the readable macro-zone label")
+	assert_true(bool(markers_by_id[0].get("is_macro_sector_member", false)), "focus markers should count as macro-sector members")
+	assert_true(bool(markers_by_id[1].get("is_macro_sector_member", false)), "ambient markers should count as macro-sector members")
+	assert_true(bool(markers_by_id[2].get("is_macro_sector_member", false)), "far markers should count as macro-sector members")
+	assert_false(bool(markers_by_id[3].get("is_macro_sector_member", true)), "outside markers should stay outside the active macro-sector")
+
 func test_cluster_debug_marker_radius_stays_visible_across_zoom_scales() -> void:
 	var cluster_radius: float = 1_200.0
 	var zoomed_out_radius: float = WORLD_RENDERER_SCRIPT.cluster_debug_marker_world_radius(cluster_radius, 0.35, false)
@@ -275,6 +313,26 @@ func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
 	assert_false(mid_kinds.has("planet"), "mid-distance LOD should drop planet previews")
 	assert_true(near_kinds.has("planet"), "near LOD should restore full planet previews")
 
+func test_macro_sector_debug_overlay_replaces_discovered_sector_grid_when_session_exists() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var ambient_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(1_000.0, 0.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(ambient_cluster)
+
+	var session := ActiveClusterSession.new()
+	session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var macro_sector_session = _make_manual_macro_sector_session(galaxy_state, session, 0, [1], [])
+
+	assert_false(
+		WORLD_RENDERER_SCRIPT.uses_macro_sector_debug_overlay(null),
+		"without an active macro-sector session the renderer should fall back to legacy sector-grid debugging"
+	)
+	assert_true(
+		WORLD_RENDERER_SCRIPT.uses_macro_sector_debug_overlay(macro_sector_session),
+		"with an active macro-sector session the renderer should prefer macro-sector debug orientation over sector tiles"
+	)
+
 func test_macro_sector_preview_rules_keep_ambient_planets_and_strip_far_planets_from_bh_only_snapshots() -> void:
 	var galaxy_state := GalaxyState.new()
 	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
@@ -343,6 +401,13 @@ func test_far_star_preview_style_is_dimmer_tighter_and_without_halo() -> void:
 		"body_type": SimBody.BodyType.STAR,
 		"macro_sector_zone": "far",
 	})
+	var outside_style: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.preview_visual_profile({
+		"body_type": SimBody.BodyType.STAR,
+		"macro_sector_zone": "outside",
+	})
+	var ambient_accent: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.cluster_accent_profile("ambient")
+	var far_accent: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.cluster_accent_profile("far")
+	var outside_accent: Dictionary = CLUSTER_PREVIEW_RENDERER_SCRIPT.cluster_accent_profile("outside")
 
 	assert_lt(
 		float(far_style.get("radius_scale", 1.0)),
@@ -357,6 +422,21 @@ func test_far_star_preview_style_is_dimmer_tighter_and_without_halo() -> void:
 	assert_false(
 		bool(far_style.get("draw_star_halo", true)),
 		"far stars should drop the ambient halo treatment so the layer reads as macro-structure"
+	)
+	assert_lt(
+		float(outside_style.get("alpha_scale", 1.0)),
+		float(far_style.get("alpha_scale", 1.0)),
+		"outside previews should stay weaker than far macro-structure instead of competing with it"
+	)
+	assert_gt(
+		float(ambient_accent.get("fill_alpha", 0.0)),
+		float(far_accent.get("fill_alpha", 0.0)),
+		"ambient cluster accents should read stronger than far macro-structure accents"
+	)
+	assert_gt(
+		float(far_accent.get("fill_alpha", 0.0)),
+		float(outside_accent.get("fill_alpha", 0.0)),
+		"outside cluster accents should stay weaker than far macro-structure accents"
 	)
 
 func _make_manual_preview_cluster(

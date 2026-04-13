@@ -7,6 +7,7 @@ extends CanvasLayer
 const COLLISION_WINDOW_SECONDS: float = 3.0
 const FRAME_SMOOTHING_ALPHA: float = 0.18
 const DEBUG_METRICS_SCRIPT := preload("res://debug/debug_metrics.gd")
+const MACRO_SECTOR_ZONE_SCRIPT := preload("res://simulation/macro_sector_zone.gd")
 const START_CONFIG_SCRIPT := preload("res://simulation/simulation_start_config.gd")
 
 signal restart_requested(start_config)
@@ -18,6 +19,7 @@ signal cluster_activation_override_cleared()
 var _sim: SimWorld = null
 var _galaxy_state: GalaxyState = null
 var _active_cluster_session: ActiveClusterSession = null
+var _active_macro_sector_session = null
 var _selected_id: int = -1
 var _metrics: RefCounted = DEBUG_METRICS_SCRIPT.new()
 var _collision_timestamps: Array[float] = []
@@ -154,12 +156,14 @@ func initialize(
 		world: SimWorld,
 		start_config = null,
 		galaxy_state: GalaxyState = null,
-		active_cluster_session: ActiveClusterSession = null) -> void:
+		active_cluster_session: ActiveClusterSession = null,
+		active_macro_sector_session = null) -> void:
 	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
 		_sim.collision_occurred.disconnect(_on_collision_occurred)
 	_sim = world
 	_galaxy_state = galaxy_state
 	_active_cluster_session = active_cluster_session
+	_active_macro_sector_session = active_macro_sector_session
 	if _sim != null:
 		_sim.collision_occurred.connect(_on_collision_occurred)
 	_selected_id = -1
@@ -181,6 +185,7 @@ func clear_world_reference() -> void:
 	_sim = null
 	_galaxy_state = null
 	_active_cluster_session = null
+	_active_macro_sector_session = null
 	_selected_id = -1
 	_collision_timestamps.clear()
 	_last_dominant_bh_by_star.clear()
@@ -336,6 +341,7 @@ func _build_cluster_diagnostics_lines() -> String:
 	var materialized_black_holes: int = _sim.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE) if _sim != null else 0
 	var materialized_bodies: int = _sim.get_active_body_count() if _sim != null else 0
 	var content_markers: Array = active_cluster.cluster_blueprint.get("content_markers", []) if active_cluster != null else []
+	var macro_sector_lines: String = _build_macro_sector_diagnostics_lines()
 	return (
 		"Galaxy seed     %d\n" % _galaxy_state.galaxy_seed
 		+ "Sector         %s\n" % _format_sector_coord(sector_coord)
@@ -365,6 +371,22 @@ func _build_cluster_diagnostics_lines() -> String:
 			_active_cluster_session.cluster_global_origin.x,
 			_active_cluster_session.cluster_global_origin.y,
 		]
+		+ macro_sector_lines
+	)
+
+func _build_macro_sector_diagnostics_lines() -> String:
+	if _active_macro_sector_session == null or _active_macro_sector_session.descriptor == null:
+		return ""
+	var descriptor = _active_macro_sector_session.descriptor
+	return (
+		"Macro anchor   %d\n" % int(descriptor.anchor_cluster_id)
+		+ "Macro focus    %d\n" % int(descriptor.focus_cluster_id)
+		+ "Macro ambient  %s\n" % _format_cluster_id_list(
+			descriptor.get_cluster_ids_for_zone(MACRO_SECTOR_ZONE_SCRIPT.Zone.AMBIENT)
+		)
+		+ "Macro far      %s\n" % _format_cluster_id_list(
+			descriptor.get_cluster_ids_for_zone(MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR)
+		)
 	)
 
 func _on_collision_occurred(_pos: Vector2) -> void:
@@ -671,6 +693,14 @@ func _count_active_cluster_black_holes() -> int:
 
 func _format_sector_coord(sector_coord: Vector2i) -> String:
 	return "%d:%d" % [sector_coord.x, sector_coord.y]
+
+func _format_cluster_id_list(cluster_ids: Array) -> String:
+	if cluster_ids.is_empty():
+		return "--"
+	var parts: PackedStringArray = []
+	for cluster_id in cluster_ids:
+		parts.append(str(int(cluster_id)))
+	return ", ".join(parts)
 
 func _format_layout_metric_au(value_au: float) -> String:
 	if value_au < 0.0:

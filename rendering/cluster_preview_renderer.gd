@@ -21,6 +21,7 @@ func update_preview_specs(
 	queue_redraw()
 
 func _draw() -> void:
+	_draw_cluster_accents()
 	for spec in _preview_specs:
 		var body_type: int = int(spec.get("body_type", SimBody.BodyType.ASTEROID))
 		var body_radius: float = float(spec.get("radius", 1.0))
@@ -63,6 +64,45 @@ func _draw() -> void:
 			_:
 				draw_circle(screen_position, screen_radius, color)
 
+func _draw_cluster_accents() -> void:
+	var drawn_cluster_ids: Dictionary = {}
+	for spec in _preview_specs:
+		var cluster_id: int = int(spec.get("cluster_id", -1))
+		if cluster_id < 0 or drawn_cluster_ids.has(cluster_id):
+			continue
+		drawn_cluster_ids[cluster_id] = true
+		var cluster_center: Vector2 = BodyRenderer.sim_to_screen(
+			Vector2(spec.get("cluster_local_center", Vector2.ZERO))
+		)
+		var cluster_radius: float = maxf(
+			BodyRenderer.sim_dist_to_screen(float(spec.get("cluster_radius", 0.0))),
+			18.0 / _canvas_scale
+		)
+		var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
+		var accent_profile: Dictionary = cluster_accent_profile(macro_sector_zone)
+		var accent_radius: float = cluster_radius * float(accent_profile.get("radius_scale", 0.5))
+		if not _is_preview_body_visible(cluster_center, accent_radius):
+			continue
+		var accent_color: Color = cluster_accent_color(macro_sector_zone)
+		var fill_alpha: float = float(accent_profile.get("fill_alpha", 0.0))
+		var ring_alpha: float = float(accent_profile.get("ring_alpha", 0.0))
+		if fill_alpha > 0.0:
+			draw_circle(
+				cluster_center,
+				accent_radius,
+				Color(accent_color.r, accent_color.g, accent_color.b, fill_alpha)
+			)
+		if ring_alpha > 0.0:
+			draw_arc(
+				cluster_center,
+				accent_radius,
+				0.0,
+				TAU,
+				56,
+				Color(accent_color.r, accent_color.g, accent_color.b, ring_alpha),
+				maxf(float(accent_profile.get("ring_width", 1.0)) / _canvas_scale, 0.9 / _canvas_scale)
+			)
+
 func _draw_black_hole_preview(screen_position: Vector2, screen_radius: float, color: Color) -> void:
 	draw_circle(
 		screen_position,
@@ -87,13 +127,17 @@ func _preview_color(spec: Dictionary) -> Color:
 	var macro_sector_zone: String = str(spec.get("macro_sector_zone", "outside"))
 	match body_type:
 		SimBody.BodyType.BLACK_HOLE:
+			if macro_sector_zone == "outside":
+				return Color(0.74, 0.78, 0.86, 0.34)
 			if macro_sector_zone == "far":
 				return Color(0.84, 0.90, 1.0, 0.44)
-			return Color(0.88, 0.94, 1.0, 0.50)
+			return Color(0.92, 0.97, 1.0, 0.58)
 		SimBody.BodyType.STAR:
+			if macro_sector_zone == "outside":
+				return Color(0.74, 0.78, 0.84, 0.34)
 			if macro_sector_zone == "far":
 				return Color(0.84, 0.90, 1.0, 0.46)
-			return Color(1.0, 0.92, 0.50, 0.60)
+			return Color(1.0, 0.94, 0.58, 0.68)
 		SimBody.BodyType.PLANET:
 			match material_type:
 				SimBody.MaterialType.ROCKY:
@@ -116,19 +160,70 @@ static func preview_visual_profile(spec: Dictionary) -> Dictionary:
 		"draw_star_halo": body_type == SimBody.BodyType.STAR,
 		"halo_alpha_scale": 1.0,
 	}
-	if macro_sector_zone == "far":
+	if macro_sector_zone == "ambient":
+		match body_type:
+			SimBody.BodyType.BLACK_HOLE:
+				profile["alpha_scale"] = 1.08
+			SimBody.BodyType.STAR:
+				profile["radius_scale"] = 1.08
+				profile["alpha_scale"] = 1.10
+				profile["halo_alpha_scale"] = 1.25
+			SimBody.BodyType.PLANET:
+				profile["alpha_scale"] = 1.14
+	elif macro_sector_zone == "far":
 		match body_type:
 			SimBody.BodyType.BLACK_HOLE:
 				profile["alpha_scale"] = 0.95
 			SimBody.BodyType.STAR:
-				profile["radius_scale"] = 0.78
-				profile["alpha_scale"] = 0.62
+				profile["radius_scale"] = 0.74
+				profile["alpha_scale"] = 0.56
 				profile["draw_star_halo"] = false
 				profile["halo_alpha_scale"] = 0.0
-	elif macro_sector_zone == "ambient":
-		if body_type == SimBody.BodyType.PLANET:
-			profile["alpha_scale"] = 1.06
+	elif macro_sector_zone == "outside":
+		match body_type:
+			SimBody.BodyType.BLACK_HOLE:
+				profile["alpha_scale"] = 0.62
+			SimBody.BodyType.STAR:
+				profile["radius_scale"] = 0.86
+				profile["alpha_scale"] = 0.44
+				profile["draw_star_halo"] = false
+				profile["halo_alpha_scale"] = 0.0
+			SimBody.BodyType.PLANET:
+				profile["alpha_scale"] = 0.58
 	return profile
+
+static func cluster_accent_color(macro_sector_zone: String) -> Color:
+	match macro_sector_zone:
+		"ambient":
+			return Color(0.32, 0.92, 0.78, 1.0)
+		"far":
+			return Color(0.56, 0.78, 1.0, 1.0)
+		_:
+			return Color(0.72, 0.76, 0.82, 1.0)
+
+static func cluster_accent_profile(macro_sector_zone: String) -> Dictionary:
+	match macro_sector_zone:
+		"ambient":
+			return {
+				"radius_scale": 0.84,
+				"fill_alpha": 0.090,
+				"ring_alpha": 0.22,
+				"ring_width": 1.8,
+			}
+		"far":
+			return {
+				"radius_scale": 0.62,
+				"fill_alpha": 0.045,
+				"ring_alpha": 0.16,
+				"ring_width": 1.1,
+			}
+		_:
+			return {
+				"radius_scale": 0.48,
+				"fill_alpha": 0.018,
+				"ring_alpha": 0.08,
+				"ring_width": 0.9,
+			}
 
 static func _min_preview_screen_px(body_type: int) -> float:
 	match body_type:

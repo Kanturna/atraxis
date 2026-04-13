@@ -222,7 +222,13 @@ func _rebind_active_world(
 		active_macro_sector_session,
 		preserve_remote_layers
 	)
-	_debug_overlay.initialize(sim_world, _current_start_config, galaxy_state, active_cluster_session)
+	_debug_overlay.initialize(
+		sim_world,
+		_current_start_config,
+		galaxy_state,
+		active_cluster_session,
+		active_macro_sector_session
+	)
 	_hud.initialize(sim_world, time_scale)
 	_debug_overlay.visible = debug_visible
 	_world_renderer.set_debug_overlays_visible(debug_visible)

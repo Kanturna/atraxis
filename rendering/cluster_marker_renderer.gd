@@ -106,14 +106,16 @@ func _draw() -> void:
 			marker_radius_screen,
 			Color(cluster_color.r, cluster_color.g, cluster_color.b, 0.16 if is_active else 0.11)
 		)
-		var label_prefix: String = str(marker.get("label_prefix", ""))
-		if label_prefix == "":
+		var label_text: String = str(marker.get("zone_label", ""))
+		if label_text == "":
+			label_text = str(marker.get("label_prefix", ""))
+		if label_text == "":
 			continue
 		var label_position: Vector2 = center + Vector2(12.0 / _canvas_scale, -10.0 / _canvas_scale)
 		draw_string(
 			ThemeDB.fallback_font,
 			label_position,
-			"%s C%d" % [label_prefix, int(marker.get("cluster_id", -1))],
+			"%s C%d" % [label_text, int(marker.get("cluster_id", -1))],
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1.0,
 			ThemeDB.fallback_font_size,
