@@ -103,6 +103,36 @@ func test_worldgen_materialization_matches_the_active_cluster_black_hole_registr
 			"materialized black holes should keep the cluster registry's stored mass"
 		)
 
+func test_runtime_star_descriptor_round_trips_pending_and_confirmed_host_state() -> void:
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_seed = 42
+
+	var star := WorldBuilder._make_star()
+	star.kinematic = false
+	star.scripted_orbit_enabled = false
+	star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
+	star.last_dominant_bh_id = 11
+	star.dominant_bh_handoff_count = 3
+	star.pending_host_bh_id = 23
+	star.pending_host_time = 0.5
+	star.confirmed_host_handoff_count = 2
+	star.position = Vector2(12.0, 34.0)
+	star.velocity = Vector2(5.0, -7.0)
+
+	var object_state: ClusterObjectState = WorldBuilder._build_object_state_from_body(
+		cluster_state,
+		star,
+		"cluster_0:star_0",
+		ObjectResidencyState.State.ACTIVE
+	)
+	var restored: SimBody = WorldBuilder._make_body_from_object_state(object_state)
+
+	assert_eq(restored.last_dominant_bh_id, 11, "runtime star descriptors should persist the last dominant BH id")
+	assert_eq(restored.dominant_bh_handoff_count, 3, "runtime star descriptors should persist the raw dominant handoff counter")
+	assert_eq(restored.pending_host_bh_id, 23, "runtime star descriptors should persist pending host candidates")
+	assert_almost_eq(restored.pending_host_time, 0.5, 0.001, "runtime star descriptors should persist pending host timers")
+	assert_eq(restored.confirmed_host_handoff_count, 2, "runtime star descriptors should persist confirmed host handoff counters")
+
 func test_worldgen_active_cluster_keeps_sector_metadata_for_runtime_and_debug() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 61

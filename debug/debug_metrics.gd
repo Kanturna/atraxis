@@ -37,6 +37,7 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 	var host_dominance_mismatch_count: int = 0
 	var stars_with_dominant_handoffs: int = 0
 	var total_dominant_handoffs: int = 0
+	var confirmed_host_handoff_count_total: int = 0
 	var close_star_encounter_count: int = 0
 	for black_hole in black_holes:
 		total_black_hole_mass += black_hole.mass
@@ -105,12 +106,17 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			if body.dominant_bh_handoff_count > 0:
 				stars_with_dominant_handoffs += 1
 			total_dominant_handoffs += body.dominant_bh_handoff_count
+			confirmed_host_handoff_count_total += body.confirmed_host_handoff_count
 			if min_other_star_distance > 0.0 and min_other_star_distance <= CLOSE_STAR_ENCOUNTER_DISTANCE:
 				close_star_encounter_count += 1
 			anchor_state["host_bh_id"] = host_bh_id
 			anchor_state["host_distance"] = host_distance
 			anchor_state["dominant_matches_host"] = dominant_matches_host
 			anchor_state["dominant_handoff_count"] = body.dominant_bh_handoff_count
+			anchor_state["confirmed_host_handoff_count"] = body.confirmed_host_handoff_count
+			anchor_state["pending_host_bh_id"] = body.pending_host_bh_id
+			anchor_state["pending_host_time"] = body.pending_host_time
+			anchor_state["handoff_pending"] = body.pending_host_bh_id >= 0
 			anchor_state["min_other_star_distance"] = min_other_star_distance
 			star_anchor_states.append(anchor_state)
 			if anchor_state["negative_specific_energy"]:
@@ -196,6 +202,7 @@ func build_snapshot(world: SimWorld, collisions_last_3s: int) -> Dictionary:
 			"host_dominance_mismatch_count": host_dominance_mismatch_count,
 			"stars_with_dominant_handoffs": stars_with_dominant_handoffs,
 			"total_dominant_handoffs": total_dominant_handoffs,
+			"confirmed_host_handoff_count_total": confirmed_host_handoff_count_total,
 			"close_star_encounter_count": close_star_encounter_count,
 			"star_anchor_states": star_anchor_states,
 		},

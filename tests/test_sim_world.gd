@@ -61,6 +61,63 @@ func test_dominant_black_hole_handoffs_are_counted_when_anchor_changes() -> void
 	assert_eq(star.last_dominant_bh_id, right_black_hole.id, "after crossing the balance region the other black hole should dominate")
 	assert_eq(star.dominant_bh_handoff_count, 1, "switching dominant black holes should increment the persisted handoff counter")
 
+func test_dynamic_star_host_hysteresis_ignores_short_dominance_blips() -> void:
+	var fixture: Dictionary = _make_dynamic_star_host_handoff_fixture()
+	var world: SimWorld = fixture["world"]
+	var left_black_hole: SimBody = fixture["left_black_hole"]
+	var right_black_hole: SimBody = fixture["right_black_hole"]
+	var star: SimBody = fixture["star"]
+
+	star.position = Vector2(6500.0, 0.0)
+	star.velocity = Vector2(0.0, 300.0)
+
+	world._update_dynamic_star_host_assignments(0.25)
+
+	assert_eq(star.pending_host_bh_id, right_black_hole.id, "a valid foreign dominant BH should become the pending host candidate")
+	assert_eq(star.pending_host_time, 0.0, "a fresh pending candidate should start at zero observed stable time")
+	assert_eq(star.orbit_parent_id, left_black_hole.id, "short dominance blips should not immediately reparent the star")
+
+	world._update_dynamic_star_host_assignments(0.25)
+
+	assert_almost_eq(star.pending_host_time, 0.25, 0.001, "later stable samples should accumulate the observed pending time")
+
+	star.position = Vector2(2200.0, 0.0)
+
+	world._update_dynamic_star_host_assignments(0.25)
+
+	assert_eq(star.pending_host_bh_id, -1, "losing the foreign dominance signal should clear the pending candidate")
+	assert_eq(star.pending_host_time, 0.0, "clearing the pending candidate should reset its timer")
+	assert_eq(star.orbit_parent_id, left_black_hole.id, "short blips should leave the confirmed host untouched")
+	assert_eq(star.confirmed_host_handoff_count, 0, "short blips should not count as confirmed host handoffs")
+	assert_eq(star.orbit_binding_state, SimBody.OrbitBindingState.FREE_DYNAMIC, "host hysteresis should keep dynamic stars dynamic")
+
+func test_dynamic_star_host_hysteresis_confirms_persistent_foreign_capture_signal() -> void:
+	var fixture: Dictionary = _make_dynamic_star_host_handoff_fixture()
+	var world: SimWorld = fixture["world"]
+	var left_black_hole: SimBody = fixture["left_black_hole"]
+	var right_black_hole: SimBody = fixture["right_black_hole"]
+	var star: SimBody = fixture["star"]
+
+	star.position = Vector2(6500.0, 0.0)
+	star.velocity = Vector2(0.0, 300.0)
+
+	world._update_dynamic_star_host_assignments(0.25)
+	world._update_dynamic_star_host_assignments(0.25)
+	world._update_dynamic_star_host_assignments(0.25)
+
+	assert_eq(star.orbit_parent_id, left_black_hole.id, "the host should not switch before the hysteresis duration is fully observed")
+	assert_eq(star.pending_host_bh_id, right_black_hole.id, "the same foreign host should remain pending while the signal stays stable")
+	assert_almost_eq(star.pending_host_time, 0.5, 0.001, "pending time should reflect only the stable samples after the first pending frame")
+	assert_eq(star.confirmed_host_handoff_count, 0, "the confirmed counter should stay flat before the threshold is met")
+
+	world._update_dynamic_star_host_assignments(0.25)
+
+	assert_eq(star.orbit_parent_id, right_black_hole.id, "persistent foreign dominance plus negative energy should confirm the host change")
+	assert_eq(star.confirmed_host_handoff_count, 1, "confirmed host switches should increment their own counter")
+	assert_eq(star.pending_host_bh_id, -1, "confirming a host switch should clear the pending candidate")
+	assert_eq(star.pending_host_time, 0.0, "confirming a host switch should reset the pending timer")
+	assert_eq(star.orbit_binding_state, SimBody.OrbitBindingState.FREE_DYNAMIC, "confirmed host changes should not convert the star into an analytic orbiter")
+
 func test_leapfrog_keeps_circular_star_orbit_stable() -> void:
 	var world := SimWorld.new()
 
@@ -158,6 +215,30 @@ func _make_dynamic_star() -> SimBody:
 	star.mass = SimConstants.STAR_MASS
 	star.radius = SimConstants.STAR_RADIUS
 	return star
+
+func _make_dynamic_star_host_handoff_fixture() -> Dictionary:
+	var world := SimWorld.new()
+
+	var left_black_hole := _make_black_hole()
+	left_black_hole.position = Vector2.ZERO
+	world.add_body(left_black_hole)
+
+	var right_black_hole := _make_black_hole()
+	right_black_hole.position = Vector2(9000.0, 0.0)
+	world.add_body(right_black_hole)
+
+	var star := _make_dynamic_star()
+	star.position = Vector2(2200.0, 0.0)
+	star.velocity = Vector2(0.0, 300.0)
+	star.orbit_parent_id = left_black_hole.id
+	world.add_body(star)
+
+	return {
+		"world": world,
+		"left_black_hole": left_black_hole,
+		"right_black_hole": right_black_hole,
+		"star": star,
+	}
 
 func _specific_orbital_energy(body: SimBody, black_hole: SimBody) -> float:
 	var distance: float = body.position.distance_to(black_hole.position)

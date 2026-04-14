@@ -278,6 +278,7 @@ func test_anchor_metrics_report_host_alignment_handoffs_and_close_star_encounter
 	matched_star.velocity = Vector2(0.0, 300.0)
 	matched_star.orbit_parent_id = central_bh.id
 	matched_star.dominant_bh_handoff_count = 2
+	matched_star.confirmed_host_handoff_count = 1
 	world.add_body(matched_star)
 
 	var mismatched_star := SimBody.new()
@@ -288,6 +289,9 @@ func test_anchor_metrics_report_host_alignment_handoffs_and_close_star_encounter
 	mismatched_star.position = Vector2(2900.0, 0.0)
 	mismatched_star.velocity = Vector2(0.0, 300.0)
 	mismatched_star.orbit_parent_id = outer_bh.id
+	mismatched_star.pending_host_bh_id = central_bh.id
+	mismatched_star.pending_host_time = 0.5
+	mismatched_star.confirmed_host_handoff_count = 2
 	world.add_body(mismatched_star)
 
 	var snapshot: Dictionary = DEBUG_METRICS_SCRIPT.new().build_snapshot(world, 0)
@@ -300,11 +304,20 @@ func test_anchor_metrics_report_host_alignment_handoffs_and_close_star_encounter
 	assert_almost_eq(anchor["min_star_host_bh_distance"], 2500.0, 0.001, "host diagnostics should expose the nearest star-to-host distance")
 	assert_eq(anchor["stars_with_dominant_handoffs"], 1, "handoff aggregation should count stars that already switched dominant BHs")
 	assert_eq(anchor["total_dominant_handoffs"], 2, "handoff aggregation should sum the per-star counters")
+	assert_eq(anchor["confirmed_host_handoff_count_total"], 3, "confirmed host handoffs should aggregate independently from raw dominant switches")
 	assert_eq(anchor["close_star_encounter_count"], 2, "both stars should report the close encounter when their separation is small")
 	assert_eq(star_states[0]["host_bh_id"], central_bh.id, "per-star diagnostics should expose the matched host id")
 	assert_true(star_states[0]["dominant_matches_host"], "the matched star should report host alignment")
 	assert_eq(star_states[0]["dominant_handoff_count"], 2, "per-star diagnostics should expose the persisted handoff counter")
+	assert_eq(star_states[0]["confirmed_host_handoff_count"], 1, "per-star diagnostics should expose confirmed host handoff counts")
+	assert_eq(star_states[0]["pending_host_bh_id"], -1, "stars without a pending host switch should expose the cleared pending host id")
+	assert_almost_eq(star_states[0]["pending_host_time"], 0.0, 0.001, "stars without a pending host switch should expose a zero pending timer")
+	assert_false(star_states[0]["handoff_pending"], "stars without a pending host switch should expose a false pending flag")
 	assert_almost_eq(star_states[0]["min_other_star_distance"], 400.0, 0.001, "per-star diagnostics should expose the nearest other-star distance")
 	assert_eq(star_states[1]["host_bh_id"], outer_bh.id, "per-star diagnostics should expose the mismatched host id")
 	assert_false(star_states[1]["dominant_matches_host"], "the mismatched star should report a host mismatch")
 	assert_almost_eq(star_states[1]["host_distance"], 6100.0, 0.001, "host distance should use the assigned host, not the dominant one")
+	assert_eq(star_states[1]["confirmed_host_handoff_count"], 2, "per-star diagnostics should expose confirmed host switches")
+	assert_eq(star_states[1]["pending_host_bh_id"], central_bh.id, "per-star diagnostics should expose the pending confirmed-host candidate")
+	assert_almost_eq(star_states[1]["pending_host_time"], 0.5, 0.001, "per-star diagnostics should expose the pending host timer")
+	assert_true(star_states[1]["handoff_pending"], "per-star diagnostics should flag stars with a pending confirmed-host switch")

@@ -667,6 +667,9 @@ static func _make_body_from_object_state(object_state: ClusterObjectState) -> Si
 	body.orbit_angular_speed = float(object_state.descriptor.get("orbit_angular_speed", 0.0))
 	body.last_dominant_bh_id = int(object_state.descriptor.get("last_dominant_bh_id", -1))
 	body.dominant_bh_handoff_count = int(object_state.descriptor.get("dominant_bh_handoff_count", 0))
+	body.pending_host_bh_id = int(object_state.descriptor.get("pending_host_bh_id", -1))
+	body.pending_host_time = float(object_state.descriptor.get("pending_host_time", 0.0))
+	body.confirmed_host_handoff_count = int(object_state.descriptor.get("confirmed_host_handoff_count", 0))
 	body.debris_mass = float(object_state.descriptor.get("debris_mass", 0.0))
 	body.sleeping = bool(object_state.descriptor.get("sleeping", false))
 	body.active = bool(object_state.descriptor.get("active", true))
@@ -1499,6 +1502,9 @@ static func _build_object_state_from_body(
 	object_state.descriptor["orbit_angular_speed"] = body.orbit_angular_speed
 	object_state.descriptor["last_dominant_bh_id"] = body.last_dominant_bh_id
 	object_state.descriptor["dominant_bh_handoff_count"] = body.dominant_bh_handoff_count
+	object_state.descriptor["pending_host_bh_id"] = body.pending_host_bh_id
+	object_state.descriptor["pending_host_time"] = body.pending_host_time
+	object_state.descriptor["confirmed_host_handoff_count"] = body.confirmed_host_handoff_count
 	object_state.descriptor["debris_mass"] = body.debris_mass
 	object_state.descriptor["sleeping"] = body.sleeping
 	object_state.descriptor["active"] = body.active

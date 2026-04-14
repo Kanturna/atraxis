@@ -22,6 +22,20 @@ const ASTEROID_MASS_MAX: float = 50.0
 # 1 AU = 1000 sim-units. Keep orbital radii as multiples of this.
 const AU: float = 1000.0
 
+# --- STAR-STAR gravity gating ---
+# Black holes remain the primary anchors. Dynamic stars still pull on each
+# other strongly up close, but their long-range mutual sensitivity is softened
+# to reduce constant field-wide reorganization.
+const STAR_STAR_GRAVITY_FAR_SCALE: float = 0.15
+const STAR_STAR_FULL_FORCE_DISTANCE: float = 0.9 * AU
+const STAR_STAR_FORCE_FADE_DISTANCE: float = 2.75 * AU
+
+# --- Dynamic star host hysteresis ---
+# Instantaneous dominant-anchor diagnostics stay raw, but confirmed host
+# reassignments require sustained foreign dominance plus negative energy.
+const HOST_HANDOFF_MIN_DOMINANCE_RATIO: float = 1.4
+const HOST_HANDOFF_MIN_DURATION: float = 0.75
+
 # --- Zone boundaries (distance from star center) ---
 const INNER_ZONE_MAX: float  = 0.5 * AU   # hot / energetic
 const MIDDLE_ZONE_MIN: float = 0.5 * AU   # temperate start

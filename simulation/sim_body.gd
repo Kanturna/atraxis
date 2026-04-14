@@ -94,6 +94,9 @@ var orbit_angular_speed: float = 0.0
 ## Persisted so cluster snapshot reloads keep the accumulated handoff history.
 var last_dominant_bh_id: int = -1
 var dominant_bh_handoff_count: int = 0
+var pending_host_bh_id: int = -1
+var pending_host_time: float = 0.0
+var confirmed_host_handoff_count: int = 0
 
 # -------------------------------------------------------------------------
 # Lifecycle

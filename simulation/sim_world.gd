@@ -5,6 +5,8 @@
 class_name SimWorld
 extends RefCounted
 
+const ANCHOR_FIELD_SCRIPT := preload("res://simulation/anchor_field.gd")
+
 signal body_added(body: SimBody)
 signal body_removed(body_id: int)
 signal debris_field_changed(field: DebrisField)
@@ -41,6 +43,7 @@ func step_sim(dt: float) -> void:
 		_update_scripted_orbiters(sim_dt)
 		_run_sleep_phase(sim_dt)
 		_rebuild_dominant_bh_cache()
+		_update_dynamic_star_host_assignments(sim_dt)
 
 	_run_collision_phase()
 	_aggregate_debris_fields()
@@ -286,6 +289,48 @@ func _requires_black_hole_adaptive_integration(body: SimBody) -> bool:
 		SimBody.BodyType.PLANET,
 		SimBody.BodyType.ASTEROID,
 	]
+
+func _update_dynamic_star_host_assignments(sim_dt: float) -> void:
+	var black_holes: Array = get_black_holes()
+	for body in bodies:
+		if body == null or not body.active or body.body_type != SimBody.BodyType.STAR:
+			continue
+		if not _should_track_dynamic_star_host_assignment(body):
+			_clear_pending_dynamic_star_host_assignment(body)
+			continue
+		if black_holes.is_empty():
+			_clear_pending_dynamic_star_host_assignment(body)
+			continue
+		var anchor_state: Dictionary = ANCHOR_FIELD_SCRIPT.build_star_anchor_state(body, black_holes)
+		var candidate_host_id: int = int(anchor_state.get("dominant_bh_id", -1))
+		var candidate_host: SimBody = get_body_by_id(candidate_host_id)
+		var valid_candidate: bool = candidate_host != null \
+			and candidate_host_id != body.orbit_parent_id \
+			and float(anchor_state.get("dominance_ratio", 0.0)) >= SimConstants.HOST_HANDOFF_MIN_DOMINANCE_RATIO \
+			and bool(anchor_state.get("negative_specific_energy", false))
+		if not valid_candidate:
+			_clear_pending_dynamic_star_host_assignment(body)
+			continue
+		if body.pending_host_bh_id != candidate_host_id:
+			body.pending_host_bh_id = candidate_host_id
+			body.pending_host_time = 0.0
+			continue
+		body.pending_host_time += sim_dt
+		if body.pending_host_time < SimConstants.HOST_HANDOFF_MIN_DURATION:
+			continue
+		body.orbit_parent_id = candidate_host_id
+		body.confirmed_host_handoff_count += 1
+		_clear_pending_dynamic_star_host_assignment(body)
+
+func _should_track_dynamic_star_host_assignment(body: SimBody) -> bool:
+	return body.active \
+		and body.body_type == SimBody.BodyType.STAR \
+		and body.orbit_binding_state == SimBody.OrbitBindingState.FREE_DYNAMIC \
+		and not body.kinematic
+
+func _clear_pending_dynamic_star_host_assignment(body: SimBody) -> void:
+	body.pending_host_bh_id = -1
+	body.pending_host_time = 0.0
 
 func _handle_black_hole_segment_impacts(body: SimBody, previous_position: Vector2, black_holes: Array) -> void:
 	if black_holes.is_empty():

@@ -340,6 +340,7 @@ func _update_anchor_diagnostics_text(anchor_stats: Dictionary, star_anchor_lines
 		+ "Host matches    %d\n" % anchor_stats["host_dominance_match_count"]
 		+ "Host mismatch   %d\n" % anchor_stats["host_dominance_mismatch_count"]
 		+ "BH handoffs     %d\n" % anchor_stats["total_dominant_handoffs"]
+		+ "Host confirms   %d\n" % anchor_stats["confirmed_host_handoff_count_total"]
 		+ "Stars handoffed %d\n" % anchor_stats["stars_with_dominant_handoffs"]
 		+ "Close star enc  %d\n" % anchor_stats["close_star_encounter_count"]
 		+ star_anchor_lines
@@ -629,14 +630,21 @@ func _format_star_anchor_lines(star_anchor_states: Array) -> String:
 	for state in star_anchor_states:
 		var host_text: String = "--" if state["host_bh_id"] < 0 else str(state["host_bh_id"])
 		var dominant_text: String = "--" if state["dominant_bh_id"] < 0 else str(state["dominant_bh_id"])
+		var pending_host_id: int = int(state.get("pending_host_bh_id", -1))
+		var pending_text: String = "--" if pending_host_id < 0 else "%d@%.2f" % [
+			pending_host_id,
+			float(state.get("pending_host_time", 0.0)),
+		]
 		var host_status_text: String = "host-ok" if state["dominant_matches_host"] else "host-swap"
 		var status_text: String = "E<0" if state["negative_specific_energy"] else "E>=0"
 		lines.append(
-			"Star %d         H%s D%s h%d rH%.0f d*%.0f %s %s" % [
+			"Star %d         H%s D%s h%d c%d p%s rH%.0f d*%.0f %s %s" % [
 				state["star_id"],
 				host_text,
 				dominant_text,
 				state["dominant_handoff_count"],
+				state.get("confirmed_host_handoff_count", 0),
+				pending_text,
 				state["host_distance"],
 				state["min_other_star_distance"],
 				host_status_text,
