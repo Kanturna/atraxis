@@ -43,6 +43,15 @@ var _debug_overlays_visible: bool = false
 var _cached_remote_preview_specs: Array = []
 var _cached_marker_payload: Dictionary = {}
 
+## Sector highlight blend state — smooths the blue active-sector border when
+## crossing into a new sector so it fades rather than jumping instantly.
+## Sentinel Vector2i(-32768, -32768) means "not yet initialised".
+const _SECTOR_COORD_NONE: Vector2i = Vector2i(-32768, -32768)
+const SECTOR_HIGHLIGHT_BLEND_SPEED: float = 10.0
+var _last_rendered_active_sector_coord: Vector2i = _SECTOR_COORD_NONE
+var _prior_active_sector_coord: Vector2i = _SECTOR_COORD_NONE
+var _sector_highlight_blend: float = 1.0
+
 func initialize(
 		world: SimWorld,
 		zones_by_star: Dictionary,
@@ -65,6 +74,10 @@ func initialize(
 	_active_sector_session = active_sector_session
 	_active_cluster_session = active_cluster_session
 	_active_macro_sector_session = active_macro_sector_session
+	# Reset blend so a hard restart never animates the initial highlight.
+	_last_rendered_active_sector_coord = _SECTOR_COORD_NONE
+	_prior_active_sector_coord = _SECTOR_COORD_NONE
+	_sector_highlight_blend = 1.0
 	_cached_remote_preview_specs = []
 	_cached_marker_payload = {}
 	_worldgen = GalaxyWorldgen.new(galaxy_state.worldgen_config) \
@@ -141,6 +154,7 @@ func render_frame(world: SimWorld) -> void:
 			canvas_scale,
 			visible_canvas_rect
 		)
+	_advance_sector_highlight_blend()
 	if _active_sector_session != null or _debug_overlays_visible:
 		queue_redraw()
 
@@ -168,6 +182,58 @@ func _clear_layer(layer: Node2D) -> void:
 		return
 	for child in layer.get_children():
 		child.free()
+
+## Advances the blend counter that smooths the sector highlight on each call to
+## render_frame(). Detects when the active sector coord changed and starts a
+## cross-fade from the prior sector's visual profile to the new one.
+func _advance_sector_highlight_blend() -> void:
+	if _active_sector_session == null or _active_sector_session.sector_state == null:
+		_last_rendered_active_sector_coord = _SECTOR_COORD_NONE
+		_prior_active_sector_coord = _SECTOR_COORD_NONE
+		_sector_highlight_blend = 1.0
+		return
+	var current_coord: Vector2i = _active_sector_session.sector_state.sector_coord
+	if current_coord != _last_rendered_active_sector_coord:
+		_prior_active_sector_coord = _last_rendered_active_sector_coord
+		_last_rendered_active_sector_coord = current_coord
+		# Only animate when there was a previous sector (not on first load / restart).
+		_sector_highlight_blend = 0.0 if _prior_active_sector_coord != _SECTOR_COORD_NONE else 1.0
+	elif _sector_highlight_blend < 1.0:
+		_sector_highlight_blend = minf(_sector_highlight_blend + SECTOR_HIGHLIGHT_BLEND_SPEED / 60.0, 1.0)
+
+## Returns a visual profile blended between the sectors' from/to styles.
+## Only called for the two sectors participating in a transition.
+func _blended_sector_visual_profile(
+		sector_coord: Vector2i,
+		current_relation: String,
+		contains_systems: bool) -> Dictionary:
+	var to_profile: Dictionary = sector_visual_profile(current_relation, contains_systems, _debug_overlays_visible)
+	if sector_coord == _last_rendered_active_sector_coord:
+		# This sector is becoming active — blend from its old (non-active) profile.
+		var prior_relation: String = sector_relation_name(sector_coord, _prior_active_sector_coord)
+		var from_profile: Dictionary = sector_visual_profile(prior_relation, contains_systems, _debug_overlays_visible)
+		return _lerp_visual_profiles(from_profile, to_profile, _sector_highlight_blend)
+	else:
+		# This sector is losing the active highlight — blend from active to current.
+		var from_profile: Dictionary = sector_visual_profile("active", contains_systems, _debug_overlays_visible)
+		return _lerp_visual_profiles(from_profile, to_profile, _sector_highlight_blend)
+
+static func _lerp_visual_profiles(from_p: Dictionary, to_p: Dictionary, t: float) -> Dictionary:
+	if t >= 1.0:
+		return to_p
+	if t <= 0.0:
+		return from_p
+	var result: Dictionary = {}
+	for key in to_p:
+		var to_val = to_p[key]
+		var from_val = from_p.get(key, to_val)
+		if to_val is Color:
+			result[key] = (from_val as Color).lerp(to_val as Color, t)
+		elif to_val is float:
+			result[key] = lerpf(float(from_val), float(to_val), t)
+		else:
+			result[key] = to_val
+	return result
 
 func _ensure_overlay_layers() -> void:
 	if _preview_layer == null:
@@ -304,11 +370,13 @@ func _draw_discovered_sectors() -> void:
 				sector_rect.grow(SECTOR_DRAW_CULL_MARGIN_PX / canvas_scale)
 		):
 			continue
-		var visual_profile: Dictionary = sector_visual_profile(
-			sector_relation,
-			contains_systems,
-			_debug_overlays_visible
-		)
+		var visual_profile: Dictionary
+		if _sector_highlight_blend < 1.0 and \
+				(sector_coord == _last_rendered_active_sector_coord or \
+				sector_coord == _prior_active_sector_coord):
+			visual_profile = _blended_sector_visual_profile(sector_coord, sector_relation, contains_systems)
+		else:
+			visual_profile = sector_visual_profile(sector_relation, contains_systems, _debug_overlays_visible)
 		_draw_sector_tile(sector_rect, sector_coord, sector_state, visual_profile)
 
 func _draw_sector_tile(
