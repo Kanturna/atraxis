@@ -182,6 +182,16 @@ func initialize(
 	_update_stats_text()
 	_update_panel_group_visibility()
 
+func update_runtime_context(
+		galaxy_state: GalaxyState = null,
+		active_cluster_session: ActiveClusterSession = null,
+		active_macro_sector_session = null,
+		active_sector_session = null) -> void:
+	_galaxy_state = galaxy_state
+	_active_sector_session = active_sector_session
+	_active_cluster_session = active_cluster_session
+	_active_macro_sector_session = active_macro_sector_session
+
 func clear_world_reference() -> void:
 	if _sim != null and _sim.collision_occurred.is_connected(_on_collision_occurred):
 		_sim.collision_occurred.disconnect(_on_collision_occurred)

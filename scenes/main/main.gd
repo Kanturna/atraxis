@@ -80,6 +80,7 @@ func _process(delta: float) -> void:
 		steps += 1
 	var previous_world: SimWorld = sim_world
 	var world_switched: bool = _sync_runtime_aliases()
+	_sync_runtime_context_views()
 	if world_switched:
 		if _should_rebase_pending_cluster_transition():
 			_rebase_pending_cluster_transition_after_world_switch(preserved_focus_global_position)
@@ -200,6 +201,22 @@ func _sync_runtime_aliases() -> bool:
 	active_macro_sector_session = galaxy_runtime.active_macro_sector_session
 	sim_world = galaxy_runtime.get_active_sim_world()
 	return previous_world != sim_world
+
+func _sync_runtime_context_views() -> void:
+	if _world_renderer != null:
+		_world_renderer.update_runtime_context(
+			galaxy_state,
+			active_sector_session,
+			active_cluster_session,
+			active_macro_sector_session
+		)
+	if _debug_overlay != null:
+		_debug_overlay.update_runtime_context(
+			galaxy_state,
+			active_cluster_session,
+			active_macro_sector_session,
+			active_sector_session
+		)
 
 func _rebind_active_world(
 		previous_world: SimWorld,

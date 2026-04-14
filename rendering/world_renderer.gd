@@ -113,6 +113,21 @@ func initialize(
 	for body in world.bodies:
 		_on_body_added(body)
 
+func update_runtime_context(
+		galaxy_state: GalaxyState = null,
+		active_sector_session = null,
+		active_cluster_session: ActiveClusterSession = null,
+		active_macro_sector_session = null) -> void:
+	_galaxy_state = galaxy_state
+	_active_sector_session = active_sector_session
+	_active_cluster_session = active_cluster_session
+	_active_macro_sector_session = active_macro_sector_session
+	if galaxy_state != null and galaxy_state.worldgen_config != null:
+		_worldgen = GalaxyWorldgen.new(galaxy_state.worldgen_config)
+	else:
+		_worldgen = null
+	_sync_active_world_layer_offsets()
+
 func render_frame(world: SimWorld) -> void:
 	_sync_active_world_layer_offsets()
 	for star_id in _zone_renderers:
