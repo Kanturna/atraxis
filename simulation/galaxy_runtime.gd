@@ -34,6 +34,7 @@ var focus_visible_world_radius: float = 0.0
 var has_focus_context: bool = false
 var far_zone_tick_counter: int = 0
 var worldgen = null
+var _snapshot_prewarm_queue: Array = []
 
 func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) -> void:
 	galaxy_state = next_galaxy_state
@@ -51,6 +52,7 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 	focus_global_position = Vector2.ZERO
 	focus_visible_world_radius = 0.0
 	far_zone_tick_counter = 0
+	_snapshot_prewarm_queue = []
 	worldgen = WORLDGEN_SCRIPT.new(galaxy_state.worldgen_config) \
 		if galaxy_state != null and galaxy_state.worldgen_config != null else null
 	if galaxy_state == null:
@@ -69,6 +71,8 @@ func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
 	_discover_focus_sector_neighborhood()
+	_enqueue_approaching_sector_snapshots()
+	_drain_snapshot_prewarm_queue()
 	_sync_active_sector_to_focus_context()
 	_apply_focus_relevance_policy()
 	_flush_pending_activation_request()
@@ -527,7 +531,47 @@ func _prime_macro_sector_ambient_snapshots(descriptor) -> void:
 		if cluster_state.last_activated_runtime_time >= 0.0 \
 				or WorldBuilder.has_coherent_runtime_snapshot(cluster_state):
 			continue
+		if not _snapshot_prewarm_queue.has(cluster_id):
+			_snapshot_prewarm_queue.append(cluster_id)
+
+## Proactively enqueues snapshot priming for clusters near the sector the focus
+## is currently in. Runs before _sync_active_sector_to_focus_context so that
+## work is spread over multiple steps before the actual transition fires.
+func _enqueue_approaching_sector_snapshots() -> void:
+	if not has_focus_context or worldgen == null or galaxy_state == null:
+		return
+	if active_sector_session == null or active_sector_session.sector_state == null:
+		return
+	var focus_sector: Vector2i = worldgen.sector_coord_for_global_position(focus_global_position)
+	if focus_sector == active_sector_session.sector_state.sector_coord:
+		return
+	for cluster_state in galaxy_state.get_clusters():
+		if cluster_state == null:
+			continue
+		if cluster_state.last_activated_runtime_time >= 0.0 \
+				or WorldBuilder.has_coherent_runtime_snapshot(cluster_state):
+			continue
+		var cluster_sector: Vector2i = _resolve_sector_coord_for_cluster(cluster_state)
+		var sector_delta: Vector2i = cluster_sector - focus_sector
+		if maxi(absi(sector_delta.x), absi(sector_delta.y)) > AMBIENT_SECTOR_RADIUS:
+			continue
+		if not _snapshot_prewarm_queue.has(cluster_state.cluster_id):
+			_snapshot_prewarm_queue.append(cluster_state.cluster_id)
+
+## Processes one pending snapshot priming entry per call so the cost is
+## amortised across frames instead of spiking at the moment of sector switch.
+func _drain_snapshot_prewarm_queue() -> void:
+	while not _snapshot_prewarm_queue.is_empty():
+		var cluster_id: int = _snapshot_prewarm_queue.pop_front()
+		var cluster_state: ClusterState = galaxy_state.get_cluster(int(cluster_id)) \
+			if galaxy_state != null else null
+		if cluster_state == null:
+			continue
+		if cluster_state.last_activated_runtime_time >= 0.0 \
+				or WorldBuilder.has_coherent_runtime_snapshot(cluster_state):
+			continue
 		WorldBuilder.ensure_coherent_simplified_snapshot(cluster_state)
+		return
 
 func _macro_sector_member_ids_match(left_member_cluster_ids: Array, right_member_cluster_ids: Array) -> bool:
 	if left_member_cluster_ids.size() != right_member_cluster_ids.size():
