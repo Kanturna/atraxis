@@ -335,7 +335,9 @@ func _update_pending_cluster_transition() -> void:
 	if active_cluster_session != null and active_cluster_session.cluster_id == _pending_click_activation_cluster_id:
 		_clear_pending_cluster_transition(false)
 		return
-	if not _sim_camera.is_focus_transition_active():
+	if not _pending_click_activation_requested and _should_request_pending_cluster_activation():
+		_request_pending_click_cluster_activation()
+	if not _sim_camera.is_focus_transition_active() and not _pending_click_activation_requested:
 		_clear_pending_cluster_transition(false)
 
 func _clear_pending_cluster_transition(cancel_camera: bool) -> void:
@@ -356,6 +358,12 @@ func _should_request_pending_cluster_activation() -> bool:
 	var position_progress: float = _transition_position_progress()
 	var zoom_progress: float = _transition_zoom_progress()
 	return minf(position_progress, zoom_progress) >= CLICK_CLUSTER_ACTIVATION_PROGRESS_THRESHOLD
+
+func _request_pending_click_cluster_activation() -> void:
+	if galaxy_runtime == null or _pending_click_activation_cluster_id < 0:
+		return
+	if galaxy_runtime.request_cluster_activation(_pending_click_activation_cluster_id):
+		_pending_click_activation_requested = true
 
 func _transition_position_progress() -> float:
 	var initial_distance: float = _pending_click_activation_initial_focus_global_position.distance_to(

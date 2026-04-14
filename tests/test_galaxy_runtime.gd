@@ -464,6 +464,49 @@ func test_sector_boundary_switch_preserves_view_frame_and_focus_projection() -> 
 		"the same global focus position should keep the same local projection after the sector switch"
 	)
 
+func test_focus_context_sector_switch_keeps_loaded_cluster_and_world_alive_until_explicit_activation() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 144
+	config.cluster_density = 1.0
+	config.void_strength = 0.0
+	config.bh_richness = 0.82
+	config.star_richness = 0.52
+	config.rare_zone_frequency = 0.55
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var initial_sector_state = runtime.get_active_sector_state()
+	assert_not_null(initial_sector_state, "the focus-sector continuity test needs an active rectangular sector")
+	assert_not_null(runtime.active_cluster_session, "the focus-sector continuity test needs a materialized active cluster")
+	var initial_cluster: ClusterState = runtime.active_cluster_session.active_cluster_state
+	var initial_world: SimWorld = runtime.get_active_sim_world()
+	var crossed_focus: Vector2 = initial_sector_state.global_origin + Vector2(
+		initial_sector_state.size * 1.5,
+		initial_sector_state.size * 0.5
+	)
+
+	runtime.update_focus_context(crossed_focus, 0.0)
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		runtime.get_active_sector_state().sector_coord,
+		initial_sector_state.sector_coord + Vector2i(1, 0),
+		"crossing the boundary should still advance the semantic active sector"
+	)
+	assert_eq(
+		runtime.active_cluster_session.cluster_id,
+		initial_cluster.cluster_id,
+		"focus-driven sector changes should not hot-swap the loaded cluster before an explicit activation request"
+	)
+	assert_true(
+		runtime.get_active_sim_world() == initial_world,
+		"focus-driven sector changes should keep the existing SimWorld alive to avoid a visible reload hitch"
+	)
+	assert_eq(
+		initial_cluster.activation_state,
+		ClusterActivationState.State.ACTIVE,
+		"the currently loaded cluster should stay ACTIVE while the focus sector moves independently"
+	)
+
 func test_sector_boundary_hysteresis_keeps_neighbor_transition_soft_without_getting_sticky() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 144

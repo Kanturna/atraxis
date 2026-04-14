@@ -113,19 +113,34 @@ func activate_cluster(target_cluster_id: int) -> void:
 	_clear_pending_activation_target(target_cluster_id)
 
 func activate_sector(target_sector_coord: Vector2i, preferred_cluster_id: int = -1) -> void:
+	_transition_active_sector(target_sector_coord, preferred_cluster_id, false)
+
+func _transition_active_sector(
+		target_sector_coord: Vector2i,
+		preferred_cluster_id: int = -1,
+		preserve_active_cluster_session: bool = false) -> void:
 	if galaxy_state == null:
 		return
 	var current_sector_coord: Vector2i = _get_active_sector_coord()
 	var same_sector: bool = active_sector_session != null and current_sector_coord == target_sector_coord
-	var same_cluster: bool = preferred_cluster_id < 0 \
-		or (active_cluster_session != null and active_cluster_session.cluster_id == preferred_cluster_id)
-	if same_sector and same_cluster:
-		return
+	if preserve_active_cluster_session:
+		if same_sector:
+			return
+	else:
+		var same_cluster: bool = preferred_cluster_id < 0 \
+			or (active_cluster_session != null and active_cluster_session.cluster_id == preferred_cluster_id)
+		if same_sector and same_cluster:
+			return
 	if active_sector_session != null and active_sector_session.sector_state != null:
 		active_sector_session.sector_state.mark_remote(runtime_time_elapsed)
-	_demote_active_cluster_to_simplified()
+	if not preserve_active_cluster_session:
+		_demote_active_cluster_to_simplified()
 	far_zone_tick_counter = 0
-	_activate_sector_internal(target_sector_coord, preferred_cluster_id)
+	_activate_sector_internal(
+		target_sector_coord,
+		preferred_cluster_id,
+		preserve_active_cluster_session
+	)
 	_rebuild_active_macro_sector(
 		active_cluster_session.cluster_id if active_cluster_session != null else -1,
 		false
@@ -235,7 +250,10 @@ func get_discovered_sector_count() -> int:
 		return 0
 	return galaxy_state.get_discovered_sector_count()
 
-func _activate_sector_internal(target_sector_coord: Vector2i, preferred_cluster_id: int = -1) -> void:
+func _activate_sector_internal(
+		target_sector_coord: Vector2i,
+		preferred_cluster_id: int = -1,
+		preserve_active_cluster_session: bool = false) -> void:
 	if galaxy_state == null:
 		return
 	var preserved_frame_global_origin = active_sector_session.frame_global_origin \
@@ -248,22 +266,29 @@ func _activate_sector_internal(target_sector_coord: Vector2i, preferred_cluster_
 			ACTIVE_SECTOR_DISCOVERY_RADIUS
 		)
 	var sector_state = galaxy_state.get_or_create_sector_state(target_sector_coord)
-	var target_cluster_id: int = _resolve_target_cluster_id_for_sector(target_sector_coord, preferred_cluster_id)
-	active_cluster_session = null
-	active_sector_world = null
-	if target_cluster_id >= 0:
-		active_cluster_session = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state, target_cluster_id)
-		if active_cluster_session != null and active_cluster_session.active_cluster_state != null:
-			if active_cluster_session.sim_world != null:
-				WorldBuilder.writeback_world_into_cluster(
-					active_cluster_session.sim_world,
-					active_cluster_session.active_cluster_state,
-					ObjectResidencyState.State.ACTIVE
-				)
-			active_cluster_session.active_cluster_state.mark_active(runtime_time_elapsed)
-			active_sector_world = active_cluster_session.sim_world
-	if active_sector_world == null:
-		active_sector_world = SimWorld.new()
+	if preserve_active_cluster_session:
+		# Focus-driven sector changes should only move the semantic sector frame.
+		# Keeping the materialized cluster/world alive avoids a visible hitch when
+		# the blue active-sector highlight advances during free camera movement.
+		if active_sector_world == null:
+			active_sector_world = active_cluster_session.sim_world if active_cluster_session != null else SimWorld.new()
+	else:
+		var target_cluster_id: int = _resolve_target_cluster_id_for_sector(target_sector_coord, preferred_cluster_id)
+		active_cluster_session = null
+		active_sector_world = null
+		if target_cluster_id >= 0:
+			active_cluster_session = WorldBuilder.build_active_session_from_galaxy_state(galaxy_state, target_cluster_id)
+			if active_cluster_session != null and active_cluster_session.active_cluster_state != null:
+				if active_cluster_session.sim_world != null:
+					WorldBuilder.writeback_world_into_cluster(
+						active_cluster_session.sim_world,
+						active_cluster_session.active_cluster_state,
+						ObjectResidencyState.State.ACTIVE
+					)
+				active_cluster_session.active_cluster_state.mark_active(runtime_time_elapsed)
+				active_sector_world = active_cluster_session.sim_world
+		if active_sector_world == null:
+			active_sector_world = SimWorld.new()
 	active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
 	active_sector_session.bind(
 		galaxy_state,
@@ -438,7 +463,9 @@ func _sync_active_sector_to_focus_context() -> void:
 		return
 	if _should_keep_current_sector_during_boundary_hysteresis(focus_global_position, focus_sector):
 		return
-	activate_sector(focus_sector)
+	var should_preserve_loaded_cluster: bool = active_cluster_session != null \
+		and not galaxy_state.get_cluster_ids_for_sector(focus_sector).is_empty()
+	_transition_active_sector(focus_sector, -1, should_preserve_loaded_cluster)
 
 func _should_keep_current_sector_during_boundary_hysteresis(
 		focus_global_position: Vector2,
