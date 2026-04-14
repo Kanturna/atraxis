@@ -257,12 +257,36 @@ func _rebind_active_world(
 	_world_renderer.render_frame(sim_world)
 	_hud.update_display(sim_world)
 	if previous_world == null and _sim_camera != null:
-		var initial_focus_local: Vector2 = Vector2.ZERO
-		if active_cluster_session != null and active_sector_session != null:
-			initial_focus_local = active_sector_session.to_local(active_cluster_session.cluster_global_origin)
-		_sim_camera.set_focus_world_position(initial_focus_local * SimConstants.SIM_TO_SCREEN)
+		_apply_initial_camera_frame()
 	if previous_world != null and previous_world != sim_world:
 		previous_world.dispose()
+
+func _apply_initial_camera_frame() -> void:
+	if _sim_camera == null or active_cluster_session == null:
+		return
+	var cluster_state: ClusterState = active_cluster_session.active_cluster_state
+	var frame: Dictionary = WorldBuilder.compute_initial_host_system_frame(sim_world, cluster_state)
+	var focus_global_position: Vector2 = active_cluster_session.cluster_global_origin
+	var visible_radius_sim: float = 1.0
+	if bool(frame.get("found_host_system", false)):
+		focus_global_position = active_cluster_session.to_global(
+			Vector2(frame.get("focus_local_position", Vector2.ZERO))
+		)
+		visible_radius_sim = maxf(float(frame.get("visible_radius_sim", 0.0)), 1.0)
+	elif cluster_state != null:
+		visible_radius_sim = maxf(
+			maxf(cluster_state.get_authoritative_radius(), cluster_state.runtime_extent_radius) * 1.10,
+			1.0
+		)
+	var focus_world_position: Vector2 = focus_global_position
+	if active_sector_session != null:
+		focus_world_position = active_sector_session.to_local(focus_global_position)
+	else:
+		focus_world_position = active_cluster_session.to_local(focus_global_position)
+	_sim_camera.set_focus_frame_immediate(
+		focus_world_position * SimConstants.SIM_TO_SCREEN,
+		visible_radius_sim * SimConstants.SIM_TO_SCREEN
+	)
 
 func _should_preserve_remote_layers_on_world_switch(previous_macro_sector) -> bool:
 	if previous_macro_sector == null or active_macro_sector_session == null or active_macro_sector_session.descriptor == null:

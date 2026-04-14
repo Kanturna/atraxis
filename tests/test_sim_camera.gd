@@ -43,6 +43,29 @@ func test_focus_transition_cancels_on_manual_wheel_zoom() -> void:
 
 	_dispose_camera(camera)
 
+func test_set_focus_frame_immediate_applies_position_and_visible_radius_without_transition() -> void:
+	var camera: SimCamera = _make_camera()
+	camera.zoom = Vector2.ONE
+	var initial_visible_radius: float = camera.get_visible_world_radius()
+	var target_position: Vector2 = Vector2(-180.0, 260.0)
+	var target_visible_radius: float = initial_visible_radius * 0.6
+
+	camera.start_focus_transition(Vector2(320.0, -140.0), initial_visible_radius * 0.4)
+	camera.set_focus_frame_immediate(target_position, target_visible_radius)
+
+	assert_false(camera.is_focus_transition_active(), "immediate framing should not leave a focus transition active")
+	assert_false(camera.has_focus_transition_arrived(), "immediate framing should not mark a tween arrival")
+	assert_almost_eq(camera.position.x, target_position.x, 0.001, "immediate framing should set the camera x position directly")
+	assert_almost_eq(camera.position.y, target_position.y, 0.001, "immediate framing should set the camera y position directly")
+	assert_almost_eq(
+		camera.get_visible_world_radius(),
+		target_visible_radius,
+		maxf(12.0, target_visible_radius * 0.01),
+		"immediate framing should set the requested visible radius directly"
+	)
+
+	_dispose_camera(camera)
+
 func test_rebase_focus_transition_keeps_motion_continuous() -> void:
 	var camera: SimCamera = _make_camera()
 	camera.zoom = Vector2.ONE

@@ -99,6 +99,15 @@ func cancel_focus_transition() -> void:
 	_focus_transition_arrived = false
 	_target_zoom = zoom.x
 
+func set_focus_frame_immediate(target_world_position: Vector2, target_visible_world_radius: float) -> void:
+	var target_zoom: float = _zoom_for_visible_world_radius(maxf(target_visible_world_radius, 1.0))
+	_focus_transition_active = false
+	_focus_transition_arrived = false
+	position = target_world_position
+	zoom = Vector2.ONE * target_zoom
+	_target_zoom = target_zoom
+	_zoom_focus_screen = get_viewport().get_visible_rect().size * 0.5
+
 func is_focus_transition_active() -> bool:
 	return _focus_transition_active
 

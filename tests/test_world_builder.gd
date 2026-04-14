@@ -288,6 +288,150 @@ func test_dynamic_star_spawn_uses_other_hosts_before_capping_overflow() -> void:
 		distinct_host_ids[star.orbit_parent_id] = true
 	assert_eq(distinct_host_ids.size(), 2, "overflow should redistribute stars across other hosts before dropping the excess")
 
+func test_initial_host_system_frame_prefers_primary_star_bearing_black_hole() -> void:
+	var world := SimWorld.new()
+	var cluster_state: ClusterState = _make_cluster_state_with_black_holes([
+		{
+			"object_id": "cluster_0:black_hole_0",
+			"local_position": Vector2.ZERO,
+			"is_primary": true,
+		},
+		{
+			"object_id": "cluster_0:black_hole_1",
+			"local_position": Vector2(12.0 * SimConstants.AU, 0.0),
+			"is_primary": false,
+		},
+	])
+	var primary_bh: SimBody = _spawn_black_hole_for_frame_test(
+		world,
+		"cluster_0:black_hole_0",
+		Vector2.ZERO
+	)
+	var secondary_bh: SimBody = _spawn_black_hole_for_frame_test(
+		world,
+		"cluster_0:black_hole_1",
+		Vector2(12.0 * SimConstants.AU, 0.0)
+	)
+	_spawn_bound_star_for_frame_test(world, primary_bh, Vector2(5.0 * SimConstants.AU, 0.0))
+	_spawn_bound_star_for_frame_test(world, secondary_bh, Vector2(14.0 * SimConstants.AU, 0.0))
+	_spawn_bound_star_for_frame_test(world, secondary_bh, Vector2(12.0 * SimConstants.AU, 6.0 * SimConstants.AU))
+
+	var frame: Dictionary = WorldBuilder.compute_initial_host_system_frame(world, cluster_state)
+
+	assert_true(bool(frame.get("found_host_system", false)), "frame computation should find a host system when the primary BH has a bound star")
+	assert_eq(
+		frame.get("host_black_hole_object_id", ""),
+		"cluster_0:black_hole_0",
+		"the primary BH should win host selection as soon as it has at least one bound star"
+	)
+	assert_eq(
+		frame.get("focus_local_position", Vector2.ONE),
+		primary_bh.position,
+		"camera framing should focus the selected host BH position"
+	)
+
+func test_initial_host_system_frame_falls_back_to_non_primary_star_bearing_black_hole() -> void:
+	var world := SimWorld.new()
+	var cluster_state: ClusterState = _make_cluster_state_with_black_holes([
+		{
+			"object_id": "cluster_0:black_hole_0",
+			"local_position": Vector2.ZERO,
+			"is_primary": true,
+		},
+		{
+			"object_id": "cluster_0:black_hole_1",
+			"local_position": Vector2(10.0 * SimConstants.AU, 0.0),
+			"is_primary": false,
+		},
+	])
+	_spawn_black_hole_for_frame_test(world, "cluster_0:black_hole_0", Vector2.ZERO)
+	var secondary_bh: SimBody = _spawn_black_hole_for_frame_test(
+		world,
+		"cluster_0:black_hole_1",
+		Vector2(10.0 * SimConstants.AU, 0.0)
+	)
+	_spawn_bound_star_for_frame_test(world, secondary_bh, Vector2(10.0 * SimConstants.AU, 4.5 * SimConstants.AU))
+
+	var frame: Dictionary = WorldBuilder.compute_initial_host_system_frame(world, cluster_state)
+
+	assert_true(bool(frame.get("found_host_system", false)), "frame computation should still find a host system when the primary BH has no stars")
+	assert_eq(
+		frame.get("host_black_hole_object_id", ""),
+		"cluster_0:black_hole_1",
+		"host selection should fall back to another star-bearing BH when the primary is empty"
+	)
+
+func test_initial_host_system_frame_uses_live_bound_positions_and_ignores_unbound_bodies() -> void:
+	var world := SimWorld.new()
+	var cluster_state: ClusterState = _make_cluster_state_with_black_holes([
+		{
+			"object_id": "cluster_0:black_hole_0",
+			"local_position": Vector2.ZERO,
+			"is_primary": true,
+		},
+	])
+	var host_bh: SimBody = _spawn_black_hole_for_frame_test(world, "cluster_0:black_hole_0", Vector2.ZERO)
+	var bound_star: SimBody = _spawn_bound_star_for_frame_test(
+		world,
+		host_bh,
+		Vector2(5.0 * SimConstants.AU, 0.0),
+		1.0 * SimConstants.AU
+	)
+	var bound_planet: SimBody = _spawn_bound_planet_for_frame_test(
+		world,
+		bound_star,
+		Vector2(5.0 * SimConstants.AU, 2.0 * SimConstants.AU),
+		0.5 * SimConstants.AU
+	)
+	_spawn_unbound_star_for_frame_test(world, Vector2(20.0 * SimConstants.AU, 0.0))
+	_spawn_unbound_planet_for_frame_test(world, Vector2(30.0 * SimConstants.AU, 0.0))
+
+	var frame: Dictionary = WorldBuilder.compute_initial_host_system_frame(world, cluster_state)
+	var expected_system_radius: float = maxf(
+		host_bh.radius,
+		host_bh.position.distance_to(bound_star.position)
+			+ maxf(
+				bound_star.radius,
+				bound_star.position.distance_to(bound_planet.position) + bound_planet.radius
+			)
+	)
+
+	assert_true(bool(frame.get("found_host_system", false)), "the bound host system should still be discovered")
+	assert_almost_eq(
+		float(frame.get("visible_radius_sim", 0.0)),
+		expected_system_radius * 1.15,
+		0.001,
+		"camera framing should follow the loaded live body positions rather than stale orbit_radius values"
+	)
+
+func test_dynamic_star_orbit_band_raises_inner_clearance_for_scaled_bodies() -> void:
+	var profile := {
+		"star_inner_orbit_au": 4.0,
+		"star_outer_orbit_au": 20.0,
+		"planets_per_star": 5,
+		"star_mass_scale_min": 1.0,
+		"star_mass_scale_max": 1.3,
+	}
+
+	var orbit_band: Dictionary = WorldBuilder._resolve_dynamic_star_orbit_band(profile)
+	var expected_clearance: float = SimConstants.BLACK_HOLE_RADIUS \
+		+ SimConstants.STAR_RADIUS * sqrt(1.3) \
+		+ WorldBuilder._max_core_planet_orbit_radius(5) * SimConstants.AU \
+		+ 0.75 * SimConstants.AU
+
+	assert_almost_eq(
+		float(orbit_band.get("inner", 0.0)),
+		expected_clearance,
+		0.001,
+		"the effective inner star orbit should expand to the required clearance when scaled bodies need more room"
+	)
+	assert_almost_eq(
+		float(orbit_band.get("outer", 0.0)),
+		20.0 * SimConstants.AU,
+		0.001,
+		"the configured outer orbit should remain unchanged when only the inner clearance grows"
+	)
+
 func test_public_worldgen_cluster_can_materialize_more_than_four_planets_per_star_when_legacy_hint_requests_it() -> void:
 	var world := SimWorld.new()
 	var config = START_CONFIG_SCRIPT.new()
@@ -411,6 +555,36 @@ func test_spawn_viable_star_bearing_archetypes_begin_with_host_aligned_dynamic_s
 				"%s should spread dynamic stars across more than one black hole when multiple hosts exist" % archetype
 			)
 
+func test_spawn_viable_star_bearing_archetypes_still_materialize_requested_star_counts_after_rescale() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.seed = 2442
+	config.cluster_density = 0.94
+	config.void_strength = 0.18
+	config.bh_richness = 0.60
+	config.star_richness = 0.60
+	config.rare_zone_frequency = 1.0
+	var safe_config = config.copy()
+	safe_config.clamp_values()
+	var worldgen_config = GALAXY_BUILDER_SCRIPT._build_public_worldgen_config(safe_config)
+	var worldgen = GALAXY_WORLDGEN_SCRIPT.new(worldgen_config)
+
+	for archetype in ["dense_bh_knot", "star_nursery", "scrap_rich_remnant"]:
+		var cluster_state: ClusterState = _find_spawn_viable_cluster_state_for_archetype(
+			worldgen_config,
+			worldgen,
+			safe_config.seed,
+			archetype,
+			40
+		)
+		assert_not_null(cluster_state, "test setup should find a spawn-viable %s candidate within the scan window" % archetype)
+		var world := SimWorld.new()
+		WorldBuilder.materialize_cluster_into_world(world, cluster_state)
+		assert_eq(
+			world.count_bodies_by_type(SimBody.BodyType.STAR),
+			int(cluster_state.simulation_profile.get("star_count", 0)),
+			"%s should still materialize its requested star count after the scaled-body clearance change" % archetype
+		)
+
 func _build_fixture_world(configure: Callable) -> SimWorld:
 	var config = START_CONFIG_SCRIPT.new()
 	configure.call(config)
@@ -501,3 +675,83 @@ func _count_bodies_with_materials(world: SimWorld, body_type: int, material_type
 		if body.active and body.body_type == body_type and material_types.has(body.material_type):
 			count += 1
 	return count
+
+func _make_cluster_state_with_black_holes(black_hole_specs: Array) -> ClusterState:
+	var cluster_state := ClusterState.new()
+	for spec in black_hole_specs:
+		var object_state := ClusterObjectState.new()
+		object_state.object_id = str(spec.get("object_id", ""))
+		object_state.kind = "black_hole"
+		object_state.local_position = Vector2(spec.get("local_position", Vector2.ZERO))
+		object_state.descriptor = {
+			"body_type": SimBody.BodyType.BLACK_HOLE,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"radius": SimConstants.BLACK_HOLE_RADIUS,
+			"is_primary": bool(spec.get("is_primary", false)),
+		}
+		cluster_state.register_object(object_state)
+		if bool(spec.get("is_primary", false)):
+			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
+	return cluster_state
+
+func _spawn_black_hole_for_frame_test(world: SimWorld, object_id: String, position: Vector2) -> SimBody:
+	var black_hole := WorldBuilder._make_black_hole(12_000_000.0)
+	black_hole.persistent_object_id = object_id
+	black_hole.position = position
+	world.add_body(black_hole)
+	return black_hole
+
+func _spawn_bound_star_for_frame_test(
+		world: SimWorld,
+		host_bh: SimBody,
+		position: Vector2,
+		orbit_radius: float = 0.0) -> SimBody:
+	var star := WorldBuilder._make_star()
+	star.kinematic = false
+	star.scripted_orbit_enabled = false
+	star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
+	star.orbit_parent_id = host_bh.id
+	star.orbit_radius = orbit_radius
+	star.position = position
+	world.add_body(star)
+	return star
+
+func _spawn_bound_planet_for_frame_test(
+		world: SimWorld,
+		host_star: SimBody,
+		position: Vector2,
+		orbit_radius: float = 0.0) -> SimBody:
+	var planet := SimBody.new()
+	planet.body_type = SimBody.BodyType.PLANET
+	planet.influence_level = SimBody.InfluenceLevel.A
+	planet.material_type = SimBody.MaterialType.ROCKY
+	planet.mass = SimConstants.PLANET_MASS_MIN
+	planet.radius = SimConstants.PLANET_RADIUS_MIN
+	planet.kinematic = true
+	planet.scripted_orbit_enabled = true
+	planet.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
+	planet.orbit_parent_id = host_star.id
+	planet.orbit_radius = orbit_radius
+	planet.position = position
+	world.add_body(planet)
+	return planet
+
+func _spawn_unbound_star_for_frame_test(world: SimWorld, position: Vector2) -> SimBody:
+	var star := WorldBuilder._make_star()
+	star.kinematic = false
+	star.scripted_orbit_enabled = false
+	star.orbit_binding_state = SimBody.OrbitBindingState.FREE_DYNAMIC
+	star.position = position
+	world.add_body(star)
+	return star
+
+func _spawn_unbound_planet_for_frame_test(world: SimWorld, position: Vector2) -> SimBody:
+	var planet := SimBody.new()
+	planet.body_type = SimBody.BodyType.PLANET
+	planet.influence_level = SimBody.InfluenceLevel.A
+	planet.material_type = SimBody.MaterialType.ROCKY
+	planet.mass = SimConstants.PLANET_MASS_MIN
+	planet.radius = SimConstants.PLANET_RADIUS_MIN
+	planet.position = position
+	world.add_body(planet)
+	return planet

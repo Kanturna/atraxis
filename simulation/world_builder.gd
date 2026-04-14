@@ -82,6 +82,40 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 		return
 	_materialize_cluster_blueprint_into_world(world, cluster_state)
 
+static func compute_initial_host_system_frame(sim_world: SimWorld, cluster_state: ClusterState) -> Dictionary:
+	var empty_frame := {
+		"focus_local_position": Vector2.ZERO,
+		"visible_radius_sim": 0.0,
+		"host_black_hole_object_id": "",
+		"found_host_system": false,
+	}
+	if sim_world == null or cluster_state == null:
+		return empty_frame
+	var host_candidate: Dictionary = _select_initial_host_black_hole_candidate(sim_world, cluster_state)
+	if host_candidate.is_empty():
+		return empty_frame
+	var host_black_hole: SimBody = host_candidate.get("body", null)
+	var bound_stars: Array = host_candidate.get("bound_stars", [])
+	if host_black_hole == null or bound_stars.is_empty():
+		return empty_frame
+	var planets_by_star_id: Dictionary = _bound_planets_by_star_id(sim_world)
+	var system_radius: float = host_black_hole.radius
+	for star_entry in bound_stars:
+		var star: SimBody = star_entry
+		var host_distance: float = _bound_child_distance_to_parent(star, host_black_hole)
+		var star_system_radius: float = star.radius
+		for planet_entry in planets_by_star_id.get(star.id, []):
+			var planet: SimBody = planet_entry
+			var planet_distance: float = _bound_child_distance_to_parent(planet, star)
+			star_system_radius = maxf(star_system_radius, planet_distance + planet.radius)
+		system_radius = maxf(system_radius, host_distance + star_system_radius)
+	return {
+		"focus_local_position": host_black_hole.position,
+		"visible_radius_sim": system_radius * 1.15,
+		"host_black_hole_object_id": str(host_candidate.get("object_id", "")),
+		"found_host_system": true,
+	}
+
 static func ensure_coherent_simplified_snapshot(cluster_state: ClusterState) -> bool:
 	if cluster_state == null:
 		return false
@@ -933,7 +967,10 @@ static func _resolve_dynamic_star_host_base_phase_for_entry(
 	return (host_position - nearest_other_position).angle()
 
 static func _resolve_dynamic_star_orbit_band(profile: Dictionary) -> Dictionary:
-	var inner_orbit_radius: float = float(profile.get("star_inner_orbit_au", 0.0)) * SimConstants.AU
+	var inner_orbit_radius: float = maxf(
+		float(profile.get("star_inner_orbit_au", 0.0)) * SimConstants.AU,
+		_required_dynamic_star_host_clearance_radius(profile)
+	)
 	var outer_orbit_radius: float = maxf(
 		inner_orbit_radius,
 		float(profile.get("star_outer_orbit_au", 0.0)) * SimConstants.AU
@@ -949,8 +986,22 @@ static func _resolve_dynamic_star_shell_spacing(profile: Dictionary) -> float:
 		0.75 * SimConstants.AU
 	)
 
+static func _required_dynamic_star_host_clearance_radius(profile: Dictionary) -> float:
+	return SimConstants.BLACK_HOLE_RADIUS \
+		+ _max_dynamic_star_radius_for_profile(profile) \
+		+ _dynamic_star_planet_envelope_radius(profile) \
+		+ 0.75 * SimConstants.AU
+
 static func _dynamic_star_planet_envelope_radius(profile: Dictionary) -> float:
 	return _max_core_planet_orbit_radius(int(profile.get("planets_per_star", 0))) * SimConstants.AU
+
+static func _max_dynamic_star_radius_for_profile(profile: Dictionary) -> float:
+	var mass_scale_min: float = float(profile.get("star_mass_scale_min", 0.7))
+	var mass_scale_max: float = maxf(
+		mass_scale_min,
+		float(profile.get("star_mass_scale_max", 1.3))
+	)
+	return SimConstants.STAR_RADIUS * sqrt(mass_scale_max)
 
 static func _dynamic_star_host_capacity(profile: Dictionary) -> int:
 	var orbit_band: Dictionary = _resolve_dynamic_star_orbit_band(profile)
@@ -1037,6 +1088,83 @@ static func _resolve_dynamic_star_phase(host_entry: Dictionary, shell_index: int
 	var centered_index: float = float(shell_index) - (float(host_star_count - 1) * 0.5)
 	var phase_step: float = phase_span / maxf(float(host_star_count - 1), 1.0)
 	return wrapf(base_phase + centered_index * phase_step, 0.0, TAU)
+
+static func _select_initial_host_black_hole_candidate(
+		sim_world: SimWorld,
+		cluster_state: ClusterState) -> Dictionary:
+	if sim_world == null or cluster_state == null:
+		return {}
+	var primary_object_id: String = cluster_state.get_primary_black_hole_object_id()
+	var bound_stars_by_host_id: Dictionary = _bound_stars_by_host_id(sim_world)
+	var star_bearing_candidates: Array = []
+	for black_hole_entry in sim_world.get_black_holes():
+		var black_hole: SimBody = black_hole_entry
+		var object_id: String = str(black_hole.persistent_object_id)
+		var object_state: ClusterObjectState = cluster_state.get_object(object_id)
+		var is_primary: bool = object_id == primary_object_id
+		if object_state != null:
+			is_primary = is_primary or bool(object_state.descriptor.get("is_primary", false))
+		var bound_stars: Array = bound_stars_by_host_id.get(black_hole.id, [])
+		if bound_stars.is_empty():
+			continue
+		var candidate := {
+			"body": black_hole,
+			"object_id": object_id,
+			"is_primary": is_primary,
+			"bound_stars": bound_stars,
+		}
+		if is_primary:
+			return candidate
+		star_bearing_candidates.append(candidate)
+	if star_bearing_candidates.is_empty():
+		return {}
+	star_bearing_candidates.sort_custom(func(a, b):
+		var bound_stars_a: Array = a.get("bound_stars", [])
+		var bound_stars_b: Array = b.get("bound_stars", [])
+		var star_count_a: int = bound_stars_a.size()
+		var star_count_b: int = bound_stars_b.size()
+		if star_count_a != star_count_b:
+			return star_count_a > star_count_b
+		if bool(a.get("is_primary", false)) != bool(b.get("is_primary", false)):
+			return bool(a.get("is_primary", false))
+		return str(a.get("object_id", "")) < str(b.get("object_id", ""))
+	)
+	return star_bearing_candidates[0]
+
+static func _bound_stars_by_host_id(sim_world: SimWorld) -> Dictionary:
+	var bound_stars_by_host_id: Dictionary = {}
+	if sim_world == null:
+		return bound_stars_by_host_id
+	for body_entry in sim_world.bodies:
+		var body: SimBody = body_entry
+		if not body.active or body.body_type != SimBody.BodyType.STAR or body.orbit_parent_id < 0:
+			continue
+		if not bound_stars_by_host_id.has(body.orbit_parent_id):
+			bound_stars_by_host_id[body.orbit_parent_id] = []
+		bound_stars_by_host_id[body.orbit_parent_id].append(body)
+	return bound_stars_by_host_id
+
+static func _bound_planets_by_star_id(sim_world: SimWorld) -> Dictionary:
+	var bound_planets_by_star_id: Dictionary = {}
+	if sim_world == null:
+		return bound_planets_by_star_id
+	for body_entry in sim_world.bodies:
+		var body: SimBody = body_entry
+		if not body.active or body.body_type != SimBody.BodyType.PLANET or body.orbit_parent_id < 0:
+			continue
+		if not bound_planets_by_star_id.has(body.orbit_parent_id):
+			bound_planets_by_star_id[body.orbit_parent_id] = []
+		bound_planets_by_star_id[body.orbit_parent_id].append(body)
+	return bound_planets_by_star_id
+
+static func _bound_child_distance_to_parent(child: SimBody, parent: SimBody) -> float:
+	if child == null:
+		return 0.0
+	if parent != null and parent.active:
+		return child.position.distance_to(parent.position)
+	if child.orbit_parent_id >= 0 and child.orbit_radius > 0.0:
+		return child.orbit_radius
+	return 0.0
 
 static func _place_analytic_stars(black_hole: SimBody, profile: Dictionary, rng: RandomNumberGenerator) -> Array:
 	var stars: Array = []

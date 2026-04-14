@@ -136,10 +136,10 @@ const BH_ADAPTIVE_MAX_SUBSTEPS: int = 16
 
 # --- Body radii (visual, in sim-units) ---
 # Real radii span many orders of magnitude; we use stylized sizes for readability.
-const STAR_RADIUS: float     = 30.0
-const BLACK_HOLE_RADIUS: float = 20.0
-const PLANET_RADIUS_MIN: float = 8.0
-const PLANET_RADIUS_MAX: float = 16.0
+const STAR_RADIUS: float     = 90.0
+const BLACK_HOLE_RADIUS: float = 60.0
+const PLANET_RADIUS_MIN: float = 24.0
+const PLANET_RADIUS_MAX: float = 48.0
 const ASTEROID_RADIUS_MIN: float = 2.0
 const ASTEROID_RADIUS_MAX: float = 5.0
 const FRAGMENT_RADIUS_MIN: float = 1.0
