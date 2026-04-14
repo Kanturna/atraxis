@@ -398,13 +398,17 @@ func _apply_focus_relevance_policy() -> void:
 	if galaxy_state == null or galaxy_state.get_cluster_count() == 0:
 		return
 	var active_cluster_id: int = active_cluster_session.cluster_id if active_cluster_session != null else -1
-	for cluster_state in galaxy_state.get_clusters():
+	if active_cluster_id >= 0:
+		var active_cluster_state: ClusterState = galaxy_state.get_cluster(active_cluster_id)
+		if active_cluster_state != null:
+			active_cluster_state.mark_relevant(runtime_time_elapsed)
+	if active_macro_sector_session == null or active_macro_sector_session.descriptor == null:
+		return
+	for cluster_id in active_macro_sector_session.descriptor.member_cluster_ids:
+		if int(cluster_id) == active_cluster_id:
+			continue
+		var cluster_state: ClusterState = galaxy_state.get_cluster(int(cluster_id))
 		if cluster_state == null:
-			continue
-		if cluster_state.cluster_id == active_cluster_id:
-			cluster_state.mark_relevant(runtime_time_elapsed)
-			continue
-		if not _should_keep_cluster_simplified(cluster_state):
 			continue
 		if cluster_state.activation_state == ClusterActivationState.State.UNLOADED:
 			cluster_state.mark_simplified(runtime_time_elapsed)
@@ -516,7 +520,11 @@ func _rebuild_active_macro_sector(focus_cluster_id: int, preserve_existing_membe
 	descriptor.discovery_radius = ACTIVE_SECTOR_DISCOVERY_RADIUS
 	var member_cluster_ids: Array = []
 	var zone_by_cluster_id: Dictionary = {}
-	for cluster_state in galaxy_state.get_clusters():
+	var active_sector_coord: Vector2i = active_sector_session.sector_state.sector_coord
+	for cluster_id in _cluster_ids_in_sector_radius(active_sector_coord, FAR_SECTOR_RADIUS):
+		var cluster_state: ClusterState = galaxy_state.get_cluster(int(cluster_id))
+		if cluster_state == null:
+			continue
 		var zone: int = _sector_zone_for_cluster(cluster_state)
 		if zone == MACRO_SECTOR_ZONE_SCRIPT.Zone.OUTSIDE:
 			continue
@@ -572,7 +580,8 @@ func _enqueue_approaching_sector_snapshots() -> void:
 	var focus_sector: Vector2i = worldgen.sector_coord_for_global_position(focus_global_position)
 	if focus_sector == active_sector_session.sector_state.sector_coord:
 		return
-	for cluster_state in galaxy_state.get_clusters():
+	for cluster_id in _cluster_ids_in_sector_radius(focus_sector, AMBIENT_SECTOR_RADIUS):
+		var cluster_state: ClusterState = galaxy_state.get_cluster(int(cluster_id))
 		if cluster_state == null:
 			continue
 		if cluster_state.last_activated_runtime_time >= 0.0 \
@@ -608,6 +617,21 @@ func _macro_sector_member_ids_match(left_member_cluster_ids: Array, right_member
 	left_sorted.sort()
 	right_sorted.sort()
 	return left_sorted == right_sorted
+
+func _cluster_ids_in_sector_radius(center_sector_coord: Vector2i, radius: int) -> Array:
+	if galaxy_state == null:
+		return []
+	var deduped_cluster_ids: Dictionary = {}
+	var ordered_cluster_ids: Array = []
+	for y in range(center_sector_coord.y - radius, center_sector_coord.y + radius + 1):
+		for x in range(center_sector_coord.x - radius, center_sector_coord.x + radius + 1):
+			for cluster_id in galaxy_state.get_cluster_ids_for_sector(Vector2i(x, y)):
+				var cluster_id_int: int = int(cluster_id)
+				if deduped_cluster_ids.has(cluster_id_int):
+					continue
+				deduped_cluster_ids[cluster_id_int] = true
+				ordered_cluster_ids.append(cluster_id_int)
+	return ordered_cluster_ids
 
 func _resolve_initial_sector_coord(initial_cluster_id: int) -> Vector2i:
 	if galaxy_state == null:
