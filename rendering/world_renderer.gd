@@ -636,12 +636,13 @@ static func build_registered_cluster_debug_markers(
 		) if has_macro_sector_overlay else {})
 		var local_center: Vector2 = reference_session.to_local(cluster_state.global_center)
 		var marker_center: Vector2 = BodyRenderer.sim_to_screen(local_center)
+		var runtime_radius: float = cluster_state.get_runtime_aware_radius()
 		var marker_radius_world: float = cluster_debug_marker_world_radius(
-			cluster_state.get_authoritative_radius(),
+			runtime_radius,
 			safe_canvas_scale,
 			is_active
 		)
-		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(cluster_state.get_authoritative_radius())
+		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(runtime_radius)
 		var marker_radius_canvas: float = BodyRenderer.sim_dist_to_screen(marker_radius_world)
 		var cull_radius: float = maxf(cluster_radius_canvas, marker_radius_canvas)
 		if not _is_cluster_visible_in_canvas_rect(
@@ -654,7 +655,7 @@ static func build_registered_cluster_debug_markers(
 		markers.append({
 			"cluster_id": cluster_state.cluster_id,
 			"local_center": local_center,
-			"radius": cluster_state.get_authoritative_radius(),
+			"radius": runtime_radius,
 			"is_active": is_active,
 			"state": activation_state_debug_name(cluster_state.activation_state),
 			"color": zone_profile.get("marker_color", cluster_debug_color(cluster_state.activation_state)),
@@ -733,7 +734,8 @@ static func build_remote_cluster_preview_specs(
 		) if active_sector_session != null and active_sector_session.sector_state != null else sector_relevance_from_macro_zone(macro_sector_zone)
 		var local_center: Vector2 = reference_session.to_local(cluster_state.global_center)
 		var cluster_center_canvas: Vector2 = BodyRenderer.sim_to_screen(local_center)
-		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(cluster_state.get_authoritative_radius())
+		var runtime_radius: float = cluster_state.get_runtime_aware_radius()
+		var cluster_radius_canvas: float = BodyRenderer.sim_dist_to_screen(runtime_radius)
 		if not _is_cluster_visible_in_canvas_rect(
 			cluster_center_canvas,
 			cluster_radius_canvas,
@@ -755,7 +757,7 @@ static func build_remote_cluster_preview_specs(
 				"material_type": SimBody.MaterialType.STELLAR,
 				"local_position": local_center,
 				"cluster_local_center": local_center,
-				"cluster_radius": cluster_state.get_authoritative_radius(),
+				"cluster_radius": runtime_radius,
 				"radius": SimConstants.STAR_RADIUS,
 				"seed": int(cluster_state.cluster_seed),
 				"cluster_id": cluster_state.cluster_id,
@@ -786,7 +788,7 @@ static func build_remote_cluster_preview_specs(
 				"material_type": int(source_spec.get("material_type", SimBody.MaterialType.MIXED)),
 				"local_position": local_position,
 				"cluster_local_center": local_center,
-				"cluster_radius": cluster_state.get_authoritative_radius(),
+				"cluster_radius": runtime_radius,
 				"radius": float(source_spec.get("radius", 1.0)),
 				"seed": int(source_spec.get("seed", 0)),
 				"cluster_id": cluster_state.cluster_id,
@@ -931,7 +933,7 @@ static func _remote_cluster_pick_result(
 		"global_center": cluster_state.global_center,
 		"clicked_global_focus_position": reference_session.to_global(clicked_local_focus_position),
 		"local_center": reference_session.to_local(cluster_state.global_center),
-		"authoritative_radius": cluster_state.get_authoritative_radius(),
+		"authoritative_radius": cluster_state.get_runtime_aware_radius(),
 		"state": activation_state_debug_name(cluster_state.activation_state),
 	}
 

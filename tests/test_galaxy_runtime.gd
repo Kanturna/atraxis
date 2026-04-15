@@ -421,6 +421,25 @@ func test_outbound_free_dynamic_star_currently_strands_in_source_cluster_registr
 		"the reloaded source star should come back from the source cluster snapshot instead of having been transferred away"
 	)
 
+func test_cluster_containment_uses_runtime_extent_for_far_dynamic_star_position() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(2)
+	var remote_cluster: ClusterState = galaxy_state.get_cluster(1)
+	var far_local_position := Vector2(2_050.0, 0.0)
+	_configure_manual_runtime_snapshot_star_state(remote_cluster, far_local_position, Vector2.ZERO)
+
+	var matched_cluster: ClusterState = galaxy_state.find_cluster_containing_global_position(
+		remote_cluster.global_center + far_local_position
+	)
+	assert_not_null(
+		matched_cluster,
+		"cluster containment should consider the runtime extent so far dynamic-star positions still map back to their owning cluster"
+	)
+	assert_eq(
+		matched_cluster.cluster_id,
+		remote_cluster.cluster_id,
+		"cluster containment should resolve the cluster whose runtime extent actually contains the far dynamic-star position"
+	)
+
 func test_runtime_time_scale_scales_simplified_cluster_simulated_time() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(3)
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)

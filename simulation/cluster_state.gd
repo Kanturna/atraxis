@@ -49,6 +49,9 @@ func get_primary_black_hole_object_id() -> String:
 func get_authoritative_radius() -> float:
 	return maxf(radius, 0.0)
 
+func get_runtime_aware_radius() -> float:
+	return maxf(get_authoritative_radius(), runtime_extent_radius)
+
 func update_runtime_extent(next_extent_radius: float) -> void:
 	runtime_extent_radius = maxf(get_authoritative_radius(), next_extent_radius)
 

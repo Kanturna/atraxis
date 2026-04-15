@@ -336,7 +336,7 @@ func find_cluster_containing_global_position(global_position: Vector2, radius_fa
 	var matched_cluster: ClusterState = null
 	var best_distance: float = INF
 	for cluster_state in get_clusters():
-		var cluster_radius: float = cluster_state.get_authoritative_radius() * radius_factor
+		var cluster_radius: float = cluster_state.get_runtime_aware_radius() * radius_factor
 		var distance: float = cluster_state.global_center.distance_to(global_position)
 		if distance > cluster_radius:
 			continue

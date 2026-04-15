@@ -431,7 +431,7 @@ func test_offscreen_cluster_payloads_are_culled_before_rendering() -> void:
 	assert_true(preview_cluster_ids.has(1), "screen-relevant remote clusters should still build preview specs")
 	assert_false(preview_cluster_ids.has(2), "offscreen remote clusters should not build preview specs")
 
-func test_remote_preview_currently_culls_runtime_extent_star_outside_static_cluster_radius() -> void:
+func test_remote_preview_includes_runtime_extent_star_outside_static_cluster_radius() -> void:
 	var galaxy_state := GalaxyState.new()
 	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
 	var remote_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(3_000.0, 0.0), 100.0)
@@ -479,9 +479,18 @@ func test_remote_preview_currently_culls_runtime_extent_star_outside_static_clus
 		visible_canvas_rect.has_point(BodyRenderer.sim_to_screen(remote_cluster.global_center + Vector2(2_500.0, 0.0))),
 		"the fixture should place the remote runtime-snapshot star inside the visible canvas rect"
 	)
-	assert_true(
+	assert_false(
 		preview_specs.is_empty(),
-		"remote preview culling currently uses the static cluster radius, so a star that only expands the runtime extent is still skipped"
+		"remote preview culling should now honor the runtime extent radius so a visible runtime-snapshot star is not skipped"
+	)
+	var has_runtime_star_preview: bool = false
+	for spec in preview_specs:
+		if str(spec.get("object_id", "")) == "cluster_1:star_0":
+			has_runtime_star_preview = true
+			break
+	assert_true(
+		has_runtime_star_preview,
+		"remote preview generation should include the visible runtime-snapshot star once runtime extent participates in culling"
 	)
 
 func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
