@@ -104,14 +104,14 @@ func _neighbor_cells(cell: Vector2i) -> Array:
 			result.append(Vector2i(cell.x + dx, cell.y + dy))
 	return result
 
-func _pair_key(id_a: int, id_b: int) -> int:
+func _pair_key(id_a: int, id_b: int) -> String:
 	var lo: int = min(id_a, id_b)
 	var hi: int = max(id_a, id_b)
-	return lo * 100_000 + hi
+	return "%d:%d" % [lo, hi]
 
 func _append_if_overlapping(candidates: Array, checked: Dictionary,
 		body_a: SimBody, body_b: SimBody) -> void:
-	var key: int = _pair_key(body_a.id, body_b.id)
+	var key: String = _pair_key(body_a.id, body_b.id)
 	if checked.has(key):
 		return
 	checked[key] = true

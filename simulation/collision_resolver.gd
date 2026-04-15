@@ -184,19 +184,22 @@ func _star_impact(a: SimBody, b: SimBody) -> void:
 func _star_star_collision(a: SimBody, b: SimBody) -> void:
 	var survivor: SimBody = _preferred_star_collision_survivor(a, b)
 	var removed: SimBody = b if survivor == a else a
-	var total_mass: float = survivor.mass + removed.mass
+	var debris_mass: float = removed.mass * STAR_IMPACT_DEBRIS_FRACTION
+	var absorbed_mass: float = maxf(removed.mass - debris_mass, 0.0)
+	var total_mass: float = survivor.mass + absorbed_mass
 	if total_mass > 0.0:
 		survivor.velocity = (
-			survivor.velocity * survivor.mass + removed.velocity * removed.mass
+			survivor.velocity * survivor.mass + removed.velocity * absorbed_mass
 		) / total_mass
 	survivor.mass = total_mass
+	survivor.radius = _radius_for_mass(survivor.mass, survivor.body_type)
 	survivor.temperature = maxf(survivor.temperature, removed.temperature)
 	if not survivor.kinematic:
 		survivor.reset_sleep_timer()
 
 	var world = _get_world()
 	if world != null:
-		world.add_debris_at(removed.position, removed.mass * STAR_IMPACT_DEBRIS_FRACTION)
+		world.add_debris_at(removed.position, debris_mass)
 		world.mark_body_for_removal_with_analytic_dependents(removed)
 		return
 	removed.marked_for_removal = true
@@ -263,7 +266,8 @@ func _radius_for_mass(mass: float, body_type: int) -> float:
 		SimBody.BodyType.BLACK_HOLE:
 			return SimConstants.BLACK_HOLE_RADIUS
 		SimBody.BodyType.STAR:
-			return SimConstants.STAR_RADIUS
+			var safe_star_mass: float = maxf(SimConstants.STAR_MASS, 0.000001)
+			return SimConstants.STAR_RADIUS * sqrt(maxf(mass, 0.0) / safe_star_mass)
 		SimBody.BodyType.PLANET:
 			return clamp(
 				SimConstants.PLANET_RADIUS_MIN + log(mass / SimConstants.PLANET_MASS_MIN + 1.0),
