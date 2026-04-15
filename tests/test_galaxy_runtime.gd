@@ -283,6 +283,144 @@ func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic
 		"simplified stepping should keep remote objects marked as simplified"
 	)
 
+func test_dynamic_star_roundtrip_through_simplified_far_cluster_accumulates_more_orbit_error_than_active_runtime() -> void:
+	var orbit_radius: float = 1_600.0
+	var step_count: int = 4_800
+	var control_galaxy: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var roundtrip_galaxy: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	_configure_manual_runtime_snapshot_star_circular_orbit(control_galaxy.get_cluster(0), orbit_radius)
+	_configure_manual_runtime_snapshot_star_circular_orbit(roundtrip_galaxy.get_cluster(0), orbit_radius)
+
+	var control_runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(control_galaxy, 0)
+	var control_star_id: String = "cluster_0:star_0"
+	var control_black_hole_id: String = "cluster_0:black_hole_0"
+	var control_star: SimBody = control_runtime.get_active_sim_world().get_body_by_persistent_object_id(control_star_id)
+	var control_black_hole: SimBody = control_runtime.get_active_sim_world().get_body_by_persistent_object_id(control_black_hole_id)
+	assert_not_null(control_star, "the active-only control fixture needs its orbiting source star")
+	assert_not_null(control_black_hole, "the active-only control fixture needs its host black hole")
+
+	var initial_energy: float = _specific_orbital_energy_from_kinematics(
+		control_star.position,
+		control_star.velocity,
+		control_black_hole.position,
+		control_black_hole.mass
+	)
+	var control_max_radius_error: float = 0.0
+	var control_max_energy_error: float = 0.0
+	for _step in range(step_count):
+		control_runtime.step(SimConstants.FIXED_DT)
+		control_star = control_runtime.get_active_sim_world().get_body_by_persistent_object_id(control_star_id)
+		control_black_hole = control_runtime.get_active_sim_world().get_body_by_persistent_object_id(control_black_hole_id)
+		control_max_radius_error = maxf(
+			control_max_radius_error,
+			absf(control_star.position.distance_to(control_black_hole.position) - orbit_radius)
+		)
+		control_max_energy_error = maxf(
+			control_max_energy_error,
+			absf(_specific_orbital_energy_from_kinematics(
+				control_star.position,
+				control_star.velocity,
+				control_black_hole.position,
+				control_black_hole.mass
+			) - initial_energy)
+		)
+
+	var roundtrip_runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(roundtrip_galaxy, 0)
+	var far_cluster_id: int = _find_first_cluster_in_macro_sector_zone(roundtrip_runtime, MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR)
+	assert_true(far_cluster_id >= 0, "the roundtrip drift fixture needs a far cluster so the source star enters the batched simplified path")
+
+	roundtrip_runtime.activate_cluster(far_cluster_id)
+	var source_cluster: ClusterState = roundtrip_galaxy.get_cluster(0)
+	assert_eq(
+		source_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"switching to a far cluster should demote the source orbit fixture into the simplified path"
+	)
+	assert_eq(
+		roundtrip_runtime.get_cluster_macro_sector_zone(0),
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR,
+		"the source orbit fixture should now be stepped through the far-zone simplified path"
+	)
+
+	var roundtrip_max_radius_error: float = 0.0
+	var roundtrip_max_energy_error: float = 0.0
+	for _step in range(step_count):
+		roundtrip_runtime.step(SimConstants.FIXED_DT)
+		var source_star_state: ClusterObjectState = source_cluster.get_object(control_star_id)
+		var source_black_hole_state: ClusterObjectState = source_cluster.get_object(control_black_hole_id)
+		assert_not_null(source_star_state, "the far simplified source cluster should keep its orbiting star persisted while measuring the roundtrip drift")
+		assert_not_null(source_black_hole_state, "the far simplified source cluster should keep its host black hole persisted while measuring the roundtrip drift")
+		roundtrip_max_radius_error = maxf(
+			roundtrip_max_radius_error,
+			absf(source_star_state.local_position.distance_to(source_black_hole_state.local_position) - orbit_radius)
+		)
+		roundtrip_max_energy_error = maxf(
+			roundtrip_max_energy_error,
+			absf(_specific_orbital_energy_from_kinematics(
+				source_star_state.local_position,
+				source_star_state.local_velocity,
+				source_black_hole_state.local_position,
+				float(source_black_hole_state.descriptor.get("mass", SimConstants.BLACK_HOLE_MASS))
+			) - initial_energy)
+		)
+
+	roundtrip_runtime.activate_cluster(0)
+	var reloaded_star: SimBody = roundtrip_runtime.get_active_sim_world().get_body_by_persistent_object_id(control_star_id)
+	assert_not_null(reloaded_star, "the far simplified orbit fixture should rematerialize the persisted star when the source cluster becomes active again")
+	assert_gt(
+		roundtrip_max_radius_error,
+		maxf(control_max_radius_error * 10.0, 10.0),
+		"the active-to-simplified-to-active roundtrip should currently accumulate a clearly larger radial orbit deviation than staying active the whole time"
+	)
+	assert_gt(
+		roundtrip_max_energy_error,
+		maxf(control_max_energy_error * 10.0, 25.0),
+		"the roundtrip path should currently accumulate clearly more orbital-energy error than the always-active control"
+	)
+
+func test_outbound_free_dynamic_star_currently_strands_in_source_cluster_registry() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(2)
+	var source_cluster: ClusterState = galaxy_state.get_cluster(0)
+	var target_cluster: ClusterState = galaxy_state.get_cluster(1)
+	var star_object_id: String = "cluster_0:star_0"
+	_configure_manual_runtime_snapshot_star_state(source_cluster, Vector2(2_050.0, 0.0), Vector2(120.0, 0.0))
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var outbound_star: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(star_object_id)
+	assert_not_null(outbound_star, "the stranded-star fixture needs its outbound dynamic star in the active source world")
+	assert_true(
+		OBJECT_RESIDENCY_POLICY_SCRIPT.is_position_within_cluster_import_radius(
+			source_cluster.global_center + outbound_star.position,
+			target_cluster
+		),
+		"the outbound star fixture should physically sit inside the neighboring target cluster's import radius"
+	)
+
+	runtime.activate_cluster(1)
+
+	var persisted_source_star: ClusterObjectState = source_cluster.get_object(star_object_id)
+	assert_not_null(persisted_source_star, "the unsupported outbound star should remain persisted in the source cluster registry")
+	assert_true(
+		WorldBuilder.cluster_has_unsupported_outbound_dynamic_stars(source_cluster),
+		"the source cluster should currently stay pinned in simplified mode by the unsupported outbound-star guardrail"
+	)
+	assert_null(
+		target_cluster.get_object(star_object_id),
+		"the neighboring target cluster should not claim the outbound star because FREE_DYNAMIC stars still have no transit ownership handoff"
+	)
+	assert_null(
+		runtime.get_active_sim_world().get_body_by_persistent_object_id(star_object_id),
+		"activating the neighboring cluster should not materialize the outbound source star there under the current narrow residency rules"
+	)
+
+	runtime.activate_cluster(0)
+	var reloaded_source_star: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(star_object_id)
+	assert_not_null(reloaded_source_star, "reactivating the source cluster should rematerialize the stranded outbound star from its persisted source snapshot")
+	assert_true(
+		reloaded_source_star.position.is_equal_approx(persisted_source_star.local_position),
+		"the reloaded source star should come back from the source cluster snapshot instead of having been transferred away"
+	)
+
 func test_runtime_time_scale_scales_simplified_cluster_simulated_time() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(3)
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
@@ -2086,6 +2224,54 @@ func _compute_black_hole_only_acceleration(object_state: ClusterObjectState, bla
 			/ dist_sq
 		acceleration += delta * inv_dist * accel_scale
 	return acceleration
+
+func _specific_orbital_energy_from_kinematics(
+		body_position: Vector2,
+		body_velocity: Vector2,
+		parent_position: Vector2,
+		parent_mass: float) -> float:
+	var distance: float = body_position.distance_to(parent_position)
+	return 0.5 * body_velocity.length_squared() - (SimConstants.G * parent_mass / distance)
+
+func _configure_manual_runtime_snapshot_star_circular_orbit(
+		cluster_state: ClusterState,
+		orbit_radius: float) -> void:
+	if cluster_state == null:
+		return
+	var black_hole_object_id: String = "cluster_%d:black_hole_0" % cluster_state.cluster_id
+	var star_object_id: String = "cluster_%d:star_0" % cluster_state.cluster_id
+	var black_hole_state: ClusterObjectState = cluster_state.get_object(black_hole_object_id)
+	var star_state: ClusterObjectState = cluster_state.get_object(star_object_id)
+	if black_hole_state == null or star_state == null:
+		return
+	black_hole_state.local_velocity = Vector2.ZERO
+	black_hole_state.descriptor["kinematic"] = true
+	var black_hole_mass: float = float(black_hole_state.descriptor.get("mass", SimConstants.BLACK_HOLE_MASS))
+	var orbital_speed: float = sqrt(SimConstants.G * black_hole_mass / orbit_radius)
+	_configure_manual_runtime_snapshot_star_state(
+		cluster_state,
+		Vector2(orbit_radius, 0.0),
+		Vector2(0.0, orbital_speed)
+	)
+
+func _configure_manual_runtime_snapshot_star_state(
+		cluster_state: ClusterState,
+		local_position: Vector2,
+		local_velocity: Vector2) -> void:
+	if cluster_state == null:
+		return
+	var star_object_id: String = "cluster_%d:star_0" % cluster_state.cluster_id
+	var star_state: ClusterObjectState = cluster_state.get_object(star_object_id)
+	if star_state == null:
+		return
+	star_state.local_position = local_position
+	star_state.local_velocity = local_velocity
+	star_state.descriptor["kinematic"] = false
+	star_state.descriptor["scripted_orbit_enabled"] = false
+	star_state.descriptor["orbit_binding_state"] = SimBody.OrbitBindingState.FREE_DYNAMIC
+	cluster_state.update_runtime_extent(
+		local_position.length() + float(star_state.descriptor.get("radius", SimConstants.STAR_RADIUS))
+	)
 
 func _make_test_transit_asteroid(
 		object_id: String,

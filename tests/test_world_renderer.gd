@@ -431,6 +431,59 @@ func test_offscreen_cluster_payloads_are_culled_before_rendering() -> void:
 	assert_true(preview_cluster_ids.has(1), "screen-relevant remote clusters should still build preview specs")
 	assert_false(preview_cluster_ids.has(2), "offscreen remote clusters should not build preview specs")
 
+func test_remote_preview_currently_culls_runtime_extent_star_outside_static_cluster_radius() -> void:
+	var galaxy_state := GalaxyState.new()
+	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
+	var remote_cluster: ClusterState = _make_manual_preview_cluster(1, Vector2(3_000.0, 0.0), 100.0)
+	galaxy_state.add_cluster(active_cluster)
+	galaxy_state.add_cluster(remote_cluster)
+
+	remote_cluster.mark_simplified(0.0)
+	remote_cluster.simulation_profile["has_runtime_snapshot"] = true
+	remote_cluster.object_registry.clear()
+	remote_cluster.register_object(_make_manual_preview_object_state(
+		"cluster_1:black_hole_0",
+		"black_hole",
+		SimBody.BodyType.BLACK_HOLE,
+		SimBody.MaterialType.STELLAR,
+		Vector2.ZERO,
+		SimConstants.BLACK_HOLE_RADIUS
+	))
+	remote_cluster.register_object(_make_manual_preview_object_state(
+		"cluster_1:star_0",
+		"star",
+		SimBody.BodyType.STAR,
+		SimBody.MaterialType.STELLAR,
+		Vector2(2_500.0, 0.0),
+		SimConstants.STAR_RADIUS
+	))
+	remote_cluster.update_runtime_extent(2_590.0)
+
+	var session := ActiveClusterSession.new()
+	session.bind(galaxy_state, active_cluster, SimWorld.new())
+	var visible_canvas_rect := Rect2(Vector2(2_050.0, -220.0), Vector2(300.0, 440.0))
+	var preview_specs: Array = WORLD_RENDERER_SCRIPT.build_remote_cluster_preview_specs(
+		galaxy_state,
+		session,
+		visible_canvas_rect,
+		1.0,
+		Vector2(2_400.0, 900.0)
+	)
+
+	assert_gt(
+		remote_cluster.runtime_extent_radius,
+		remote_cluster.get_authoritative_radius(),
+		"the runtime-extent fixture needs a cluster whose live footprint extends far beyond its static authoritative radius"
+	)
+	assert_true(
+		visible_canvas_rect.has_point(BodyRenderer.sim_to_screen(remote_cluster.global_center + Vector2(2_500.0, 0.0))),
+		"the fixture should place the remote runtime-snapshot star inside the visible canvas rect"
+	)
+	assert_true(
+		preview_specs.is_empty(),
+		"remote preview culling currently uses the static cluster radius, so a star that only expands the runtime extent is still skipped"
+	)
+
 func test_remote_preview_lod_scales_from_marker_only_to_full_preview() -> void:
 	var galaxy_state := GalaxyState.new()
 	var active_cluster: ClusterState = _make_manual_preview_cluster(0, Vector2.ZERO, 100.0)
