@@ -145,6 +145,63 @@ func test_runtime_snapshot_materialization_relinks_planet_parent_to_materialized
 		"runtime snapshot materialization should relink stored parent object ids to live SimWorld body ids"
 	)
 
+func test_runtime_snapshot_reactivation_preserves_sleeping_state_for_dynamic_body() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(2)
+	var source_cluster: ClusterState = galaxy_state.get_cluster(0)
+	var asteroid_object_id: String = "cluster_0:asteroid_sleeping_0"
+	source_cluster.register_object(_make_manual_cluster_object_state(
+		asteroid_object_id,
+		"asteroid",
+		Vector2(80.0, 0.0),
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.ASTEROID,
+			"material_type": SimBody.MaterialType.ROCKY,
+			"influence_level": SimBody.InfluenceLevel.B,
+			"mass": 8.0,
+			"radius": 3.0,
+			"temperature": 200.0,
+			"kinematic": false,
+			"scripted_orbit_enabled": false,
+			"orbit_binding_state": SimBody.OrbitBindingState.FREE_DYNAMIC,
+			"orbit_radius": 0.0,
+			"orbit_angle": 0.0,
+			"orbit_angular_speed": 0.0,
+			"debris_mass": 0.0,
+			"sleeping": true,
+			"active": true,
+			"parent_object_id": "",
+		}
+	))
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var initial_world: SimWorld = runtime.get_active_sim_world()
+	var sleeping_asteroid: SimBody = initial_world.get_body_by_persistent_object_id(asteroid_object_id)
+
+	assert_not_null(sleeping_asteroid, "the sleeping asteroid should materialize from the runtime snapshot")
+	assert_true(sleeping_asteroid.sleeping, "runtime snapshot materialization should currently preserve sleeping state on dynamic bodies")
+
+	var initial_position: Vector2 = sleeping_asteroid.position
+	runtime.step(SimConstants.FIXED_DT)
+	assert_true(
+		sleeping_asteroid.position.is_equal_approx(initial_position),
+		"the materialized sleeping asteroid should currently remain frozen during active-world stepping"
+	)
+
+	runtime.activate_cluster(1)
+	runtime.activate_cluster(0)
+
+	var reloaded_asteroid: SimBody = runtime.get_active_sim_world().get_body_by_persistent_object_id(asteroid_object_id)
+	assert_not_null(reloaded_asteroid, "reactivating the source cluster should rematerialize the sleeping asteroid from its snapshot")
+	assert_true(
+		reloaded_asteroid.sleeping,
+		"reactivating from a persisted snapshot should currently restore the dynamic body's sleeping state unchanged"
+	)
+	assert_true(
+		reloaded_asteroid.position.is_equal_approx(initial_position),
+		"the persisted sleeping asteroid should currently rematerialize at the same stored snapshot position"
+	)
+
 func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic_body() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(3)
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)

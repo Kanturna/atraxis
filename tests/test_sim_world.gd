@@ -36,6 +36,167 @@ func test_far_from_black_hole_keeps_single_substep() -> void:
 		"bodies far from every black hole should keep the default single-step integration"
 	)
 
+func test_adaptive_substeps_do_not_double_advance_scripted_orbiters_per_frame() -> void:
+	var world := SimWorld.new()
+
+	var black_hole := _make_black_hole()
+	world.add_body(black_hole)
+
+	var star := _make_dynamic_star()
+	star.position = Vector2(200.0, 0.0)
+	star.velocity = Vector2(0.0, 900.0)
+	world.add_body(star)
+
+	var planet := SimBody.new()
+	planet.active = true
+	planet.body_type = SimBody.BodyType.PLANET
+	planet.influence_level = SimBody.InfluenceLevel.B
+	planet.material_type = SimBody.MaterialType.ROCKY
+	planet.mass = SimConstants.PLANET_MASS_MIN
+	planet.radius = SimConstants.PLANET_RADIUS_MIN
+	planet.kinematic = true
+	planet.scripted_orbit_enabled = true
+	planet.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
+	planet.orbit_parent_id = star.id
+	planet.orbit_radius = 120.0
+	planet.orbit_angle = 1.25
+	planet.orbit_angular_speed = 0.5
+	planet.position = star.position + Vector2(cos(planet.orbit_angle), sin(planet.orbit_angle)) * planet.orbit_radius
+	world.add_body(planet)
+
+	world._rebuild_dominant_bh_cache()
+	var substeps: int = world._determine_black_hole_adaptive_substeps(SimConstants.FIXED_DT)
+	assert_gt(substeps, 1, "the fixture should trigger adaptive BH substeps before measuring scripted orbit behavior")
+
+	var initial_angle: float = planet.orbit_angle
+	world.step_sim(SimConstants.FIXED_DT)
+
+	assert_true(star.active, "the adaptive-substep fixture should keep the scripted planet's parent alive during the measured frame")
+	assert_true(planet.active, "the scripted planet should still be active when verifying its per-frame orbit advancement")
+
+	assert_almost_eq(
+		planet.orbit_angle,
+		wrapf(initial_angle + planet.orbit_angular_speed * SimConstants.FIXED_DT, 0.0, TAU),
+		0.0001,
+		"scripted orbiters should currently advance once per frame by sim_dt, not once per adaptive substep"
+	)
+	assert_almost_eq(
+		planet.age,
+		SimConstants.FIXED_DT,
+		0.0001,
+		"scripted orbiters should currently age once per frame even when adaptive substeps trigger elsewhere in the world"
+	)
+
+func test_sleep_timer_progress_matches_frame_dt_even_when_adaptive_substeps_trigger() -> void:
+	var close_world := SimWorld.new()
+	var close_black_hole := _make_black_hole()
+	close_world.add_body(close_black_hole)
+
+	var close_star := _make_dynamic_star()
+	close_star.position = Vector2(200.0, 0.0)
+	close_world.add_body(close_star)
+
+	var close_fragment := SimBody.new()
+	close_fragment.active = true
+	close_fragment.body_type = SimBody.BodyType.FRAGMENT
+	close_fragment.influence_level = SimBody.InfluenceLevel.C
+	close_fragment.material_type = SimBody.MaterialType.ROCKY
+	close_fragment.mass = 1.0
+	close_fragment.radius = 2.0
+	close_fragment.position = Vector2(50_000.0, 0.0)
+	close_fragment.velocity = Vector2.ZERO
+	close_world.add_body(close_fragment)
+
+	close_world._rebuild_dominant_bh_cache()
+	assert_gt(
+		close_world._determine_black_hole_adaptive_substeps(SimConstants.FIXED_DT),
+		1,
+		"the close-world fixture should trigger adaptive substeps before measuring sleep timing"
+	)
+
+	var far_world := SimWorld.new()
+	var far_black_hole := _make_black_hole()
+	far_world.add_body(far_black_hole)
+
+	var far_star := _make_dynamic_star()
+	far_star.position = Vector2(20_000.0, 0.0)
+	far_world.add_body(far_star)
+
+	var far_fragment := SimBody.new()
+	far_fragment.active = true
+	far_fragment.body_type = SimBody.BodyType.FRAGMENT
+	far_fragment.influence_level = SimBody.InfluenceLevel.C
+	far_fragment.material_type = SimBody.MaterialType.ROCKY
+	far_fragment.mass = 1.0
+	far_fragment.radius = 2.0
+	far_fragment.position = Vector2(50_000.0, 0.0)
+	far_fragment.velocity = Vector2.ZERO
+	far_world.add_body(far_fragment)
+
+	far_world._rebuild_dominant_bh_cache()
+	assert_eq(
+		far_world._determine_black_hole_adaptive_substeps(SimConstants.FIXED_DT),
+		1,
+		"the far-world fixture should stay on the default single-step path"
+	)
+
+	close_world.step_sim(SimConstants.FIXED_DT)
+	far_world.step_sim(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		close_fragment.sleep_timer,
+		SimConstants.FIXED_DT,
+		0.0001,
+		"sleep timer should currently accumulate only the frame dt even when adaptive substeps are active elsewhere"
+	)
+	assert_almost_eq(
+		far_fragment.sleep_timer,
+		SimConstants.FIXED_DT,
+		0.0001,
+		"single-step worlds should accumulate the same frame dt into sleep timers"
+	)
+	assert_false(close_fragment.sleeping, "one frame below the sleep threshold should not confirm sleep yet")
+	assert_false(far_fragment.sleeping, "control world should match the close-world sleep confirmation behavior")
+	assert_almost_eq(
+		close_fragment.sleep_timer,
+		far_fragment.sleep_timer,
+		0.0001,
+		"sleep timer progression should currently be invariant to the adaptive-substep count"
+	)
+
+func test_sleeping_body_near_black_hole_remains_asleep_under_current_rules() -> void:
+	var world := SimWorld.new()
+
+	var black_hole := _make_black_hole()
+	world.add_body(black_hole)
+
+	var asteroid := SimBody.new()
+	asteroid.active = true
+	asteroid.body_type = SimBody.BodyType.ASTEROID
+	asteroid.influence_level = SimBody.InfluenceLevel.B
+	asteroid.material_type = SimBody.MaterialType.ROCKY
+	asteroid.mass = 8.0
+	asteroid.radius = 3.0
+	asteroid.position = Vector2(120.0, 0.0)
+	asteroid.velocity = Vector2.ZERO
+	asteroid.sleeping = true
+	asteroid.sleep_timer = SimConstants.SLEEP_CONFIRM_TIME
+	world.add_body(asteroid)
+
+	var initial_position: Vector2 = asteroid.position
+	var initial_velocity: Vector2 = asteroid.velocity
+	world.step_sim(SimConstants.FIXED_DT)
+
+	assert_true(asteroid.sleeping, "under the current rules a sleeping body near a strong source stays asleep without an explicit wake path")
+	assert_true(
+		asteroid.position.is_equal_approx(initial_position),
+		"sleeping bodies currently skip integration even when they are close to a black hole"
+	)
+	assert_true(
+		asteroid.velocity.is_equal_approx(initial_velocity),
+		"sleeping bodies currently do not pick up new velocity from nearby black-hole gravity"
+	)
+
 func test_dominant_black_hole_handoffs_are_counted_when_anchor_changes() -> void:
 	var world := SimWorld.new()
 
