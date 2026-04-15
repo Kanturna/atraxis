@@ -118,6 +118,32 @@ func test_dynamic_star_host_hysteresis_confirms_persistent_foreign_capture_signa
 	assert_eq(star.pending_host_time, 0.0, "confirming a host switch should reset the pending timer")
 	assert_eq(star.orbit_binding_state, SimBody.OrbitBindingState.FREE_DYNAMIC, "confirmed host changes should not convert the star into an analytic orbiter")
 
+func test_analytic_orbiter_with_missing_parent_is_removed_instead_of_freezing() -> void:
+	var world := SimWorld.new()
+
+	var planet := SimBody.new()
+	planet.active = true
+	planet.body_type = SimBody.BodyType.PLANET
+	planet.influence_level = SimBody.InfluenceLevel.B
+	planet.material_type = SimBody.MaterialType.ROCKY
+	planet.mass = SimConstants.PLANET_MASS_MIN
+	planet.radius = SimConstants.PLANET_RADIUS_MIN
+	planet.kinematic = true
+	planet.scripted_orbit_enabled = true
+	planet.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
+	planet.orbit_parent_id = 42
+	planet.orbit_radius = 60.0
+	planet.orbit_angular_speed = 0.5
+	world.add_body(planet)
+
+	world.step_sim(SimConstants.FIXED_DT)
+
+	assert_eq(
+		world.count_bodies_by_type(SimBody.BodyType.PLANET),
+		0,
+		"analytic orbiters with missing parents should be removed instead of lingering in a frozen orphan state"
+	)
+
 func test_leapfrog_keeps_circular_star_orbit_stable() -> void:
 	var world := SimWorld.new()
 

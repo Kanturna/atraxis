@@ -405,6 +405,7 @@ func _update_scripted_orbiters(sim_dt: float) -> void:
 			continue
 		var parent: SimBody = _find_body_by_id(body.orbit_parent_id)
 		if parent == null or not parent.active:
+			_remove_orphaned_analytic_orbiter(body)
 			continue
 		body.sleeping = false
 		body.sleep_timer = 0.0
@@ -415,6 +416,15 @@ func _update_scripted_orbiters(sim_dt: float) -> void:
 		body.position = parent.position + radial * body.orbit_radius
 		body.velocity = parent.velocity + tangent * (body.orbit_angular_speed * body.orbit_radius)
 		body.age += sim_dt
+
+func _remove_orphaned_analytic_orbiter(body: SimBody) -> void:
+	if body == null:
+		return
+	body.active = false
+	body.marked_for_removal = true
+	body.scripted_orbit_enabled = false
+	body.orbit_parent_id = -1
+	body.orbit_center = body.position
 
 func _aggregate_debris_fields() -> void:
 	for i in range(debris_fields.size()):

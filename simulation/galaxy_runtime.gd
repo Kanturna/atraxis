@@ -23,6 +23,7 @@ var active_sector_session = null
 var active_cluster_session: ActiveClusterSession = null
 var active_macro_sector_session = null
 var active_sector_world: SimWorld = null
+var time_scale: float = 1.0
 var runtime_time_elapsed: float = 0.0
 var pending_manual_activation_cluster_id: int = -1
 var pending_auto_activation_cluster_id: int = -1
@@ -42,6 +43,7 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 	active_cluster_session = null
 	active_macro_sector_session = null
 	active_sector_world = null
+	time_scale = 1.0
 	runtime_time_elapsed = 0.0
 	pending_manual_activation_cluster_id = -1
 	pending_auto_activation_cluster_id = -1
@@ -65,18 +67,21 @@ func initialize(next_galaxy_state: GalaxyState, initial_cluster_id: int = -1) ->
 		active_cluster_session.cluster_id if active_cluster_session != null else -1,
 		false
 	)
+	_apply_time_scale_to_active_world()
 	galaxy_state.sync_world_entity_bindings()
 
 func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
+	var sim_dt: float = dt * time_scale
 	_discover_focus_sector_neighborhood()
 	_enqueue_approaching_sector_snapshots()
 	_drain_snapshot_prewarm_queue()
 	_sync_active_sector_to_focus_context()
 	_apply_focus_relevance_policy()
 	_flush_pending_activation_request()
-	WorldBuilder.step_transit_objects(galaxy_state, dt)
+	_apply_time_scale_to_active_world()
+	WorldBuilder.step_transit_objects(galaxy_state, sim_dt)
 	_settle_arrived_transit_objects_into_inactive_clusters()
 	if active_cluster_session != null and active_cluster_session.sim_world != null:
 		active_cluster_session.sim_world.step_sim(dt)
@@ -88,11 +93,17 @@ func step(dt: float) -> void:
 		)
 	elif active_sector_world != null:
 		active_sector_world.step_sim(dt)
-	_step_simplified_clusters(dt)
+	_step_simplified_clusters(sim_dt)
 	_import_transit_objects_into_active_cluster()
 	galaxy_state.sync_world_entity_bindings()
+	# Runtime clocks drive focus, activation and unload hysteresis, so they
+	# intentionally remain tied to real frame time instead of simulation speed.
 	runtime_time_elapsed += dt
 	_apply_simplified_unload_policy()
+
+func set_time_scale(value: float) -> void:
+	time_scale = clampf(value, SimConstants.MIN_TIME_SCALE, SimConstants.MAX_TIME_SCALE)
+	_apply_time_scale_to_active_world()
 
 func update_focus_context(next_focus_global_position: Vector2, visible_world_radius: float) -> void:
 	focus_global_position = next_focus_global_position
@@ -289,6 +300,7 @@ func _activate_sector_internal(
 				active_sector_world = active_cluster_session.sim_world
 		if active_sector_world == null:
 			active_sector_world = SimWorld.new()
+	_apply_time_scale_to_active_world()
 	active_sector_session = ACTIVE_SECTOR_SESSION_SCRIPT.new()
 	active_sector_session.bind(
 		galaxy_state,
@@ -508,7 +520,15 @@ func _should_keep_cluster_simplified(cluster_state: ClusterState) -> bool:
 		return true
 	if cluster_state.cluster_id == manual_activation_hold_cluster_id and _is_manual_activation_hold_active():
 		return true
+	if WorldBuilder.cluster_has_unsupported_outbound_dynamic_stars(cluster_state):
+		return true
 	return false
+
+func _apply_time_scale_to_active_world() -> void:
+	if active_cluster_session != null and active_cluster_session.sim_world != null:
+		active_cluster_session.sim_world.time_scale = time_scale
+	if active_sector_world != null:
+		active_sector_world.time_scale = time_scale
 
 func _rebuild_active_macro_sector(focus_cluster_id: int, preserve_existing_members: bool) -> void:
 	if galaxy_state == null or active_sector_session == null or active_sector_session.sector_state == null:

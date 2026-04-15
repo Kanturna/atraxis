@@ -68,6 +68,8 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	if sim_world == null:
 		return
+	if galaxy_runtime != null:
+		galaxy_runtime.set_time_scale(_hud.get_current_time_scale())
 	_update_pending_cluster_transition()
 	var preserved_focus_global_position: Vector2 = _camera_focus_global_position()
 	var previous_macro_sector = galaxy_runtime.get_active_macro_sector() if galaxy_runtime != null else null
@@ -135,6 +137,8 @@ func restart_simulation(config) -> void:
 	_accumulated_dt = 0.0
 
 	galaxy_runtime = WorldBuilder.build_runtime_from_config(_current_start_config)
+	if galaxy_runtime != null:
+		galaxy_runtime.set_time_scale(time_scale)
 	_sync_runtime_aliases()
 	if sim_world == null:
 		return
@@ -226,6 +230,8 @@ func _rebind_active_world(
 	_disconnect_world_signals(previous_world)
 	if sim_world == null:
 		return
+	if galaxy_runtime != null:
+		galaxy_runtime.set_time_scale(time_scale)
 
 	var zones_by_star: Dictionary = {}
 	for star in sim_world.get_stars():

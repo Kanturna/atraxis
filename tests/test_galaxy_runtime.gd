@@ -131,6 +131,20 @@ func test_runtime_cluster_switch_writes_back_and_reloads_from_snapshot() -> void
 		"reactivation should restore the cluster's persisted simulation time into SimWorld"
 	)
 
+func test_runtime_snapshot_materialization_relinks_planet_parent_to_materialized_star() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(1, 2_000.0, true)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var star: SimBody = runtime.get_active_sim_world().get_star()
+	var planet: SimBody = _find_active_body_of_type(runtime.get_active_sim_world(), SimBody.BodyType.PLANET)
+
+	assert_not_null(star, "the manual runtime snapshot should materialize its stored star")
+	assert_not_null(planet, "the manual runtime snapshot should materialize its stored planet")
+	assert_eq(
+		planet.orbit_parent_id,
+		star.id,
+		"runtime snapshot materialization should relink stored parent object ids to live SimWorld body ids"
+	)
+
 func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic_body() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(3)
 	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
@@ -194,6 +208,80 @@ func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic
 		advanced_star.residency_state,
 		ObjectResidencyState.State.SIMPLIFIED,
 		"simplified stepping should keep remote objects marked as simplified"
+	)
+
+func test_runtime_time_scale_scales_simplified_cluster_simulated_time() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(3)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var source_cluster: ClusterState = galaxy_state.get_cluster(0)
+
+	runtime.activate_cluster(1)
+	var old_time: float = source_cluster.simulated_time
+	runtime.set_time_scale(3.0)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		source_cluster.simulated_time,
+		old_time + SimConstants.FIXED_DT * 3.0,
+		0.0001,
+		"simplified clusters should advance using the same scaled simulation dt as the active runtime"
+	)
+
+func test_runtime_time_scale_scales_transit_object_motion_and_age() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(2)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var transit_state = _make_test_transit_asteroid(
+		"transit:scaled_dt",
+		0,
+		Vector2(25_000.0, -10_000.0),
+		Vector2(10.0, -4.0)
+	)
+	runtime.galaxy_state.register_transit_object(transit_state)
+	runtime.set_time_scale(4.0)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_almost_eq(
+		transit_state.age,
+		SimConstants.FIXED_DT * 4.0,
+		0.0001,
+		"transit records should age using the runtime-scaled simulation dt"
+	)
+	assert_almost_eq(
+		transit_state.global_position.x,
+		25_000.0 + 10.0 * SimConstants.FIXED_DT * 4.0,
+		0.001,
+		"transit records should advance their x position using the runtime-scaled simulation dt"
+	)
+	assert_almost_eq(
+		transit_state.global_position.y,
+		-10_000.0 + (-4.0) * SimConstants.FIXED_DT * 4.0,
+		0.001,
+		"transit records should advance their y position using the runtime-scaled simulation dt"
+	)
+
+func test_cluster_activation_preserves_runtime_time_scale_on_new_active_world() -> void:
+	var config = START_CONFIG_SCRIPT.new()
+	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR
+	config.anchor_topology = START_CONFIG_SCRIPT.AnchorTopology.GALAXY_CLUSTER
+	config.black_hole_count = 9
+	config.galaxy_cluster_count = 3
+	config.star_count = 1
+	config.planets_per_star = 0
+	config.disturbance_body_count = 0
+
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_config(config)
+	var second_cluster_id: int = _find_secondary_cluster_id(runtime.galaxy_state, runtime.active_cluster_session.cluster_id)
+	runtime.set_time_scale(5.0)
+
+	runtime.activate_cluster(second_cluster_id)
+
+	assert_almost_eq(
+		runtime.get_active_sim_world().time_scale,
+		5.0,
+		0.0001,
+		"activating a different cluster should keep the runtime time scale on the newly materialized active world"
 	)
 
 func test_active_macro_sector_caps_members_and_assigns_ambient_and_far_zones() -> void:
@@ -1499,6 +1587,41 @@ func test_dynamic_stars_do_not_enter_transit_in_the_first_narrow_pipeline() -> v
 	assert_not_null(
 		runtime.get_active_sim_world().get_body_by_persistent_object_id(star.persistent_object_id),
 		"unsupported object types should remain owned by the active cluster for now"
+	)
+
+func test_unsupported_outbound_dynamic_stars_keep_their_source_cluster_simplified_as_guardrail() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var source_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var source_cluster: ClusterState = runtime.galaxy_state.get_cluster(source_cluster_id)
+	var star: SimBody = runtime.get_active_sim_world().get_star()
+	var export_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_export_radius(source_cluster)
+	var far_cluster_id: int = _find_cluster_outside_active_macro_sector(runtime)
+
+	assert_true(far_cluster_id >= 0, "the residency guardrail test needs a cluster outside the current active macro sector")
+
+	star.position = Vector2(
+		export_radius + SimConstants.CLUSTER_UNSUPPORTED_STAR_GUARDRAIL_MARGIN + SimConstants.AU,
+		0.0
+	)
+	star.velocity = Vector2.ZERO
+	runtime.step(SimConstants.FIXED_DT)
+	runtime.activate_cluster(far_cluster_id)
+
+	var steps_until_unload: int = int(ceil(
+		SimConstants.CLUSTER_SIMPLIFIED_UNLOAD_DELAY / SimConstants.FIXED_DT
+	)) + 1
+	for _i in range(steps_until_unload):
+		runtime.step(SimConstants.FIXED_DT)
+
+	assert_eq(
+		source_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"clusters with unsupported outbound dynamic stars should stay simplified instead of unloading away in this guardrail pass"
+	)
+	assert_not_null(
+		source_cluster.get_object(star.persistent_object_id),
+		"the source cluster should keep the persisted outbound star state available while narrow star transit support is still disabled"
 	)
 
 func test_unloaded_cluster_reloads_from_persisted_snapshot() -> void:

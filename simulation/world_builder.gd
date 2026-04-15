@@ -79,8 +79,9 @@ static func materialize_cluster_into_world(world: SimWorld, cluster_state: Clust
 	world.time_elapsed = cluster_state.simulated_time
 	if _can_materialize_from_runtime_snapshot(cluster_state):
 		_materialize_runtime_snapshot(world, cluster_state)
-		return
-	_materialize_cluster_blueprint_into_world(world, cluster_state)
+	else:
+		_materialize_cluster_blueprint_into_world(world, cluster_state)
+	_relink_materialized_world_parents(world, cluster_state)
 
 static func compute_initial_host_system_frame(sim_world: SimWorld, cluster_state: ClusterState) -> Dictionary:
 	var empty_frame := {
@@ -493,6 +494,8 @@ static func step_simplified_cluster(
 	)
 	var object_by_id: Dictionary = {}
 	var black_hole_states: Array = []
+	var orphaned_object_ids: Array = []
+	var orphaned_object_id_set: Dictionary = {}
 	for object_state in object_states:
 		object_by_id[object_state.object_id] = object_state
 		if object_state.kind == "black_hole":
@@ -519,9 +522,9 @@ static func step_simplified_cluster(
 			continue
 		var parent_object_id: String = str(object_state.descriptor.get("parent_object_id", ""))
 		var parent_state: ClusterObjectState = object_by_id.get(parent_object_id, null)
-		if parent_state == null:
-			object_state.local_position += object_state.local_velocity * dt
-			object_state.age += dt
+		if parent_state == null or orphaned_object_id_set.has(parent_object_id):
+			orphaned_object_ids.append(object_state.object_id)
+			orphaned_object_id_set[object_state.object_id] = true
 			continue
 		var orbit_angle: float = wrapf(
 			float(object_state.descriptor.get("orbit_angle", 0.0))
@@ -537,6 +540,12 @@ static func step_simplified_cluster(
 		object_state.local_velocity = parent_state.local_velocity \
 			+ tangent * (float(object_state.descriptor.get("orbit_angular_speed", 0.0)) * orbit_radius)
 		object_state.age += dt
+
+	if not orphaned_object_ids.is_empty():
+		var next_registry: Dictionary = cluster_state.object_registry.duplicate()
+		for object_id in orphaned_object_ids:
+			next_registry.erase(object_id)
+		cluster_state.replace_object_registry(next_registry)
 
 	cluster_state.set_object_residency_state(ObjectResidencyState.State.SIMPLIFIED)
 	cluster_state.simulated_time += dt
@@ -601,8 +610,6 @@ static func _materialize_runtime_snapshot(world: SimWorld, cluster_state: Cluste
 		return a.object_id < b.object_id
 	)
 
-	var body_by_object_id: Dictionary = {}
-	var pending_parent_links: Array = []
 	for object_state in object_states:
 		if object_state.residency_state == ObjectResidencyState.State.IN_TRANSIT:
 			continue
@@ -610,21 +617,6 @@ static func _materialize_runtime_snapshot(world: SimWorld, cluster_state: Cluste
 		if body == null or not body.active:
 			continue
 		world.add_body(body)
-		body_by_object_id[object_state.object_id] = body
-		var parent_object_id: String = str(object_state.descriptor.get("parent_object_id", ""))
-		if parent_object_id != "":
-			pending_parent_links.append({
-				"body": body,
-				"parent_object_id": parent_object_id,
-			})
-
-	for link in pending_parent_links:
-		var body: SimBody = link["body"]
-		var parent_body: SimBody = body_by_object_id.get(link["parent_object_id"], null)
-		if parent_body == null:
-			continue
-		body.orbit_parent_id = parent_body.id
-		body.orbit_center = parent_body.position
 
 static func _materialize_registered_cluster_objects(world: SimWorld, cluster_state: ClusterState) -> void:
 	if world == null or cluster_state == null:
@@ -644,6 +636,29 @@ static func _materialize_registered_cluster_objects(world: SimWorld, cluster_sta
 		if body == null or not body.active:
 			continue
 		world.add_body(body)
+
+static func _relink_materialized_world_parents(world: SimWorld, cluster_state: ClusterState) -> void:
+	if world == null or cluster_state == null:
+		return
+	var body_by_object_id: Dictionary = {}
+	for body in world.bodies:
+		if body == null or not body.active or body.persistent_object_id == "":
+			continue
+		body_by_object_id[body.persistent_object_id] = body
+	for body in world.bodies:
+		if body == null or not body.active or body.persistent_object_id == "":
+			continue
+		var object_state: ClusterObjectState = cluster_state.get_object(body.persistent_object_id)
+		if object_state == null:
+			continue
+		var parent_object_id: String = str(object_state.descriptor.get("parent_object_id", ""))
+		if parent_object_id == "":
+			continue
+		var parent_body: SimBody = body_by_object_id.get(parent_object_id, null)
+		if parent_body == null:
+			continue
+		body.orbit_parent_id = parent_body.id
+		body.orbit_center = parent_body.position
 
 static func _make_body_from_object_state(object_state: ClusterObjectState) -> SimBody:
 	var body := SimBody.new()
@@ -1460,10 +1475,18 @@ static func _ensure_body_object_id(
 	used_object_ids[body.persistent_object_id] = true
 	return body.persistent_object_id
 
-static func _resolve_parent_object_id(body: SimBody, persistent_id_by_sim_id: Dictionary) -> String:
+static func _resolve_parent_object_id(
+		body: SimBody,
+		persistent_id_by_sim_id: Dictionary,
+		previous_state: ClusterObjectState = null) -> String:
 	if body.orbit_parent_id < 0:
 		return ""
-	return str(persistent_id_by_sim_id.get(body.orbit_parent_id, ""))
+	var resolved_parent_object_id: String = str(persistent_id_by_sim_id.get(body.orbit_parent_id, ""))
+	if resolved_parent_object_id != "":
+		return resolved_parent_object_id
+	if previous_state != null:
+		return str(previous_state.descriptor.get("parent_object_id", ""))
+	return ""
 
 static func _derive_runtime_object_seed(cluster_seed: int, object_id: String) -> int:
 	return absi((cluster_seed + 1) * 8_191 + object_id.hash())
@@ -1508,7 +1531,11 @@ static func _build_object_state_from_body(
 	object_state.descriptor["debris_mass"] = body.debris_mass
 	object_state.descriptor["sleeping"] = body.sleeping
 	object_state.descriptor["active"] = body.active
-	object_state.descriptor["parent_object_id"] = _resolve_parent_object_id(body, persistent_id_by_sim_id)
+	object_state.descriptor["parent_object_id"] = _resolve_parent_object_id(
+		body,
+		persistent_id_by_sim_id,
+		previous_state
+	)
 	return object_state
 
 static func _build_transit_object_state_from_body(
@@ -1534,6 +1561,32 @@ static func _build_transit_object_state_from_body(
 	transit_state.seed = object_state.seed
 	transit_state.descriptor = object_state.descriptor.duplicate(true)
 	return transit_state
+
+static func cluster_has_unsupported_outbound_dynamic_stars(cluster_state: ClusterState) -> bool:
+	if cluster_state == null:
+		return false
+	var export_radius: float = OBJECT_RESIDENCY_POLICY_SCRIPT.transit_export_radius(cluster_state)
+	if export_radius <= 0.0:
+		return false
+	var guardrail_radius: float = export_radius + SimConstants.CLUSTER_UNSUPPORTED_STAR_GUARDRAIL_MARGIN
+	for object_state in cluster_state.get_objects_by_kind("star"):
+		if object_state == null:
+			continue
+		var descriptor: Dictionary = object_state.descriptor
+		if not bool(descriptor.get("active", true)):
+			continue
+		if bool(descriptor.get("kinematic", false)):
+			continue
+		if bool(descriptor.get("scripted_orbit_enabled", false)):
+			continue
+		if int(descriptor.get(
+			"orbit_binding_state",
+			SimBody.OrbitBindingState.FREE_DYNAMIC
+		)) != SimBody.OrbitBindingState.FREE_DYNAMIC:
+			continue
+		if object_state.local_position.length() > guardrail_radius:
+			return true
+	return false
 
 static func _build_cluster_object_state_from_transit(
 		transit_state,

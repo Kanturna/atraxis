@@ -133,6 +133,151 @@ func test_runtime_star_descriptor_round_trips_pending_and_confirmed_host_state()
 	assert_almost_eq(restored.pending_host_time, 0.5, 0.001, "runtime star descriptors should persist pending host timers")
 	assert_eq(restored.confirmed_host_handoff_count, 2, "runtime star descriptors should persist confirmed host handoff counters")
 
+func test_registered_cluster_materialization_relinks_parent_ids_from_object_registry() -> void:
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_seed = 9
+	cluster_state.simulation_profile["spawn_anchor_content"] = false
+	cluster_state.cluster_blueprint["primary_black_hole_object_id"] = "cluster_0:black_hole_0"
+
+	cluster_state.register_object(_make_manual_cluster_object_state_for_world_builder_test(
+		"cluster_0:black_hole_0",
+		"black_hole",
+		Vector2.ZERO,
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.BLACK_HOLE,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"influence_level": SimBody.InfluenceLevel.A,
+			"mass": SimConstants.BLACK_HOLE_MASS,
+			"radius": SimConstants.BLACK_HOLE_RADIUS,
+			"is_primary": true,
+		}
+	))
+	cluster_state.register_object(_make_manual_cluster_object_state_for_world_builder_test(
+		"cluster_0:star_0",
+		"star",
+		Vector2(400.0, 0.0),
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.STAR,
+			"material_type": SimBody.MaterialType.STELLAR,
+			"influence_level": SimBody.InfluenceLevel.A,
+			"mass": SimConstants.STAR_MASS,
+			"radius": SimConstants.STAR_RADIUS,
+			"kinematic": false,
+			"scripted_orbit_enabled": false,
+			"orbit_binding_state": SimBody.OrbitBindingState.FREE_DYNAMIC,
+			"parent_object_id": "cluster_0:black_hole_0",
+		}
+	))
+	cluster_state.register_object(_make_manual_cluster_object_state_for_world_builder_test(
+		"cluster_0:star_0:planet_0",
+		"planet",
+		Vector2(460.0, 0.0),
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.PLANET,
+			"material_type": SimBody.MaterialType.ROCKY,
+			"influence_level": SimBody.InfluenceLevel.B,
+			"mass": SimConstants.PLANET_MASS_MIN,
+			"radius": SimConstants.PLANET_RADIUS_MIN,
+			"kinematic": true,
+			"scripted_orbit_enabled": true,
+			"orbit_binding_state": SimBody.OrbitBindingState.BOUND_ANALYTIC,
+			"orbit_radius": 60.0,
+			"orbit_angle": 0.0,
+			"orbit_angular_speed": 0.5,
+			"parent_object_id": "cluster_0:star_0",
+		}
+	))
+
+	var world := SimWorld.new()
+	WorldBuilder.materialize_cluster_into_world(world, cluster_state)
+
+	var black_hole: SimBody = world.get_body_by_persistent_object_id("cluster_0:black_hole_0")
+	var star: SimBody = world.get_body_by_persistent_object_id("cluster_0:star_0")
+	var planet: SimBody = world.get_body_by_persistent_object_id("cluster_0:star_0:planet_0")
+
+	assert_not_null(black_hole, "registered black holes should materialize into the world")
+	assert_not_null(star, "registered stars should materialize into the world")
+	assert_not_null(planet, "registered planets should materialize into the world")
+	assert_eq(star.orbit_parent_id, black_hole.id, "registered stars should relink their stored parent object id to the live black-hole body id")
+	assert_eq(planet.orbit_parent_id, star.id, "registered planets should relink their stored parent object id to the live parent star body id")
+
+func test_writeback_preserves_previous_parent_object_id_when_parent_is_temporarily_unresolved() -> void:
+	var cluster_state := ClusterState.new()
+	cluster_state.cluster_seed = 17
+	cluster_state.register_object(_make_manual_cluster_object_state_for_world_builder_test(
+		"cluster_0:planet_0",
+		"planet",
+		Vector2(60.0, 0.0),
+		Vector2.ZERO,
+		{
+			"body_type": SimBody.BodyType.PLANET,
+			"material_type": SimBody.MaterialType.ROCKY,
+			"influence_level": SimBody.InfluenceLevel.B,
+			"kinematic": true,
+			"scripted_orbit_enabled": true,
+			"orbit_binding_state": SimBody.OrbitBindingState.BOUND_ANALYTIC,
+			"parent_object_id": "cluster_0:star_0",
+		}
+	))
+
+	var planet := SimBody.new()
+	planet.body_type = SimBody.BodyType.PLANET
+	planet.material_type = SimBody.MaterialType.ROCKY
+	planet.influence_level = SimBody.InfluenceLevel.B
+	planet.mass = SimConstants.PLANET_MASS_MIN
+	planet.radius = SimConstants.PLANET_RADIUS_MIN
+	planet.kinematic = true
+	planet.scripted_orbit_enabled = true
+	planet.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
+	planet.orbit_parent_id = 999
+	planet.position = Vector2(60.0, 0.0)
+
+	var object_state: ClusterObjectState = WorldBuilder._build_object_state_from_body(
+		cluster_state,
+		planet,
+		"cluster_0:planet_0",
+		ObjectResidencyState.State.ACTIVE,
+		{}
+	)
+
+	assert_eq(
+		str(object_state.descriptor.get("parent_object_id", "")),
+		"cluster_0:star_0",
+		"writeback should keep the last known persistent parent id when the live parent body is temporarily unresolved"
+	)
+
+func test_simplified_cluster_prunes_analytic_orbiters_whose_parent_is_missing() -> void:
+	var cluster_state := ClusterState.new()
+	cluster_state.radius = 100.0
+	cluster_state.register_object(_make_manual_cluster_object_state_for_world_builder_test(
+		"cluster_0:orphan_planet_0",
+		"planet",
+		Vector2(120.0, 0.0),
+		Vector2(10.0, 0.0),
+		{
+			"body_type": SimBody.BodyType.PLANET,
+			"material_type": SimBody.MaterialType.ROCKY,
+			"influence_level": SimBody.InfluenceLevel.B,
+			"kinematic": true,
+			"scripted_orbit_enabled": true,
+			"orbit_binding_state": SimBody.OrbitBindingState.BOUND_ANALYTIC,
+			"orbit_radius": 40.0,
+			"orbit_angle": 0.0,
+			"orbit_angular_speed": 0.5,
+			"parent_object_id": "cluster_0:missing_star",
+		}
+	))
+
+	WorldBuilder.step_simplified_cluster(cluster_state, SimConstants.FIXED_DT)
+
+	assert_false(
+		cluster_state.has_object("cluster_0:orphan_planet_0"),
+		"simplified stepping should remove analytic orbiters instead of leaving orphaned bodies behind when their parent is missing"
+	)
+
 func test_worldgen_active_cluster_keeps_sector_metadata_for_runtime_and_debug() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.seed = 61
@@ -723,6 +868,21 @@ func _make_cluster_state_with_black_holes(black_hole_specs: Array) -> ClusterSta
 		if bool(spec.get("is_primary", false)):
 			cluster_state.cluster_blueprint["primary_black_hole_object_id"] = object_state.object_id
 	return cluster_state
+
+func _make_manual_cluster_object_state_for_world_builder_test(
+		object_id: String,
+		kind: String,
+		local_position: Vector2,
+		local_velocity: Vector2,
+		descriptor: Dictionary) -> ClusterObjectState:
+	var object_state := ClusterObjectState.new()
+	object_state.object_id = object_id
+	object_state.kind = kind
+	object_state.residency_state = ObjectResidencyState.State.SIMPLIFIED
+	object_state.local_position = local_position
+	object_state.local_velocity = local_velocity
+	object_state.descriptor = descriptor.duplicate(true)
+	return object_state
 
 func _spawn_black_hole_for_frame_test(world: SimWorld, object_id: String, position: Vector2) -> SimBody:
 	var black_hole := WorldBuilder._make_black_hole(12_000_000.0)
