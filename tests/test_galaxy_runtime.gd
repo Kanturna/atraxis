@@ -145,7 +145,7 @@ func test_runtime_snapshot_materialization_relinks_planet_parent_to_materialized
 		"runtime snapshot materialization should relink stored parent object ids to live SimWorld body ids"
 	)
 
-func test_runtime_snapshot_reactivation_preserves_sleeping_state_for_dynamic_body() -> void:
+func test_runtime_snapshot_reactivation_preserves_sleeping_until_active_step_then_wakes_near_black_hole() -> void:
 	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(2)
 	var source_cluster: ClusterState = galaxy_state.get_cluster(0)
 	var asteroid_object_id: String = "cluster_0:asteroid_sleeping_0"
@@ -182,10 +182,9 @@ func test_runtime_snapshot_reactivation_preserves_sleeping_state_for_dynamic_bod
 	assert_true(sleeping_asteroid.sleeping, "runtime snapshot materialization should currently preserve sleeping state on dynamic bodies")
 
 	var initial_position: Vector2 = sleeping_asteroid.position
-	runtime.step(SimConstants.FIXED_DT)
 	assert_true(
 		sleeping_asteroid.position.is_equal_approx(initial_position),
-		"the materialized sleeping asteroid should currently remain frozen during active-world stepping"
+		"the initial runtime snapshot should expose the persisted sleeping asteroid position before any active stepping happens"
 	)
 
 	runtime.activate_cluster(1)
@@ -195,11 +194,28 @@ func test_runtime_snapshot_reactivation_preserves_sleeping_state_for_dynamic_bod
 	assert_not_null(reloaded_asteroid, "reactivating the source cluster should rematerialize the sleeping asteroid from its snapshot")
 	assert_true(
 		reloaded_asteroid.sleeping,
-		"reactivating from a persisted snapshot should currently restore the dynamic body's sleeping state unchanged"
+		"reactivating from a persisted snapshot should restore the dynamic body's sleeping state before the next active sim step"
 	)
 	assert_true(
 		reloaded_asteroid.position.is_equal_approx(initial_position),
 		"the persisted sleeping asteroid should currently rematerialize at the same stored snapshot position"
+	)
+
+	runtime.step(SimConstants.FIXED_DT)
+
+	assert_false(
+		reloaded_asteroid.sleeping,
+		"the next active sim step should wake a reactivated sleeping body when a strong black-hole source is nearby"
+	)
+	assert_almost_eq(
+		reloaded_asteroid.sleep_timer,
+		0.0,
+		0.0001,
+		"waking after reactivation should reset the restored sleep timer"
+	)
+	assert_false(
+		reloaded_asteroid.position.is_equal_approx(initial_position),
+		"the woken asteroid should no longer remain frozen at its restored snapshot position"
 	)
 
 func test_simplified_cluster_step_applies_black_hole_pull_to_deactivated_dynamic_body() -> void:

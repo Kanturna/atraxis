@@ -35,6 +35,7 @@ func step_sim(dt: float) -> void:
 	var sim_dt: float = dt * time_scale
 
 	if sim_dt > 0.0:
+		_wake_sleeping_bodies_under_strong_black_hole_gravity()
 		_rebuild_dominant_bh_cache()
 		var integration_substeps: int = _determine_black_hole_adaptive_substeps(sim_dt)
 		var sub_dt: float = sim_dt / float(integration_substeps)
@@ -206,6 +207,31 @@ func _run_sleep_phase(sim_dt: float) -> void:
 				body.sleeping = true
 		else:
 			body.reset_sleep_timer()
+
+func _wake_sleeping_bodies_under_strong_black_hole_gravity() -> void:
+	var black_holes: Array = get_black_holes()
+	if black_holes.is_empty():
+		return
+	for body in bodies:
+		if not body.active or not body.sleeping or body.kinematic or body.scripted_orbit_enabled:
+			continue
+		var bh_acceleration: Vector2 = _summed_black_hole_acceleration_for_body(body, black_holes)
+		if bh_acceleration.length() < SimConstants.SLEEP_WAKE_BH_ACCELERATION_THRESHOLD:
+			continue
+		body.sleeping = false
+		body.sleep_timer = 0.0
+
+func _summed_black_hole_acceleration_for_body(body: SimBody, black_holes: Array) -> Vector2:
+	if body == null or black_holes.is_empty():
+		return Vector2.ZERO
+	var total_acceleration: Vector2 = Vector2.ZERO
+	for black_hole in black_holes:
+		if black_hole == null or not black_hole.active:
+			continue
+		var delta: Vector2 = black_hole.position - body.position
+		var dist_sq: float = delta.length_squared() + SimConstants.GRAVITY_SOFTENING_SQ
+		total_acceleration += delta.normalized() * (SimConstants.G * black_hole.mass / dist_sq)
+	return total_acceleration
 
 func _run_collision_phase() -> void:
 	var pairs: Array = _detector.broadphase(bodies)

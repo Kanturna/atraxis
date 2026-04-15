@@ -54,6 +54,7 @@ const MAX_DEBRIS_FIELDS: int         = 15    # global cap on debris aggregation 
 # Bodies with speed below threshold for SLEEP_CONFIRM_TIME seconds → sleeping
 const SLEEP_SPEED_SQ: float      = 0.01   # speed² threshold (= 0.1 units/s)
 const SLEEP_CONFIRM_TIME: float  = 2.0    # seconds before confirmed sleep
+const SLEEP_WAKE_BH_ACCELERATION_THRESHOLD: float = 30.0
 # Level-A and kinematic bodies never sleep; only B/C eligible
 
 # --- Gravity softening ---

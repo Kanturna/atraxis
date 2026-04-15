@@ -164,7 +164,7 @@ func test_sleep_timer_progress_matches_frame_dt_even_when_adaptive_substeps_trig
 		"sleep timer progression should currently be invariant to the adaptive-substep count"
 	)
 
-func test_sleeping_body_near_black_hole_remains_asleep_under_current_rules() -> void:
+func test_sleeping_body_near_black_hole_wakes_on_next_step() -> void:
 	var world := SimWorld.new()
 
 	var black_hole := _make_black_hole()
@@ -187,14 +187,59 @@ func test_sleeping_body_near_black_hole_remains_asleep_under_current_rules() -> 
 	var initial_velocity: Vector2 = asteroid.velocity
 	world.step_sim(SimConstants.FIXED_DT)
 
-	assert_true(asteroid.sleeping, "under the current rules a sleeping body near a strong source stays asleep without an explicit wake path")
+	assert_false(asteroid.sleeping, "sleeping bodies near strong black-hole gravity should wake on the next active sim step")
+	assert_almost_eq(
+		asteroid.sleep_timer,
+		0.0,
+		0.0001,
+		"waking a sleeping body should reset its sleep timer"
+	)
+	assert_false(
+		asteroid.position.is_equal_approx(initial_position),
+		"woken bodies should no longer stay frozen in place near a black hole"
+	)
+	assert_false(
+		asteroid.velocity.is_equal_approx(initial_velocity),
+		"woken bodies should pick up fresh velocity from black-hole gravity"
+	)
+
+func test_sleeping_body_far_from_black_hole_stays_asleep() -> void:
+	var world := SimWorld.new()
+
+	var black_hole := _make_black_hole()
+	world.add_body(black_hole)
+
+	var asteroid := SimBody.new()
+	asteroid.active = true
+	asteroid.body_type = SimBody.BodyType.ASTEROID
+	asteroid.influence_level = SimBody.InfluenceLevel.B
+	asteroid.material_type = SimBody.MaterialType.ROCKY
+	asteroid.mass = 8.0
+	asteroid.radius = 3.0
+	asteroid.position = Vector2(20_000.0, 0.0)
+	asteroid.velocity = Vector2.ZERO
+	asteroid.sleeping = true
+	asteroid.sleep_timer = SimConstants.SLEEP_CONFIRM_TIME
+	world.add_body(asteroid)
+
+	var initial_position: Vector2 = asteroid.position
+	var initial_velocity: Vector2 = asteroid.velocity
+	world.step_sim(SimConstants.FIXED_DT)
+
+	assert_true(asteroid.sleeping, "the narrow BH wake pass should leave far sleeping bodies asleep")
+	assert_almost_eq(
+		asteroid.sleep_timer,
+		SimConstants.SLEEP_CONFIRM_TIME + SimConstants.FIXED_DT,
+		0.0001,
+		"far sleeping bodies should continue their existing sleep confirmation time under the current sleep phase"
+	)
 	assert_true(
 		asteroid.position.is_equal_approx(initial_position),
-		"sleeping bodies currently skip integration even when they are close to a black hole"
+		"far sleeping bodies should remain frozen when BH gravity stays below the wake threshold"
 	)
 	assert_true(
 		asteroid.velocity.is_equal_approx(initial_velocity),
-		"sleeping bodies currently do not pick up new velocity from nearby black-hole gravity"
+		"far sleeping bodies should not pick up new velocity while they remain asleep"
 	)
 
 func test_dominant_black_hole_handoffs_are_counted_when_anchor_changes() -> void:
