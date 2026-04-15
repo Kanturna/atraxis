@@ -143,6 +143,7 @@ func _impact(a: SimBody, b: SimBody,
 
 func _fragment(a: SimBody, b: SimBody,
 		result: CollisionDetector.CollisionResult) -> void:
+	var reference_frame: Dictionary = _build_fragment_reference_frame(a, b)
 	var original_total: float = a.mass + b.mass
 	var frag_pool: float = original_total * 0.15
 	var a_share: float = frag_pool * (a.mass / original_total)
@@ -159,14 +160,14 @@ func _fragment(a: SimBody, b: SimBody,
 	var world = _get_world()
 	if per_frag_mass < SimConstants.MIN_FRAGMENT_MASS:
 		if world != null:
-			world.add_debris_at(a.position, frag_pool)
+			world.add_debris_at(reference_frame["collision_center"], frag_pool)
 		_bounce(a, b, result)
 		return
 
 	_bounce(a, b, result)
 
 	for i in range(frag_count):
-		var frag := _make_fragment(per_frag_mass, a, result, i, frag_count)
+		var frag := _make_fragment(per_frag_mass, reference_frame, i, frag_count)
 		if world != null:
 			world.add_body(frag)
 
@@ -236,23 +237,87 @@ func _collision_ke_fraction(a: SimBody, b: SimBody,
 		return 0.0
 	return approach_ke / total_ke
 
-func _make_fragment(mass: float, source: SimBody,
-		result: CollisionDetector.CollisionResult,
+func _make_fragment(mass: float, reference_frame: Dictionary,
 		index: int, total: int) -> SimBody:
 	var frag := SimBody.new()
 	frag.body_type = SimBody.BodyType.FRAGMENT
 	frag.influence_level = SimBody.InfluenceLevel.C
-	frag.material_type = source.material_type
+	frag.material_type = int(reference_frame["material_type"])
 	frag.mass = mass
 	frag.radius = _radius_for_mass(mass, SimBody.BodyType.FRAGMENT)
 	var spread: float = (float(index) / float(total) - 0.5) * PI * 0.7
-	var eject_dir: Vector2 = result.collision_normal.rotated(spread)
-	frag.position = source.position + eject_dir * (source.radius * 1.5)
-	frag.velocity = source.velocity + eject_dir * randf_range(20.0, 80.0)
-	frag.temperature = source.temperature * 1.1
+	var eject_dir: Vector2 = Vector2(reference_frame["axis"]).rotated(spread)
+	frag.position = Vector2(reference_frame["collision_center"]) \
+		+ eject_dir * (float(reference_frame["anchor_radius"]) * 1.5)
+	frag.velocity = Vector2(reference_frame["base_velocity"]) \
+		+ eject_dir * randf_range(20.0, 80.0)
+	frag.temperature = float(reference_frame["temperature"]) * 1.1
 	frag.kinematic = false
 	frag.active = true
 	return frag
+
+func _build_fragment_reference_frame(a: SimBody, b: SimBody) -> Dictionary:
+	var total_mass: float = a.mass + b.mass
+	var base_velocity: Vector2 = Vector2.ZERO
+	if total_mass > 0.0:
+		base_velocity = (a.velocity * a.mass + b.velocity * b.mass) / total_mass
+	return {
+		"collision_center": (a.position + b.position) * 0.5,
+		"base_velocity": base_velocity,
+		"axis": _canonical_fragment_axis(a, b),
+		"anchor_radius": maxf(a.radius, b.radius),
+		"material_type": _fragment_material_type(a, b),
+		"temperature": _fragment_temperature(a, b),
+	}
+
+func _canonical_fragment_axis(a: SimBody, b: SimBody) -> Vector2:
+	var primary_is_a: bool = _fragment_primary_is_a(a, b)
+	var axis: Vector2 = a.position - b.position
+	if axis.length_squared() > 0.000001:
+		axis = axis.normalized()
+		return axis if primary_is_a else -axis
+	axis = a.velocity - b.velocity
+	if axis.length_squared() > 0.000001:
+		axis = axis.normalized()
+		return axis if primary_is_a else -axis
+	return Vector2.RIGHT
+
+func _fragment_primary_is_a(a: SimBody, b: SimBody) -> bool:
+	if not is_equal_approx(a.mass, b.mass):
+		return a.mass > b.mass
+	if not is_equal_approx(a.radius, b.radius):
+		return a.radius > b.radius
+	if _vector2_lex_less(a.position, b.position):
+		return true
+	if _vector2_lex_less(b.position, a.position):
+		return false
+	if _vector2_lex_less(a.velocity, b.velocity):
+		return true
+	if _vector2_lex_less(b.velocity, a.velocity):
+		return false
+	if a.material_type != b.material_type:
+		return a.material_type < b.material_type
+	if not is_equal_approx(a.temperature, b.temperature):
+		return a.temperature < b.temperature
+	return true
+
+func _fragment_material_type(a: SimBody, b: SimBody) -> int:
+	if a.material_type == b.material_type:
+		return a.material_type
+	return SimBody.MaterialType.MIXED
+
+func _fragment_temperature(a: SimBody, b: SimBody) -> float:
+	var total_mass: float = a.mass + b.mass
+	if total_mass <= 0.0:
+		return maxf(a.temperature, b.temperature)
+	return (a.temperature * a.mass + b.temperature * b.mass) / total_mass
+
+func _vector2_lex_less(lhs: Vector2, rhs: Vector2) -> bool:
+	if not is_equal_approx(lhs.x, rhs.x):
+		return lhs.x < rhs.x
+	if not is_equal_approx(lhs.y, rhs.y):
+		return lhs.y < rhs.y
+	return false
 
 func _preferred_star_collision_survivor(a: SimBody, b: SimBody) -> SimBody:
 	if a.mass > b.mass:
