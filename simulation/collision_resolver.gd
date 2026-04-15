@@ -2,6 +2,7 @@
 ## Determines and applies collision outcomes.
 ##
 ## Outcomes (in priority order):
+##   star_star_collision - deterministic merge-like resolution for star-star hits
 ##   absorb    - tiny body swallowed by massive one (mass_ratio < 0.001)
 ##   impact    - asteroid hits planet
 ##   merge     - similar-mass slow collision
@@ -33,6 +34,7 @@ func resolve(result: CollisionDetector.CollisionResult) -> void:
 	var outcome: String = _determine_outcome(a, b, result)
 	match outcome:
 		"black_hole_impact": _black_hole_impact(a, b)
+		"star_star_collision": _star_star_collision(a, b)
 		"star_impact": _star_impact(a, b)
 		"absorb": _absorb(a, b)
 		"impact": _impact(a, b, result)
@@ -48,6 +50,9 @@ func _determine_outcome(a: SimBody, b: SimBody,
 		result: CollisionDetector.CollisionResult) -> String:
 	if a.body_type == SimBody.BodyType.BLACK_HOLE or b.body_type == SimBody.BodyType.BLACK_HOLE:
 		return "black_hole_impact"
+
+	if a.body_type == SimBody.BodyType.STAR and b.body_type == SimBody.BodyType.STAR:
+		return "star_star_collision"
 
 	if a.body_type == SimBody.BodyType.STAR or b.body_type == SimBody.BodyType.STAR:
 		return "star_impact"
@@ -171,11 +176,40 @@ func _star_impact(a: SimBody, b: SimBody) -> void:
 	var world = _get_world()
 	if world != null:
 		world.add_debris_at(impactor.position, debris_mass)
+		world.mark_body_for_removal_with_analytic_dependents(impactor)
+		return
 	impactor.marked_for_removal = true
+	impactor.active = false
+
+func _star_star_collision(a: SimBody, b: SimBody) -> void:
+	var survivor: SimBody = _preferred_star_collision_survivor(a, b)
+	var removed: SimBody = b if survivor == a else a
+	var total_mass: float = survivor.mass + removed.mass
+	if total_mass > 0.0:
+		survivor.velocity = (
+			survivor.velocity * survivor.mass + removed.velocity * removed.mass
+		) / total_mass
+	survivor.mass = total_mass
+	survivor.temperature = maxf(survivor.temperature, removed.temperature)
+	if not survivor.kinematic:
+		survivor.reset_sleep_timer()
+
+	var world = _get_world()
+	if world != null:
+		world.add_debris_at(removed.position, removed.mass * STAR_IMPACT_DEBRIS_FRACTION)
+		world.mark_body_for_removal_with_analytic_dependents(removed)
+		return
+	removed.marked_for_removal = true
+	removed.active = false
 
 func _black_hole_impact(a: SimBody, b: SimBody) -> void:
 	var impactor: SimBody = b if a.body_type == SimBody.BodyType.BLACK_HOLE else a
+	var world = _get_world()
+	if world != null:
+		world.mark_body_for_removal_with_analytic_dependents(impactor)
+		return
 	impactor.marked_for_removal = true
+	impactor.active = false
 
 # -------------------------------------------------------------------------
 # Helpers
@@ -216,6 +250,13 @@ func _make_fragment(mass: float, source: SimBody,
 	frag.kinematic = false
 	frag.active = true
 	return frag
+
+func _preferred_star_collision_survivor(a: SimBody, b: SimBody) -> SimBody:
+	if a.mass > b.mass:
+		return a
+	if b.mass > a.mass:
+		return b
+	return a if a.id <= b.id else b
 
 func _radius_for_mass(mass: float, body_type: int) -> float:
 	match body_type:

@@ -214,6 +214,41 @@ func test_segment_black_hole_impact_catches_tunneling_star() -> void:
 	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 0, "segment-based BH impacts should remove tunneled stars")
 	assert_eq(world.get_active_body_count(), 1, "only the black hole should remain active after the impact")
 
+func test_segment_black_hole_impact_prunes_star_children_in_same_tick() -> void:
+	var world := SimWorld.new()
+
+	var black_hole := _make_black_hole()
+	world.add_body(black_hole)
+
+	var star := _make_dynamic_star()
+	star.position = Vector2(200.0, 0.0)
+	star.velocity = Vector2(-30_000.0, 0.0)
+	world.add_body(star)
+
+	var planet := SimBody.new()
+	planet.active = true
+	planet.body_type = SimBody.BodyType.PLANET
+	planet.influence_level = SimBody.InfluenceLevel.B
+	planet.material_type = SimBody.MaterialType.ROCKY
+	planet.mass = SimConstants.PLANET_MASS_MIN
+	planet.radius = SimConstants.PLANET_RADIUS_MIN
+	planet.kinematic = true
+	planet.scripted_orbit_enabled = true
+	planet.orbit_binding_state = SimBody.OrbitBindingState.BOUND_ANALYTIC
+	planet.orbit_parent_id = star.id
+	planet.orbit_radius = 60.0
+	planet.orbit_angle = 0.0
+	planet.orbit_angular_speed = 0.5
+	planet.position = star.position + Vector2(60.0, 0.0)
+	world.add_body(planet)
+
+	world.step_sim(SimConstants.FIXED_DT)
+
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.BLACK_HOLE), 1, "the black hole should remain active after the impact")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.STAR), 0, "the tunneled star should still be removed")
+	assert_eq(world.count_bodies_by_type(SimBody.BodyType.PLANET), 0, "analytic children of the removed star should be pruned immediately instead of lingering for one tick")
+	assert_eq(world.get_active_body_count(), 1, "no orphaned child should remain after the parent star dies")
+
 func test_sim_world_releases_when_last_reference_goes_away() -> void:
 	var world := SimWorld.new()
 	var world_ref: WeakRef = weakref(world)

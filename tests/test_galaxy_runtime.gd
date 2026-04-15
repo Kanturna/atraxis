@@ -1673,6 +1673,93 @@ func test_unloaded_cluster_reloads_from_persisted_snapshot() -> void:
 		"reloading an unloaded cluster should restore its persisted simulation time"
 	)
 
+func test_far_remote_return_reloads_planet_binding_from_persisted_snapshot() -> void:
+	var galaxy_state: GalaxyState = _make_manual_runtime_snapshot_galaxy(7, 2_000.0, true)
+	var runtime: GalaxyRuntime = WorldBuilder.build_runtime_from_galaxy_state(galaxy_state, 0)
+	var source_cluster_id: int = runtime.active_cluster_session.cluster_id
+	var source_cluster: ClusterState = runtime.galaxy_state.get_cluster(source_cluster_id)
+	var active_world: SimWorld = runtime.get_active_sim_world()
+	var star: SimBody = active_world.get_star()
+	var planet: SimBody = _find_active_body_of_type(active_world, SimBody.BodyType.PLANET)
+	var far_cluster_id: int = _find_first_cluster_in_macro_sector_zone(runtime, MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR)
+
+	assert_not_null(star, "the remote-return test needs an active source star")
+	assert_not_null(planet, "the remote-return test needs an analytic child planet")
+	assert_true(far_cluster_id >= 0, "the remote-return test needs a cluster that starts in the far macro-sector zone")
+
+	var star_object_id: String = star.persistent_object_id
+	var planet_object_id: String = planet.persistent_object_id
+
+	runtime.activate_cluster(far_cluster_id)
+
+	assert_eq(
+		source_cluster.activation_state,
+		ClusterActivationState.State.SIMPLIFIED,
+		"switching away should demote the previous active cluster into simplified remote state"
+	)
+	assert_eq(
+		runtime.get_cluster_macro_sector_zone(source_cluster_id),
+		MACRO_SECTOR_ZONE_SCRIPT.Zone.FAR,
+		"the source cluster should now be remote in the far zone for this return-path fixture"
+	)
+
+	for _i in range(4):
+		runtime.step(SimConstants.FIXED_DT)
+
+	var persisted_star: ClusterObjectState = source_cluster.get_object(star_object_id)
+	var persisted_planet: ClusterObjectState = source_cluster.get_object(planet_object_id)
+
+	assert_not_null(persisted_star, "the far-remote source cluster should keep the persisted star snapshot available")
+	assert_not_null(persisted_planet, "the far-remote source cluster should keep the persisted child planet snapshot available")
+
+	var persisted_parent_object_id: String = str(persisted_planet.descriptor.get("parent_object_id", ""))
+	var persisted_orbit_radius: float = float(persisted_planet.descriptor.get("orbit_radius", 0.0))
+	var persisted_orbit_angle: float = float(persisted_planet.descriptor.get("orbit_angle", 0.0))
+
+	runtime.activate_cluster(source_cluster_id)
+
+	var reloaded_world: SimWorld = runtime.get_active_sim_world()
+	var reloaded_star: SimBody = reloaded_world.get_body_by_persistent_object_id(star_object_id)
+	var reloaded_planet: SimBody = reloaded_world.get_body_by_persistent_object_id(planet_object_id)
+
+	assert_not_null(reloaded_star, "returning to the source cluster should restore the persisted star")
+	assert_not_null(reloaded_planet, "returning to the source cluster should restore the persisted child planet")
+	assert_eq(
+		persisted_parent_object_id,
+		star_object_id,
+		"the persisted far-remote planet snapshot should continue to store the star's persistent parent id"
+	)
+	assert_eq(
+		reloaded_planet.orbit_parent_id,
+		reloaded_star.id,
+		"reactivation should relink the persisted parent object id back onto the live star body id"
+	)
+	assert_true(
+		reloaded_planet.scripted_orbit_enabled,
+		"reactivated analytic planets should remain scripted orbiters instead of becoming detached dynamics"
+	)
+	assert_eq(
+		reloaded_planet.orbit_binding_state,
+		SimBody.OrbitBindingState.BOUND_ANALYTIC,
+		"remote return should preserve the planet's analytic binding state"
+	)
+	assert_almost_eq(
+		reloaded_planet.orbit_radius,
+		persisted_orbit_radius,
+		0.001,
+		"remote return should preserve the stored orbit radius through far-remote writeback and reload"
+	)
+	assert_almost_eq(
+		reloaded_planet.orbit_angle,
+		persisted_orbit_angle,
+		0.001,
+		"remote return should restore the persisted orbit angle exactly"
+	)
+	assert_true(
+		reloaded_planet.position.is_equal_approx(persisted_planet.local_position),
+		"reactivated planets should rematerialize at the persisted far-remote snapshot position"
+	)
+
 func test_cluster_activation_request_switches_cluster_on_next_step() -> void:
 	var config = START_CONFIG_SCRIPT.new()
 	config.mode = START_CONFIG_SCRIPT.StartMode.DYNAMIC_ANCHOR

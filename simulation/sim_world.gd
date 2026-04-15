@@ -342,8 +342,7 @@ func _handle_black_hole_segment_impacts(body: SimBody, previous_position: Vector
 		return
 	body.position = hit["position"]
 	body.velocity = Vector2.ZERO
-	body.active = false
-	body.marked_for_removal = true
+	mark_body_for_removal_with_analytic_dependents(body)
 	collision_occurred.emit(body.position)
 
 func _find_black_hole_segment_hit(body: SimBody, start: Vector2, finish: Vector2, black_holes: Array) -> Dictionary:
@@ -420,11 +419,36 @@ func _update_scripted_orbiters(sim_dt: float) -> void:
 func _remove_orphaned_analytic_orbiter(body: SimBody) -> void:
 	if body == null:
 		return
+	_mark_body_for_removal(body)
+
+func mark_body_for_removal_with_analytic_dependents(body: SimBody) -> void:
+	if body == null:
+		return
+	var pending_parent_ids: Array = [body.id]
+	var queued_parent_ids: Dictionary = {body.id: true}
+	while not pending_parent_ids.is_empty():
+		var parent_id: int = int(pending_parent_ids.pop_back())
+		for candidate in bodies:
+			if candidate == null or not candidate.active or not candidate.is_analytic_orbit_bound():
+				continue
+			if candidate.orbit_parent_id != parent_id:
+				continue
+			_mark_body_for_removal(candidate)
+			if not queued_parent_ids.has(candidate.id):
+				pending_parent_ids.append(candidate.id)
+				queued_parent_ids[candidate.id] = true
+	_mark_body_for_removal(body)
+
+func _mark_body_for_removal(body: SimBody) -> void:
+	if body == null:
+		return
 	body.active = false
 	body.marked_for_removal = true
 	body.scripted_orbit_enabled = false
 	body.orbit_parent_id = -1
 	body.orbit_center = body.position
+	body.sleeping = false
+	body.sleep_timer = 0.0
 
 func _aggregate_debris_fields() -> void:
 	for i in range(debris_fields.size()):
